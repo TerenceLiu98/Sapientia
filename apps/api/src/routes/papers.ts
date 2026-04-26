@@ -1,7 +1,7 @@
-import { createDbClient, papers, workspacePapers } from "@sapientia/db"
+import { papers, workspacePapers } from "@sapientia/db"
 import { and, desc, eq, isNull } from "drizzle-orm"
 import { Hono } from "hono"
-import { config } from "../config"
+import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
 import {
@@ -11,8 +11,6 @@ import {
 	userCanAccessPaper,
 } from "../services/paper"
 import { generatePresignedGetUrl } from "../services/s3-client"
-
-const { db } = createDbClient(config.DATABASE_URL)
 
 export const paperRoutes = new Hono<AuthContext>()
 

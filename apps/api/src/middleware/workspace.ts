@@ -1,8 +1,8 @@
 import type { Role } from "@sapientia/db"
-import { createDbClient, memberships } from "@sapientia/db"
+import { memberships } from "@sapientia/db"
 import { and, eq } from "drizzle-orm"
 import { createMiddleware } from "hono/factory"
-import { config } from "../config"
+import { db } from "../db"
 import type { AuthContext } from "./auth"
 
 const ROLE_RANK: Record<Role, number> = {
@@ -10,8 +10,6 @@ const ROLE_RANK: Record<Role, number> = {
 	editor: 2,
 	owner: 3,
 }
-
-const { db } = createDbClient(config.DATABASE_URL)
 
 export type WorkspaceContext = AuthContext & {
 	Variables: AuthContext["Variables"] & {

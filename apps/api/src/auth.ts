@@ -1,12 +1,10 @@
 import * as schema from "@sapientia/db"
-import { createDbClient } from "@sapientia/db"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { config } from "./config"
+import { db } from "./db"
 import { logger } from "./logger"
 import { ensurePersonalWorkspace } from "./services/workspace"
-
-const { db } = createDbClient(config.DATABASE_URL)
 
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {

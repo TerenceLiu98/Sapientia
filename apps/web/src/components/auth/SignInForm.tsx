@@ -1,10 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { signIn, useSession } from "@/lib/auth-client"
+import { useAuthProviders } from "@/lib/auth-providers"
 import { AuthPageFrame } from "./AuthPageFrame"
 
 export function SignInForm() {
 	const { data: session, isPending } = useSession()
+	const providers = useAuthProviders()
 	const navigate = useNavigate()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
@@ -95,22 +97,28 @@ export function SignInForm() {
 				</button>
 			</form>
 
-			<div className="mt-6 grid gap-2">
-				<button
-					className="h-10 rounded-md border border-border-default bg-bg-primary text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
-					onClick={() => void signIn.social({ provider: "google" })}
-					type="button"
-				>
-					Continue with Google
-				</button>
-				<button
-					className="h-10 rounded-md border border-border-default bg-bg-primary text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
-					onClick={() => void signIn.social({ provider: "github" })}
-					type="button"
-				>
-					Continue with GitHub
-				</button>
-			</div>
+			{providers.google || providers.github ? (
+				<div className="mt-6 grid gap-2">
+					{providers.google ? (
+						<button
+							className="h-10 rounded-md border border-border-default bg-bg-primary text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
+							onClick={() => void signIn.social({ provider: "google" })}
+							type="button"
+						>
+							Continue with Google
+						</button>
+					) : null}
+					{providers.github ? (
+						<button
+							className="h-10 rounded-md border border-border-default bg-bg-primary text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
+							onClick={() => void signIn.social({ provider: "github" })}
+							type="button"
+						>
+							Continue with GitHub
+						</button>
+					) : null}
+				</div>
+			) : null}
 		</AuthPageFrame>
 	)
 }

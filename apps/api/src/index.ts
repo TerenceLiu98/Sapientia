@@ -1,16 +1,16 @@
-import { createDbClient } from "@sapientia/db"
 import { sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { Redis } from "ioredis"
 import { auth } from "./auth"
 import { config } from "./config"
+import { closeDb, db } from "./db"
 import { logger as appLogger } from "./logger"
+import { authProvidersRoutes } from "./routes/auth-providers"
 import { meRoutes } from "./routes/me"
 import { paperRoutes } from "./routes/papers"
 import { workspaceRoutes } from "./routes/workspaces"
 import { checkS3Health } from "./services/s3-client"
 
-const { db, close: closeDb } = createDbClient(config.DATABASE_URL)
 const redis = new Redis(config.REDIS_URL, { lazyConnect: false, maxRetriesPerRequest: 1 })
 
 redis.on("error", (err) => {
@@ -19,7 +19,7 @@ redis.on("error", (err) => {
 
 export const app = new Hono()
 
-// better-auth handles all auth routes (sign-up, sign-in, sign-out, OAuth callbacks, etc.)
+// better-auth owns all of /api/auth/* (sign-up, sign-in, sign-out, OAuth callbacks).
 app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
 
 app.get("/health", async (c) => {
@@ -46,9 +46,12 @@ app.get("/health", async (c) => {
 	)
 })
 
-app.route("/api/v1", meRoutes)
-app.route("/api/v1", paperRoutes)
-app.route("/api/v1", workspaceRoutes)
+const apiV1 = new Hono()
+apiV1.route("/", authProvidersRoutes)
+apiV1.route("/", meRoutes)
+apiV1.route("/", workspaceRoutes)
+apiV1.route("/", paperRoutes)
+app.route("/api/v1", apiV1)
 
 appLogger.info({ port: config.PORT, env: config.NODE_ENV }, "api_starting")
 

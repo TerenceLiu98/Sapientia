@@ -1,10 +1,7 @@
-import { createDbClient } from "@sapientia/db"
 import { Hono } from "hono"
-import { config } from "../config"
+import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { listWorkspacesForUser } from "../services/workspace"
-
-const { db } = createDbClient(config.DATABASE_URL)
 
 export const workspaceRoutes = new Hono<AuthContext>()
 
