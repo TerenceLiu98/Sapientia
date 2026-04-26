@@ -6,9 +6,19 @@
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"scripts": {
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "bun run src/migrate.ts",
+		"db:studio": "drizzle-kit studio",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
+		"@types/node": "^24.12.2",
+		"dotenv": "^17.4.2",
+		"drizzle-kit": "^0.31.10",
 		"typescript": "^5.6.0"
+	},
+	"dependencies": {
+		"drizzle-orm": "^0.45.2",
+		"postgres": "^3.4.9"
 	}
 }

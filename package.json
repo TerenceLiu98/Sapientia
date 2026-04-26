@@ -6,6 +6,12 @@
 	"scripts": {
 		"dev:web": "pnpm --filter @sapientia/web dev",
 		"dev:api": "pnpm --filter @sapientia/api dev",
+		"infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+		"infra:down": "docker compose -f infra/docker/docker-compose.yml down",
+		"infra:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",
+		"db:generate": "pnpm --filter @sapientia/db db:generate",
+		"db:migrate": "pnpm --filter @sapientia/db db:migrate",
+		"db:studio": "pnpm --filter @sapientia/db db:studio",
 		"build": "pnpm -r build",
 		"typecheck": "pnpm -r typecheck",
 		"lint": "biome check .",
