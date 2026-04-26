@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sapientia Design Tokens Visual Proof</title>
+    <style>
+      :root {
+        --neutral-50: oklch(0.985 0.003 75);
+        --neutral-100: oklch(0.965 0.005 75);
+        --neutral-200: oklch(0.925 0.006 75);
+        --neutral-300: oklch(0.87 0.007 75);
+        --neutral-400: oklch(0.745 0.008 75);
+        --neutral-500: oklch(0.585 0.008 75);
+        --neutral-600: oklch(0.46 0.008 75);
+        --neutral-700: oklch(0.355 0.008 75);
+        --neutral-800: oklch(0.235 0.008 70);
+        --neutral-900: oklch(0.165 0.008 65);
+
+        --accent-100: oklch(0.92 0.04 195);
+        --accent-500: oklch(0.54 0.12 195);
+        --accent-600: oklch(0.45 0.11 195);
+        --accent-700: oklch(0.37 0.09 195);
+        --accent-800: oklch(0.29 0.065 195);
+
+        --success-100: oklch(0.92 0.035 145);
+        --warning-100: oklch(0.94 0.04 80);
+        --error-100: oklch(0.93 0.035 25);
+
+        --color-bg-primary: var(--neutral-50);
+        --color-bg-secondary: var(--neutral-100);
+        --color-bg-tertiary: var(--neutral-200);
+        --color-surface-default: var(--neutral-50);
+        --color-surface-hover: var(--neutral-100);
+        --color-surface-selected: var(--accent-100);
+        --color-text-primary: var(--neutral-900);
+        --color-text-secondary: var(--neutral-600);
+        --color-text-tertiary: var(--neutral-500);
+        --color-text-accent: var(--accent-700);
+        --color-border-subtle: var(--neutral-200);
+        --color-border-default: var(--neutral-300);
+        --color-border-accent: var(--accent-500);
+        --color-interactive-default: var(--accent-600);
+        --color-interactive-hover: var(--accent-700);
+        --color-reading-bg: oklch(0.99 0.005 80);
+        --color-reading-text: var(--neutral-900);
+        --color-reading-selection: oklch(0.85 0.08 80 / 0.35);
+
+        --note-questioning-bg: oklch(0.94 0.03 25);
+        --note-questioning-text: oklch(0.42 0.13 25);
+        --note-important-bg: oklch(0.95 0.04 80);
+        --note-important-text: oklch(0.42 0.115 75);
+        --note-original-bg: oklch(0.94 0.035 145);
+        --note-original-text: oklch(0.4 0.09 145);
+        --note-pending-bg: oklch(0.94 0.03 195);
+        --note-pending-text: oklch(0.4 0.09 195);
+        --note-background-bg: var(--neutral-200);
+        --note-background-text: var(--neutral-700);
+
+        --graph-node-source: var(--neutral-500);
+        --graph-node-entity: oklch(0.55 0.11 30);
+        --graph-node-concept: oklch(0.5 0.12 195);
+        --graph-edge-default: oklch(0.5 0.005 75 / 0.4);
+        --graph-edge-active: var(--accent-500);
+
+        --font-serif: "Source Serif 4", "Crimson Pro", Georgia, "Times New Roman", serif;
+        --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+        --text-xs: 0.75rem;
+        --text-sm: 0.875rem;
+        --text-base: 1rem;
+        --text-md: 1.125rem;
+        --text-lg: 1.25rem;
+        --text-xl: 1.5rem;
+        --text-2xl: 1.875rem;
+        --text-3xl: 2.25rem;
+
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.25rem;
+        --space-6: 1.5rem;
+        --space-8: 2rem;
+        --space-10: 2.5rem;
+        --space-12: 3rem;
+
+        --radius-sm: 4px;
+        --radius-md: 6px;
+        --radius-lg: 8px;
+        --radius-xl: 12px;
+        --radius-full: 9999px;
+
+        --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.04);
+        --shadow-sm:
+          0 1px 3px 0 oklch(0 0 0 / 0.06),
+          0 1px 2px -1px oklch(0 0 0 / 0.04);
+        --shadow-md:
+          0 4px 6px -1px oklch(0 0 0 / 0.08),
+          0 2px 4px -2px oklch(0 0 0 / 0.05);
+        --shadow-focus: 0 0 0 3px oklch(from var(--color-border-accent) l c h / 0.3);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--color-bg-primary);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+      }
+
+      .page {
+        padding: var(--space-8);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+        gap: var(--space-8);
+        max-width: 1440px;
+        margin: 0 auto var(--space-8);
+        align-items: end;
+      }
+
+      .eyebrow,
+      .label {
+        color: var(--color-text-secondary);
+        font-size: var(--text-xs);
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        line-height: 1.4;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: var(--space-3) 0 var(--space-4);
+        font-family: var(--font-serif);
+        font-size: clamp(2.25rem, 5vw, 4.5rem);
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        line-height: 0.98;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin: 0;
+        color: var(--color-text-secondary);
+        font-family: var(--font-serif);
+        font-size: var(--text-md);
+        line-height: 1.7;
+      }
+
+      .decision {
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-xl);
+        background: var(--color-bg-secondary);
+        padding: var(--space-5);
+      }
+
+      .decision p {
+        margin: var(--space-2) 0 0;
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+
+      .artboard {
+        max-width: 1440px;
+        margin: 0 auto;
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-xl);
+        background:
+          linear-gradient(90deg, transparent 31px, oklch(0.6 0.005 75 / 0.06) 32px),
+          linear-gradient(transparent 31px, oklch(0.6 0.005 75 / 0.06) 32px),
+          var(--color-bg-primary);
+        background-size: 32px 32px;
+        box-shadow: var(--shadow-xs);
+        overflow: hidden;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr) 380px;
+        min-height: 780px;
+      }
+
+      .nav,
+      .side-panel {
+        background: var(--color-bg-secondary);
+      }
+
+      .nav {
+        border-right: 1px solid var(--color-border-subtle);
+        padding: var(--space-6) var(--space-4);
+      }
+
+      .brand {
+        margin-bottom: var(--space-8);
+        font-family: var(--font-serif);
+        font-size: var(--text-xl);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .nav-section {
+        margin-top: var(--space-6);
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        height: 36px;
+        margin-top: var(--space-2);
+        border-radius: var(--radius-md);
+        padding: 0 var(--space-3);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+      }
+
+      .nav-item.active {
+        background: var(--color-surface-selected);
+        color: var(--color-text-accent);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--color-text-tertiary);
+      }
+
+      .dot.accent {
+        background: var(--color-interactive-default);
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: 56px 1fr;
+        min-width: 0;
+        background: var(--color-bg-primary);
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--color-border-subtle);
+        padding: 0 var(--space-6);
+        background: var(--color-bg-primary);
+      }
+
+      .toolbar-title {
+        font-family: var(--font-serif);
+        font-size: var(--text-lg);
+        font-weight: 600;
+      }
+
+      .actions {
+        display: flex;
+        gap: var(--space-2);
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 36px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-default);
+        color: var(--color-text-primary);
+        padding: 0 var(--space-4);
+        font-size: var(--text-sm);
+        font-weight: 500;
+      }
+
+      .button.primary {
+        border-color: var(--color-interactive-default);
+        background: var(--color-interactive-default);
+        color: var(--neutral-50);
+      }
+
+      .reader {
+        display: grid;
+        grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.05fr);
+        gap: var(--space-6);
+        padding: var(--space-6);
+        background: var(--color-bg-primary);
+      }
+
+      .pdf-zone,
+      .notes-zone {
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        background: var(--color-reading-bg);
+      }
+
+      .pdf-zone {
+        padding: var(--space-6);
+      }
+
+      .pdf-page {
+        min-height: 590px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-sm);
+        background: oklch(1 0 0);
+        box-shadow: var(--shadow-md);
+        padding: var(--space-8);
+      }
+
+      .paper-title {
+        margin: 0 0 var(--space-5);
+        font-family: var(--font-serif);
+        font-size: var(--text-2xl);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+
+      .paper-line {
+        height: 8px;
+        margin: 11px 0;
+        border-radius: var(--radius-full);
+        background: var(--neutral-200);
+      }
+
+      .paper-line.short {
+        width: 62%;
+      }
+
+      .paper-highlight {
+        display: block;
+        height: 16px;
+        margin: var(--space-5) 0;
+        border-radius: var(--radius-sm);
+        background: var(--color-reading-selection);
+      }
+
+      .notes-zone {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .editor-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: 40px;
+        border-bottom: 1px solid var(--color-border-subtle);
+        padding: 0 var(--space-4);
+        color: var(--color-text-tertiary);
+        font-size: var(--text-xs);
+      }
+
+      .tool {
+        width: 26px;
+        height: 26px;
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-sm);
+        background: var(--color-bg-primary);
+      }
+
+      .note-content {
+        max-width: 800px;
+        padding: var(--space-8);
+      }
+
+      .note-content h2 {
+        margin: 0 0 var(--space-4);
+        font-family: var(--font-serif);
+        font-size: var(--text-2xl);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+
+      .note-content p {
+        margin: var(--space-4) 0;
+        color: var(--color-reading-text);
+        font-family: var(--font-serif);
+        font-size: var(--text-md);
+        line-height: 1.7;
+      }
+
+      mark {
+        border-radius: var(--radius-sm);
+        padding: 0 0.16em;
+      }
+
+      .questioning {
+        background: var(--note-questioning-bg);
+        color: var(--note-questioning-text);
+      }
+
+      .important {
+        background: var(--note-important-bg);
+        color: var(--note-important-text);
+      }
+
+      .original {
+        background: var(--note-original-bg);
+        color: var(--note-original-text);
+      }
+
+      .pending {
+        background: var(--note-pending-bg);
+        color: var(--note-pending-text);
+      }
+
+      .background {
+        background: var(--note-background-bg);
+        color: var(--note-background-text);
+      }
+
+      .focus-input {
+        width: min(100%, 420px);
+        height: 40px;
+        margin-top: var(--space-6);
+        border: 2px solid var(--color-border-accent);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-primary);
+        box-shadow: var(--shadow-focus);
+        color: var(--color-text-secondary);
+        display: flex;
+        align-items: center;
+        padding: 0 var(--space-3);
+        font-size: var(--text-sm);
+      }
+
+      .side-panel {
+        border-left: 1px solid var(--color-border-subtle);
+        padding: var(--space-6);
+      }
+
+      .card {
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        background: var(--color-bg-primary);
+        padding: var(--space-4);
+      }
+
+      .card + .card {
+        margin-top: var(--space-4);
+      }
+
+      .swatches {
+        display: grid;
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+      }
+
+      .swatch {
+        display: grid;
+        grid-template-columns: 24px 1fr auto;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 32px;
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+      }
+
+      .chip {
+        width: 24px;
+        height: 24px;
+        border: 1px solid oklch(0 0 0 / 0.05);
+        border-radius: var(--radius-sm);
+      }
+
+      .chip.bg-primary {
+        background: var(--color-bg-primary);
+      }
+
+      .chip.reading {
+        background: var(--color-reading-bg);
+      }
+
+      .chip.accent {
+        background: var(--color-interactive-default);
+      }
+
+      .chip.questioning {
+        background: var(--note-questioning-bg);
+      }
+
+      .chip.important {
+        background: var(--note-important-bg);
+      }
+
+      .chip.original {
+        background: var(--note-original-bg);
+      }
+
+      .chip.pending {
+        background: var(--note-pending-bg);
+      }
+
+      .chip.background {
+        background: var(--note-background-bg);
+      }
+
+      .chip.pending-alt {
+        background: oklch(0.94 0.03 290);
+      }
+
+      .code {
+        border-radius: var(--radius-sm);
+        background: var(--color-bg-tertiary);
+        padding: 0.1em 0.35em;
+        color: var(--color-text-secondary);
+        font-family: var(--font-mono);
+        font-size: 0.85em;
+      }
+
+      .graph-wrap {
+        position: relative;
+        min-height: 280px;
+        margin-top: var(--space-4);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        background: var(--color-bg-secondary);
+        overflow: hidden;
+      }
+
+      .graph-wrap svg {
+        width: 100%;
+        height: 280px;
+        display: block;
+      }
+
+      .table {
+        margin-top: var(--space-4);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 12px 1fr auto;
+        align-items: center;
+        gap: var(--space-3);
+        height: 44px;
+        border-bottom: 1px solid var(--color-border-subtle);
+        padding: 0 var(--space-4);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+      }
+
+      .row:last-child {
+        border-bottom: 0;
+      }
+
+      .row:hover {
+        background: var(--color-surface-hover);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--color-interactive-default);
+      }
+
+      .popover-demo {
+        position: relative;
+        min-height: 110px;
+        margin-top: var(--space-4);
+      }
+
+      .popover {
+        width: min(100%, 260px);
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-primary);
+        box-shadow: var(--shadow-md);
+        padding: var(--space-3);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+
+      .popover::before {
+        content: "";
+        position: absolute;
+        top: -6px;
+        left: 28px;
+        width: 10px;
+        height: 10px;
+        border-top: 1px solid var(--color-border-default);
+        border-left: 1px solid var(--color-border-default);
+        background: var(--color-bg-primary);
+        transform: rotate(45deg);
+      }
+
+      .component-gaps {
+        display: grid;
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+      }
+
+      .gap-item {
+        border-left: 3px solid var(--color-border-accent);
+        border-radius: var(--radius-sm);
+        background: var(--color-bg-secondary);
+        padding: var(--space-3);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+        line-height: 1.45;
+      }
+
+      .token-note {
+        color: var(--color-text-tertiary);
+        font-size: var(--text-xs);
+      }
+
+      @media (max-width: 1180px) {
+        .hero,
+        .shell,
+        .reader {
+          grid-template-columns: 1fr;
+        }
+
+        .side-panel,
+        .nav {
+          border: 0;
+        }
+
+        .shell {
+          min-height: auto;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: var(--space-4);
+        }
+
+        .toolbar,
+        .reader,
+        .note-content,
+        .pdf-zone,
+        .side-panel,
+        .nav {
+          padding: var(--space-4);
+        }
+
+        h1 {
+          font-size: 2.4rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">Sapientia / Design tokens visual proof</div>
+          <h1>Chrome recedes. Reading advances.</h1>
+          <p class="lede">
+            这版 HTML 将 app chrome 保持在 <span class="code">--color-bg-primary</span> 的近白层级，
+            只让 PDF viewer 与 note editor 使用更暖的 <span class="code">--color-reading-bg</span>。
+            这样 mood 不会吞掉结构，阅读区也能明确“向前”。
+          </p>
+        </div>
+        <aside class="decision">
+          <div class="label">Product decision</div>
+          <p>
+            <span class="code">pending</span> 目前按文档保持 teal 家族，会自然接近链接/按钮色。
+            页面里保留了一个 lavender 候选色块，方便判断是否要把它从交互色语义里拆出来。
+          </p>
+        </aside>
+      </section>
+
+      <section class="artboard" aria-label="Sapientia design token diagram">
+        <div class="shell">
+          <nav class="nav">
+            <div class="brand">Sapientia</div>
+            <div class="label">Workspace</div>
+            <div class="nav-section">
+              <div class="nav-item active"><span class="dot accent"></span> Reader</div>
+              <div class="nav-item"><span class="dot"></span> Library</div>
+              <div class="nav-item"><span class="dot"></span> Graph</div>
+              <div class="nav-item"><span class="dot"></span> Notes</div>
+            </div>
+            <div class="nav-section">
+              <div class="label">Chrome layer</div>
+              <div class="swatch">
+                <span class="chip bg-primary"></span>
+                <span>bg primary</span>
+                <span class="token-note">near white</span>
+              </div>
+              <div class="swatch">
+                <span class="chip reading"></span>
+                <span>reading bg</span>
+                <span class="token-note">warmer</span>
+              </div>
+            </div>
+          </nav>
+
+          <section class="main">
+            <header class="toolbar">
+              <div>
+                <div class="label">Reading first</div>
+                <div class="toolbar-title">The Structure of Scientific Revolutions</div>
+              </div>
+              <div class="actions">
+                <button class="button">Quiet action</button>
+                <button class="button primary">Annotate</button>
+              </div>
+            </header>
+
+            <div class="reader">
+              <section class="pdf-zone" aria-label="PDF viewer using reading background">
+                <article class="pdf-page">
+                  <h2 class="paper-title">Paradigms and Scientific Change</h2>
+                  <div class="paper-line"></div>
+                  <div class="paper-line"></div>
+                  <div class="paper-line short"></div>
+                  <span class="paper-highlight"></span>
+                  <div class="paper-line"></div>
+                  <div class="paper-line"></div>
+                  <div class="paper-line"></div>
+                  <div class="paper-line short"></div>
+                  <span class="paper-highlight"></span>
+                  <div class="paper-line"></div>
+                  <div class="paper-line"></div>
+                  <div class="paper-line short"></div>
+                </article>
+              </section>
+
+              <section class="notes-zone" aria-label="Note editor using reading background">
+                <div class="editor-toolbar">
+                  <span class="tool"></span>
+                  <span class="tool"></span>
+                  <span class="tool"></span>
+                  <span class="token-note">BlockNote toolbar: needs override decision</span>
+                </div>
+                <div class="note-content">
+                  <h2>Notes should read larger than chrome.</h2>
+                  <p>
+                    Kuhn's argument is not just historical; it questions how a field decides what
+                    counts as evidence. <mark class="important">This is the central claim.</mark>
+                  </p>
+                  <p>
+                    <mark class="questioning">Questioning:</mark> does a paradigm explain consensus,
+                    or does it hide disagreement? <mark class="original">Original:</mark> compare this
+                    with interface defaults that silently shape reading behavior.
+                  </p>
+                  <p>
+                    <mark class="pending">Pending:</mark> revisit whether pending should remain teal.
+                    <mark class="background">Background:</mark> semantic colors are stored by name,
+                    not resolved value.
+                  </p>
+                  <div class="focus-input">Focused input uses border-accent + shadow-focus</div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <aside class="side-panel">
+            <section class="card">
+              <div class="label">Semantic note colors</div>
+              <div class="swatches">
+                <div class="swatch"><span class="chip questioning"></span><span>Questioning</span><span class="token-note">25 hue</span></div>
+                <div class="swatch"><span class="chip important"></span><span>Important</span><span class="token-note">80 hue</span></div>
+                <div class="swatch"><span class="chip original"></span><span>Original</span><span class="token-note">145 hue</span></div>
+                <div class="swatch"><span class="chip pending"></span><span>Pending current</span><span class="token-note">195 hue</span></div>
+                <div class="swatch"><span class="chip pending-alt"></span><span>Pending candidate</span><span class="token-note">290 hue</span></div>
+                <div class="swatch"><span class="chip background"></span><span>Background</span><span class="token-note">neutral</span></div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="label">Knowledge graph</div>
+              <div class="graph-wrap">
+                <svg viewBox="0 0 340 280" role="img" aria-label="Knowledge graph with type-based colors">
+                  <line x1="170" y1="65" x2="82" y2="122" stroke="var(--graph-edge-active)" stroke-width="2" />
+                  <line x1="170" y1="65" x2="245" y2="112" stroke="var(--graph-edge-default)" stroke-width="1.5" />
+                  <line x1="82" y1="122" x2="132" y2="205" stroke="var(--graph-edge-default)" stroke-width="1.5" />
+                  <line x1="245" y1="112" x2="222" y2="204" stroke="var(--graph-edge-default)" stroke-width="1.5" />
+                  <line x1="132" y1="205" x2="222" y2="204" stroke="var(--graph-edge-default)" stroke-width="1.5" />
+                  <line x1="170" y1="65" x2="170" y2="150" stroke="var(--graph-edge-default)" stroke-width="1.5" />
+                  <circle cx="170" cy="65" r="16" fill="var(--graph-node-concept)" />
+                  <circle cx="82" cy="122" r="13" fill="var(--graph-node-entity)" />
+                  <circle cx="245" cy="112" r="12" fill="var(--graph-node-concept)" />
+                  <circle cx="170" cy="150" r="10" fill="var(--graph-node-source)" />
+                  <circle cx="132" cy="205" r="12" fill="var(--graph-node-concept)" />
+                  <circle cx="222" cy="204" r="12" fill="var(--graph-node-concept)" />
+                  <text x="170" y="39" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Paradigm</text>
+                  <text x="82" y="99" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Kuhn</text>
+                  <text x="245" y="90" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Crisis</text>
+                  <text x="170" y="174" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Source</text>
+                  <text x="132" y="229" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Normal Science</text>
+                  <text x="222" y="229" text-anchor="middle" fill="var(--color-text-secondary)" font-size="12">Conceptual Change</text>
+                </svg>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="label">Component token gaps</div>
+              <div class="table">
+                <div class="row"><span class="status-dot"></span><span>Table row height</span><span class="code">44px</span></div>
+                <div class="row"><span class="status-dot"></span><span>Status dot style</span><span class="token-note">missing</span></div>
+              </div>
+              <div class="popover-demo">
+                <div class="popover">
+                  Popover uses existing shadow/radius tokens, but still needs padding, max width, and arrow tokens.
+                </div>
+              </div>
+              <div class="component-gaps">
+                <div class="gap-item">Popover token details are underspecified.</div>
+                <div class="gap-item">Table status indicators need semantic rules.</div>
+                <div class="gap-item">BlockNote toolbar styling needs override policy.</div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
