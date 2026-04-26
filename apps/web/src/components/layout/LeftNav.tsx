@@ -1,5 +1,13 @@
-const navItems = [
-	{ label: "Library", hint: "Soon" },
+import { Link } from "@tanstack/react-router"
+
+type NavItem = {
+	label: string
+	to?: string
+	hint?: string
+}
+
+const navItems: NavItem[] = [
+	{ label: "Library", to: "/library" },
 	{ label: "Notes", hint: "Soon" },
 	{ label: "Wiki", hint: "Soon" },
 	{ label: "Graph", hint: "Soon" },
@@ -17,18 +25,29 @@ export function LeftNav() {
 			</div>
 
 			<nav className="mt-8 space-y-1">
-				{navItems.map((item) => (
-					<button
-						className="flex items-center justify-between rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
-						key={item.label}
-						type="button"
-					>
-						<span>{item.label}</span>
-						<span className="text-xs uppercase tracking-[0.12em] text-text-tertiary">
-							{item.hint}
-						</span>
-					</button>
-				))}
+				{navItems.map((item) =>
+					item.to ? (
+						<Link
+							className="flex items-center justify-between rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
+							to={item.to}
+							key={item.label}
+							activeProps={{ className: "bg-surface-selected text-text-primary" }}
+						>
+							<span>{item.label}</span>
+						</Link>
+					) : (
+						<button
+							className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
+							key={item.label}
+							type="button"
+						>
+							<span>{item.label}</span>
+							<span className="text-xs uppercase tracking-[0.12em] text-text-tertiary">
+								{item.hint}
+							</span>
+						</button>
+					),
+				)}
 			</nav>
 		</div>
 	)

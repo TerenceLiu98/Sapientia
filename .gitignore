@@ -34,3 +34,4 @@ logs/
 
 # Local-only sandbox content
 demo/
+.tanstack/
