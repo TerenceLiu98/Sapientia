@@ -1,2 +1,3 @@
-// Schema files will be added per entity in subsequent tasks.
-export {}
+export * from "./auth"
+export * from "./papers"
+export * from "./workspaces"

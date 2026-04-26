@@ -36,13 +36,13 @@ cp packages/db/.env.example packages/db/.env
 # Start Postgres + Redis + MinIO (port 5432, 6379, 9000+9001)
 pnpm infra:up
 
-# Apply migrations (no-op until TASK-004 adds the first schema)
+# Apply migrations (creates better-auth tables in Phase 1)
 pnpm db:migrate
 
 # Backend on http://localhost:3000 → `curl :3000/health`
 pnpm dev:api
 
-# Frontend on http://localhost:5173 → renders "Sapientia"
+# Frontend on http://localhost:5173 → sign-in / sign-up / protected shell
 pnpm dev:web
 ```
 
@@ -68,6 +68,34 @@ pnpm dev:web
 
 ## Tests
 
-`pnpm test` runs vitest in `apps/api/`. Integration tests use `testcontainers-node`, which needs a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` before running.
+`pnpm test` runs vitest across the workspace. `apps/web` contains component tests for the auth flow; `apps/api` contains integration tests backed by `testcontainers-node`, which needs a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` before running.
+
+## Frontend notes
+
+The web app uses TanStack Router with the Vite router plugin. File-based routes live in `apps/web/src/routes`, and `apps/web/src/routeTree.gen.ts` is generated automatically during build/dev and should be committed when it changes.
+
+In local development, Vite proxies `/api/*` from `http://localhost:5173` to `http://localhost:3000`, so better-auth stays same-origin from the browser's perspective and auth cookies work without extra client configuration.
+
+## OAuth setup for local development
+
+OAuth is optional in v0.1 local development. Email/password auth works with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `FRONTEND_ORIGIN` set. For the default local setup, use `BETTER_AUTH_URL=http://localhost:3000` and `FRONTEND_ORIGIN=http://localhost:5173`.
+
+For Google OAuth:
+
+1. Go to `https://console.cloud.google.com/`.
+2. Create a project or select an existing one.
+3. Enable the Google Sign-In APIs required by your project setup.
+4. Create an OAuth 2.0 client with application type `Web application`.
+5. Add the redirect URI `http://localhost:3000/api/auth/callback/google`.
+6. Copy the client ID and secret into `apps/api/.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+For GitHub OAuth:
+
+1. Go to `https://github.com/settings/developers`.
+2. Create a new OAuth App.
+3. Set the authorization callback URL to `http://localhost:3000/api/auth/callback/github`.
+4. Copy the client ID and secret into `apps/api/.env` as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+
+If you set one value from an OAuth provider pair, you must set the other too. The API config validation rejects partial provider configuration on boot.
 
 Phase 1 status and active task: [docs/STATUS.md](docs/STATUS.md).

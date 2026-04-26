@@ -28,9 +28,9 @@ describe("healthcheck infrastructure", () => {
 	})
 
 	afterAll(async () => {
-		await pg.stop()
-		await redis.stop()
-		await minio.stop()
+		await pg?.stop()
+		await redis?.stop()
+		await minio?.stop()
 	})
 
 	it("spins up Postgres + Redis + MinIO via testcontainers", () => {

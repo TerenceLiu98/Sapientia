@@ -2,8 +2,12 @@ import { createDbClient } from "@sapientia/db"
 import { sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { Redis } from "ioredis"
+import { auth } from "./auth"
 import { config } from "./config"
 import { logger as appLogger } from "./logger"
+import { meRoutes } from "./routes/me"
+import { paperRoutes } from "./routes/papers"
+import { workspaceRoutes } from "./routes/workspaces"
 import { checkS3Health } from "./services/s3-client"
 
 const { db, close: closeDb } = createDbClient(config.DATABASE_URL)
@@ -13,7 +17,10 @@ redis.on("error", (err) => {
 	appLogger.warn({ err: err.message }, "redis_connection_error")
 })
 
-const app = new Hono()
+export const app = new Hono()
+
+// better-auth handles all auth routes (sign-up, sign-in, sign-out, OAuth callbacks, etc.)
+app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
 
 app.get("/health", async (c) => {
 	const checks = await Promise.allSettled([
@@ -38,6 +45,10 @@ app.get("/health", async (c) => {
 		allOk ? 200 : 503,
 	)
 })
+
+app.route("/api/v1", meRoutes)
+app.route("/api/v1", paperRoutes)
+app.route("/api/v1", workspaceRoutes)
 
 appLogger.info({ port: config.PORT, env: config.NODE_ENV }, "api_starting")
 

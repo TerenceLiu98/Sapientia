@@ -1,4 +1,64 @@
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
+
+@theme {
+	--color-neutral-50: oklch(0.985 0.003 75);
+	--color-neutral-100: oklch(0.965 0.005 75);
+	--color-neutral-200: oklch(0.925 0.006 75);
+	--color-neutral-300: oklch(0.87 0.007 75);
+	--color-neutral-400: oklch(0.745 0.008 75);
+	--color-neutral-500: oklch(0.585 0.008 75);
+	--color-neutral-600: oklch(0.46 0.008 75);
+	--color-neutral-700: oklch(0.355 0.008 75);
+	--color-neutral-800: oklch(0.235 0.008 70);
+	--color-neutral-900: oklch(0.165 0.008 65);
+	--color-neutral-950: oklch(0.115 0.008 60);
+
+	--color-accent-50: oklch(0.965 0.02 195);
+	--color-accent-100: oklch(0.92 0.04 195);
+	--color-accent-200: oklch(0.86 0.07 195);
+	--color-accent-300: oklch(0.77 0.1 195);
+	--color-accent-400: oklch(0.66 0.115 195);
+	--color-accent-500: oklch(0.54 0.12 195);
+	--color-accent-600: oklch(0.45 0.11 195);
+	--color-accent-700: oklch(0.37 0.09 195);
+	--color-accent-800: oklch(0.29 0.065 195);
+	--color-accent-900: oklch(0.22 0.04 195);
+
+	--color-bg-primary: var(--color-neutral-50);
+	--color-bg-secondary: var(--color-neutral-100);
+	--color-bg-tertiary: var(--color-neutral-200);
+	--color-bg-overlay: oklch(1 0 0 / 0.95);
+	--color-surface-default: var(--color-neutral-50);
+	--color-surface-hover: var(--color-neutral-100);
+	--color-surface-active: var(--color-neutral-200);
+	--color-surface-selected: var(--color-accent-100);
+
+	--color-text-primary: var(--color-neutral-900);
+	--color-text-secondary: var(--color-neutral-600);
+	--color-text-tertiary: var(--color-neutral-500);
+	--color-text-disabled: var(--color-neutral-400);
+	--color-text-inverse: var(--color-neutral-50);
+	--color-text-accent: var(--color-accent-700);
+	--color-text-error: oklch(0.45 0.13 25);
+
+	--color-border-subtle: var(--color-neutral-200);
+	--color-border-default: var(--color-neutral-300);
+	--color-border-strong: var(--color-neutral-400);
+	--color-border-accent: var(--color-accent-500);
+
+	--font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+	--font-sans: "Inter", system-ui, -apple-system, sans-serif;
+	--font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+	--text-md: 1.125rem;
+	--shadow-focus: 0 0 0 3px oklch(from var(--color-border-accent) l c h / 0.3);
+	--shadow-popover: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.05);
+
+	--container-narrow: 640px;
+	--container-content: 800px;
+	--container-wide: 1200px;
+}
 
 html,
 body,
@@ -6,6 +66,40 @@ body,
 	height: 100%;
 }
 
+html {
+	background: var(--color-bg-primary);
+}
+
 body {
 	margin: 0;
+	background: linear-gradient(180deg, oklch(0.995 0.003 75) 0%, var(--color-bg-primary) 100%);
+	color: var(--color-text-primary);
+	font-family: var(--font-sans);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+button,
+input {
+	font: inherit;
+}
+
+button {
+	cursor: pointer;
+}
+
+a {
+	color: inherit;
+	text-decoration: none;
+}
+
+kbd {
+	font-family: var(--font-mono);
+}
+
+:focus-visible {
+	outline: none;
+	box-shadow: var(--shadow-focus);
 }
