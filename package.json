@@ -1,0 +1,18 @@
+{
+  "name": "sapientia",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "bootstrap": "pnpm install && pnpm --filter @sapientia/web install && cd apps/api && uv sync",
+    "dev:web": "pnpm --filter @sapientia/web dev",
+    "dev:api": "cd apps/api && uv run uvicorn src.main:app --reload",
+    "build:web": "pnpm --filter @sapientia/web build",
+    "typecheck": "pnpm --filter @sapientia/web typecheck",
+    "lint:web": "pnpm --filter @sapientia/web lint",
+    "lint:api": "cd apps/api && uv run ruff check .",
+    "lint": "pnpm run lint:web && pnpm run lint:api",
+    "test:api": "cd apps/api && uv run pytest"
+  },
+  "devDependencies": {}
+}
