@@ -1,0 +1,36 @@
+# Node / pnpm
+node_modules/
+dist/
+build/
+.vite/
+.turbo/
+*.tsbuildinfo
+
+# Bun (lockfile is committed; cache is not)
+.bun/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local Claude Code state
+.claude/
+
+# Local-only sandbox content
+demo/

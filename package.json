@@ -1,0 +1,19 @@
+{
+	"name": "sapientia",
+	"private": true,
+	"version": "0.1.0",
+	"packageManager": "pnpm@10.33.2",
+	"scripts": {
+		"dev:web": "pnpm --filter @sapientia/web dev",
+		"dev:api": "pnpm --filter @sapientia/api dev",
+		"build": "pnpm -r build",
+		"typecheck": "pnpm -r typecheck",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"test": "pnpm -r test"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.2.0",
+		"typescript": "^5.6.0"
+	}
+}
