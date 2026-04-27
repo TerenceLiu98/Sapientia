@@ -28,6 +28,9 @@ export async function uploadPdfToS3(content: Uint8Array, key: string): Promise<v
 			Key: key,
 			Body: content,
 			ContentType: "application/pdf",
+			// Pass ContentLength explicitly so the SDK doesn't fall back to its
+			// "stream of unknown length" warning + chunked-encoding path.
+			ContentLength: content.byteLength,
 		}),
 	)
 }

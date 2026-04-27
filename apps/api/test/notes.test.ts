@@ -294,6 +294,46 @@ describe("notes", () => {
 		expect(del.status).toBe(403)
 	})
 
+	it("createNote with the same (paper, owner) is idempotent — returns the existing note", async () => {
+		await signUp("note-paper@example.com")
+		const cookie = await signIn("note-paper@example.com")
+		const { userId, workspaceId } = await workspaceFor("note-paper@example.com")
+		const { papers, workspacePapers } = await import("@sapientia/db")
+		const [paper] = await dbClient.db
+			.insert(papers)
+			.values({
+				ownerUserId: userId,
+				contentHash: `hash-${userId}-idempotent`,
+				title: "Paper for one-note rule",
+				fileSizeBytes: 100,
+				pdfObjectKey: `papers/${userId}/x/source.pdf`,
+				parseStatus: "done",
+			})
+			.returning()
+		await dbClient.db
+			.insert(workspacePapers)
+			.values({ paperId: paper.id, workspaceId, grantedBy: userId })
+
+		const first = await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
+			method: "POST",
+			headers: { cookie, "content-type": "application/json" },
+			body: JSON.stringify({ paperId: paper.id, title: "Take 1", blocknoteJson: sampleDoc }),
+		})
+		const noteA = (await first.json()) as { id: string; title: string }
+
+		const second = await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
+			method: "POST",
+			headers: { cookie, "content-type": "application/json" },
+			body: JSON.stringify({ paperId: paper.id, title: "Take 2", blocknoteJson: sampleDoc }),
+		})
+		const noteB = (await second.json()) as { id: string; title: string }
+
+		// Same row — no duplicate, and the title from the first call wins
+		// because the second call short-circuited before any new write.
+		expect(noteB.id).toBe(noteA.id)
+		expect(noteB.title).toBe("Take 1")
+	})
+
 	it("listNotes filters by paperId (?paperId=null isolates standalone notes)", async () => {
 		await signUp("note-filter@example.com")
 		const cookie = await signIn("note-filter@example.com")

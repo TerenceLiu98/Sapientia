@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_notes_paper_owner_active" ON "notes" USING btree ("paper_id","owner_user_id") WHERE "notes"."paper_id" IS NOT NULL AND "notes"."deleted_at" IS NULL;

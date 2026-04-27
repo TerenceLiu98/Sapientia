@@ -329,7 +329,9 @@ describe("citations (note ↔ block refs)", () => {
 		const { userId, workspaceId } = await workspaceFor("cite-counts@example.com")
 		const paper = await seedPaper(userId, workspaceId)
 
-		// Two notes, both citing aaaa1111 — one of them twice.
+		// One paper-side note (per the one-note-per-paper rule) plus a
+		// standalone note in the same workspace, both citing the same block
+		// — three references total.
 		await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
 			method: "POST",
 			headers: { cookie, "content-type": "application/json" },
@@ -352,11 +354,11 @@ describe("citations (note ↔ block refs)", () => {
 				],
 			}),
 		})
+		// Standalone note (no paperId) — separate row, same blockId.
 		await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
 			method: "POST",
 			headers: { cookie, "content-type": "application/json" },
 			body: JSON.stringify({
-				paperId: paper.id,
 				blocknoteJson: docCiting(paper.id, "aaaa1111", "A"),
 			}),
 		})

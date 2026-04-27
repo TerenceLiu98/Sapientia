@@ -1,5 +1,14 @@
 import { relations, sql } from "drizzle-orm"
-import { customType, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import {
+	customType,
+	index,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+	uniqueIndex,
+	uuid,
+} from "drizzle-orm/pg-core"
 import { user } from "./auth"
 import { papers } from "./papers"
 import { workspaces } from "./workspaces"
@@ -50,6 +59,12 @@ export const notes = pgTable(
 		index("idx_notes_workspace").on(table.workspaceId),
 		index("idx_notes_paper").on(table.paperId),
 		index("idx_notes_owner").on(table.ownerUserId),
+		// One paper-side note per (paper, owner). Standalone notes (paper_id
+		// NULL) are unconstrained, and soft-deleted notes are excluded so a
+		// user can re-create a note after deleting the previous one.
+		uniqueIndex("uniq_notes_paper_owner_active")
+			.on(table.paperId, table.ownerUserId)
+			.where(sql`${table.paperId} IS NOT NULL AND ${table.deletedAt} IS NULL`),
 		// Manually-applied GIN index — see the migration for the SQL. Drizzle's
 		// schema layer doesn't model GIN-on-tsvector cleanly, but listing it
 		// here keeps the intent visible. The `using` here is a no-op; the real

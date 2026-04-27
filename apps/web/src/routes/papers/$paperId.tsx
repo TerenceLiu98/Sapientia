@@ -29,7 +29,20 @@ function PaperDetail() {
 		setRequestNonce((n) => n + 1)
 	}, [])
 
-	async function onCreatePaperNote() {
+	const existingNote = paperNotes && paperNotes.length > 0 ? paperNotes[0] : null
+
+	async function onOpenOrCreatePaperNote() {
+		// Design rule: one note per (paper, owner). If one already exists,
+		// jump to it instead of producing a second. The backend
+		// createNote is also idempotent on (paperId, ownerUserId), so the
+		// worst case is a wasted API call — never a duplicate.
+		if (existingNote) {
+			await navigate({
+				to: "/papers/$paperId/notes/$noteId",
+				params: { paperId, noteId: existingNote.id },
+			})
+			return
+		}
 		const created = await createNote.mutateAsync({
 			paperId,
 			title: paper?.title ?? "Untitled",
@@ -52,27 +65,20 @@ function PaperDetail() {
 					<div className="flex h-full flex-col">
 						<ParseStatusBanner paper={paper} />
 						<div className="flex items-center justify-between border-b border-border-subtle px-6 py-2 text-sm">
-							<div className="flex items-center gap-3 text-text-secondary">
-								<span>
-									{paperNotes?.length ?? 0} note{paperNotes?.length === 1 ? "" : "s"} on this paper
-								</span>
-								{paperNotes && paperNotes.length > 0 ? (
-									<Link
-										className="text-text-accent hover:underline"
-										params={{ paperId, noteId: paperNotes[0].id }}
-										to="/papers/$paperId/notes/$noteId"
-									>
-										open most recent →
-									</Link>
-								) : null}
+							<div className="text-text-secondary">
+								{existingNote ? `Note: ${existingNote.title}` : "No note for this paper yet."}
 							</div>
 							<button
 								className="h-8 rounded-md bg-accent-600 px-3 text-xs font-medium text-text-inverse transition-colors hover:bg-accent-700 disabled:opacity-60"
 								disabled={createNote.isPending || !workspace}
-								onClick={() => void onCreatePaperNote()}
+								onClick={() => void onOpenOrCreatePaperNote()}
 								type="button"
 							>
-								{createNote.isPending ? "Creating…" : "New note for this paper"}
+								{createNote.isPending
+									? "Creating…"
+									: existingNote
+										? "Open note"
+										: "New note for this paper"}
 							</button>
 						</div>
 						<div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">

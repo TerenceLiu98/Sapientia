@@ -110,6 +110,7 @@ async function processPaperParse(
 			Key: blocksKey,
 			Body: blocksJson,
 			ContentType: "application/json",
+			ContentLength: blocksJson.byteLength,
 		}),
 	)
 
@@ -121,6 +122,7 @@ async function processPaperParse(
 			Key: zipKey,
 			Body: zipBuffer,
 			ContentType: "application/zip",
+			ContentLength: zipBuffer.byteLength,
 		}),
 	)
 

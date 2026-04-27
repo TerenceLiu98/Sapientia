@@ -47,6 +47,11 @@ async function uploadVersion(args: {
 	const docArray = Array.isArray(args.blocknoteJson) ? args.blocknoteJson : []
 	const markdown = blocknoteJsonToMarkdown(docArray)
 
+	// Pre-compute byte lengths so the SDK doesn't have to guess — strings
+	// otherwise trip the "stream of unknown length" warning.
+	const jsonBytes = Buffer.byteLength(jsonString, "utf8")
+	const mdBytes = Buffer.byteLength(markdown, "utf8")
+
 	await Promise.all([
 		s3Client.send(
 			new PutObjectCommand({
@@ -54,6 +59,7 @@ async function uploadVersion(args: {
 				Key: jsonObjectKey,
 				Body: jsonString,
 				ContentType: "application/json",
+				ContentLength: jsonBytes,
 			}),
 		),
 		s3Client.send(
@@ -62,6 +68,7 @@ async function uploadVersion(args: {
 				Key: mdObjectKey,
 				Body: markdown,
 				ContentType: "text/markdown",
+				ContentLength: mdBytes,
 			}),
 		),
 	])
@@ -78,6 +85,26 @@ export interface CreateNoteInput {
 }
 
 export async function createNote(input: CreateNoteInput): Promise<Note> {
+	// "One paper-side note per (paper, owner)" is enforced by a unique
+	// index. To make the API idempotent we look first: if the same user
+	// already owns a note for this paper, hand it back. The frontend
+	// "New note for this paper" button can then click-spam without
+	// creating ghosts and without surfacing 409s.
+	if (input.paperId) {
+		const [existing] = await db
+			.select()
+			.from(notes)
+			.where(
+				and(
+					eq(notes.paperId, input.paperId),
+					eq(notes.ownerUserId, input.ownerUserId),
+					isNull(notes.deletedAt),
+				),
+			)
+			.limit(1)
+		if (existing) return existing
+	}
+
 	const noteId = randomUUID()
 	const { jsonObjectKey, mdObjectKey, markdown } = await uploadVersion({
 		workspaceId: input.workspaceId,
