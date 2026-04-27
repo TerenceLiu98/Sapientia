@@ -26,6 +26,7 @@ describe("better-auth integration", () => {
 		process.env.DATABASE_URL = pg.getConnectionUri()
 		process.env.BETTER_AUTH_SECRET = "test_secret_32_chars_minimum_aaaa"
 		process.env.BETTER_AUTH_URL = "http://localhost:3000"
+		process.env.ENCRYPTION_KEY = "vmJVlH/PNqbzZGyWB5INuG2ZhuM9Q4jK0r4zNLmUKQk="
 		process.env.FRONTEND_ORIGIN = "http://localhost:5173"
 		process.env.S3_ENDPOINT = "http://localhost:9000"
 		process.env.S3_ACCESS_KEY_ID = "test"

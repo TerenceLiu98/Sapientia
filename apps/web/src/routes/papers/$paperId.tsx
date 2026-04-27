@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { usePaper } from "@/api/hooks/papers"
+import { createFileRoute, Link } from "@tanstack/react-router"
+import { type Paper, usePaper } from "@/api/hooks/papers"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { AppShell } from "@/components/layout/AppShell"
 import { PdfViewer } from "@/components/reader/PdfViewer"
@@ -21,10 +21,41 @@ function PaperDetail() {
 					<div className="p-8 text-sm text-text-tertiary">Not found.</div>
 				) : (
 					<div className="flex h-full flex-col">
-						<PdfViewer paperId={paperId} />
+						<ParseStatusBanner paper={paper} />
+						<div className="min-h-0 flex-1">
+							<PdfViewer paperId={paperId} />
+						</div>
 					</div>
 				)}
 			</AppShell>
 		</ProtectedRoute>
+	)
+}
+
+function ParseStatusBanner({ paper }: { paper: Paper }) {
+	if (paper.parseStatus === "done" || paper.parseStatus === "pending") return null
+
+	if (paper.parseStatus === "parsing") {
+		return (
+			<div className="border-b border-border-subtle bg-bg-secondary px-6 py-2 text-sm text-text-secondary">
+				Parsing this paper… block-level structure will appear once it's done. You can read the PDF
+				in the meantime.
+			</div>
+		)
+	}
+
+	// failed — surface the error and offer a route to fix it.
+	const needsCredentials = paper.parseError
+		?.toLowerCase()
+		.includes("mineru api token not configured")
+	return (
+		<div className="border-b border-[oklch(0.45_0.13_25)] bg-[oklch(0.93_0.035_25)] px-6 py-3 text-sm">
+			<div className="text-text-error">Parsing failed. {paper.parseError ?? "Unknown error."}</div>
+			{needsCredentials ? (
+				<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">
+					Configure MinerU →
+				</Link>
+			) : null}
+		</div>
 	)
 }

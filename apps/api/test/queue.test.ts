@@ -33,6 +33,7 @@ describe("BullMQ worker integration", () => {
 		process.env.REDIS_URL = `redis://${redisContainer.getHost()}:${redisContainer.getFirstMappedPort()}`
 		process.env.BETTER_AUTH_SECRET = "test_secret_32_chars_minimum_aaaa"
 		process.env.BETTER_AUTH_URL = "http://localhost:3000"
+		process.env.ENCRYPTION_KEY = "vmJVlH/PNqbzZGyWB5INuG2ZhuM9Q4jK0r4zNLmUKQk="
 		process.env.S3_ENDPOINT = "http://localhost:9000"
 		process.env.S3_ACCESS_KEY_ID = "test"
 		process.env.S3_SECRET_ACCESS_KEY = "test"
@@ -121,23 +122,10 @@ describe("BullMQ worker integration", () => {
 		return { status: row.status, error: row.error }
 	}
 
-	it("paper-parse stub: pending → parsing → done", async () => {
-		const userId = "user-stub-1"
-		const paperId = "00000000-0000-0000-0000-000000000001"
-		await createUser(userId)
-		await createPaper(paperId, userId)
-
-		const { enqueuePaperParse } = await import("../src/queues/paper-parse")
-		const { createPaperParseWorker } = await import("../src/workers/paper-parse.worker")
-		const worker = createPaperParseWorker()
-
-		await enqueuePaperParse({ paperId, userId })
-
-		await waitFor(async () => (await readPaperStatus(paperId)).status === "done", 8000)
-		expect((await readPaperStatus(paperId)).status).toBe("done")
-
-		await worker.close()
-	})
+	// The end-to-end happy path (pending → parsing → done) for the real
+	// MinerU worker lives in paper-parse.worker.test.ts because it needs
+	// credentials + a mock MinerU + MinIO. This file just verifies the
+	// generic BullMQ wiring around it.
 
 	it("retries on error and marks failed after all attempts", async () => {
 		const userId = "user-fail-1"

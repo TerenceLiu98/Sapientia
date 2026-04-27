@@ -6,6 +6,7 @@ export interface Paper {
 	title: string
 	fileSizeBytes: number
 	parseStatus: "pending" | "parsing" | "done" | "failed"
+	parseError: string | null
 	createdAt: string
 }
 

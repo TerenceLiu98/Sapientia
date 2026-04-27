@@ -67,6 +67,9 @@ export function TopBar({
 					<DropdownMenuContent align="end">
 						<DropdownMenuLabel>{user.email}</DropdownMenuLabel>
 						<DropdownMenuSeparator />
+						<DropdownMenuItem onSelect={() => void navigate({ to: "/settings" })}>
+							Settings
+						</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => void handleSignOut()}>Sign out</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>

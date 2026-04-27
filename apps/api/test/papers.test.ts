@@ -83,6 +83,7 @@ describe("papers", () => {
 		process.env.DATABASE_URL = pg.getConnectionUri()
 		process.env.BETTER_AUTH_SECRET = "test_secret_32_chars_minimum_aaaa"
 		process.env.BETTER_AUTH_URL = "http://localhost:3000"
+		process.env.ENCRYPTION_KEY = "vmJVlH/PNqbzZGyWB5INuG2ZhuM9Q4jK0r4zNLmUKQk="
 		process.env.S3_ENDPOINT = s3Endpoint
 		process.env.S3_ACCESS_KEY_ID = "test"
 		process.env.S3_SECRET_ACCESS_KEY = "testpassword"

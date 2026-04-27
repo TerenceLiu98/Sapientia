@@ -15,6 +15,7 @@ const baseEnv = {
 	S3_FORCE_PATH_STYLE: "true",
 	BETTER_AUTH_SECRET: "test_secret_32_chars_minimum_aaaa",
 	BETTER_AUTH_URL: "http://localhost:3000",
+	ENCRYPTION_KEY: "vmJVlH/PNqbzZGyWB5INuG2ZhuM9Q4jK0r4zNLmUKQk=",
 } satisfies NodeJS.ProcessEnv
 
 describe("config parsing", () => {

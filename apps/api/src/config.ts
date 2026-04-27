@@ -27,6 +27,17 @@ export const ConfigSchema = z
 		GOOGLE_CLIENT_SECRET: z.string().optional(),
 		GITHUB_CLIENT_ID: z.string().optional(),
 		GITHUB_CLIENT_SECRET: z.string().optional(),
+
+		// 32 bytes encoded as base64. Generate with: openssl rand -base64 32
+		ENCRYPTION_KEY: z
+			.string()
+			.refine(
+				(v) => Buffer.from(v, "base64").length === 32,
+				"ENCRYPTION_KEY must be 32 bytes encoded as base64 (use: openssl rand -base64 32)",
+			),
+
+		// MinerU API base. Override in tests with a local mock server.
+		MINERU_BASE_URL: z.string().url().default("https://mineru.net"),
 	})
 	.refine(
 		(data) =>
