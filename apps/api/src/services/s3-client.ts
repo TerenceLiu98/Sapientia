@@ -10,7 +10,38 @@ export const s3Client = new S3Client({
 		secretAccessKey: config.S3_SECRET_ACCESS_KEY,
 	},
 	forcePathStyle: config.S3_FORCE_PATH_STYLE,
+	// AWS SDK v3 defaults flexible checksums to WHEN_SUPPORTED, which adds
+	// `x-amz-checksum-mode=ENABLED` to presigned GET URLs. AWS S3 accepts that,
+	// but some MinIO versions reject the resulting signed URL with 403.
+	requestChecksumCalculation: "WHEN_REQUIRED",
+	responseChecksumValidation: "WHEN_REQUIRED",
 })
+
+// Belt-and-suspenders: even with `responseChecksumValidation: "WHEN_REQUIRED"`
+// the SDK's flexible-checksums middleware still injects
+// `x-amz-checksum-mode=ENABLED` into the request, which becomes part of the
+// SigV4 canonical query string. MinIO doesn't recognise it but still folds it
+// into its own signature calculation → mismatch → 403. We strip both the
+// header and the query param from every request before it reaches the
+// signer. AWS's real S3 ignores this strip; MinIO is happy without it.
+s3Client.middlewareStack.add(
+	(next) => async (args) => {
+		const req = args.request as {
+			headers?: Record<string, string>
+			query?: Record<string, string | undefined>
+		}
+		if (req.headers) {
+			delete req.headers["x-amz-checksum-mode"]
+			delete req.headers["X-Amz-Checksum-Mode"]
+		}
+		if (req.query) {
+			delete req.query["x-amz-checksum-mode"]
+			delete req.query["X-Amz-Checksum-Mode"]
+		}
+		return next(args)
+	},
+	{ step: "build", name: "stripChecksumModeForMinio", priority: "high" },
+)
 
 export async function checkS3Health(): Promise<boolean> {
 	try {

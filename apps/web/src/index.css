@@ -78,6 +78,21 @@
 	--shell-toolbar-height: 40px;
 
 	--table-row-height: 44px;
+
+	/* Semantic highlight palette (TASK-017). The five colors come from PRD
+	   §"颜色作为一等公民" / DESIGN_TOKENS.md §2.5. Stored as semantic names
+	   on the row, resolved to CSS vars at render time so dark mode + future
+	   palette changes don't require data migration. */
+	--note-questioning-bg: oklch(0.94 0.03 25);
+	--note-questioning-text: oklch(0.42 0.13 25);
+	--note-important-bg: oklch(0.95 0.04 80);
+	--note-important-text: oklch(0.42 0.115 75);
+	--note-original-bg: oklch(0.94 0.035 145);
+	--note-original-text: oklch(0.4 0.09 145);
+	--note-pending-bg: oklch(0.94 0.03 195);
+	--note-pending-text: oklch(0.4 0.09 195);
+	--note-background-bg: var(--color-neutral-200);
+	--note-background-text: var(--color-neutral-700);
 }
 
 html,
@@ -179,4 +194,29 @@ kbd {
 	background: color-mix(in oklch, var(--color-bg-primary) 96%, var(--color-reading-bg) 4%);
 	border-color: var(--color-border-subtle);
 	box-shadow: var(--shadow-popover);
+}
+
+/* Hide native scrollbars on the reader's PDF + parsed-blocks panes while
+   keeping scroll interaction. Reader UX preference: the panes are visually
+   self-contained and the scrollbar adds noise. */
+.scrollbar-none {
+	scrollbar-width: none; /* Firefox */
+}
+.scrollbar-none::-webkit-scrollbar {
+	display: none; /* WebKit */
+}
+
+.pdf-block-text::selection {
+	background: color-mix(in oklch, var(--note-important-bg) 72%, white 28%);
+	color: var(--color-text-primary);
+}
+
+.pdf-block-text *::selection {
+	background: color-mix(in oklch, var(--note-important-bg) 72%, white 28%);
+	color: var(--color-text-primary);
+}
+
+.react-pdf__Page__textContent {
+	pointer-events: none;
+	user-select: none;
 }

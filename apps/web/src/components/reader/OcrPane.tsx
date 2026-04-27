@@ -93,37 +93,103 @@ export function OcrPane({
 					{headerLabel}
 				</span>
 			</header>
-			<div className="flex-1 overflow-y-auto p-4">
-				<div className="grid gap-3">
-					{grouped.map(([page, pageBlocks]) => (
-						<section className="grid gap-3" key={page}>
-							<div className="text-xs uppercase tracking-[0.16em] text-text-tertiary">
-								Page {page}
-							</div>
-							{pageBlocks.map((block) => (
-								<BlockCard
-									block={block}
-									citationCount={citationCounts?.get(block.blockId)}
-									isSelected={selectedBlockId === block.blockId}
-									key={block.blockId}
-									onDismissPopover={onDismissPopover}
-									onSelect={onSelectBlock}
-									onTogglePopover={onTogglePopover}
-									paperId={paperId}
-									popoverOpen={openPopoverFor === block.blockId}
-									renderActions={renderActions}
-								/>
-							))}
-						</section>
-					))}
-				</div>
+			<OcrPaneScrollBody
+				blocks={blocks}
+				citationCounts={citationCounts}
+				grouped={grouped}
+				onDismissPopover={onDismissPopover}
+				onSelectBlock={onSelectBlock}
+				onTogglePopover={onTogglePopover}
+				openPopoverFor={openPopoverFor}
+				paperId={paperId}
+				renderActions={renderActions}
+				selectedBlockId={selectedBlockId}
+			/>
+		</div>
+	)
+}
+
+// Scrollable card list with imperative scroll-into-view: when the
+// `selectedBlockId` changes (e.g., the user clicked a bbox in the PDF), we
+// look up that card's offset relative to *this exact* scroll container and
+// scroll it into view ourselves. `scrollIntoView` is unreliable across
+// nested overflow ancestors, so we don't use it.
+function OcrPaneScrollBody({
+	blocks,
+	citationCounts,
+	grouped,
+	onDismissPopover,
+	onSelectBlock,
+	onTogglePopover,
+	openPopoverFor,
+	paperId,
+	renderActions,
+	selectedBlockId,
+}: {
+	blocks: Block[]
+	citationCounts?: Map<string, number>
+	grouped: Array<[number, Block[]]>
+	onDismissPopover?: () => void
+	onSelectBlock?: (block: Block) => void
+	onTogglePopover?: (blockId: string) => void
+	openPopoverFor?: string | null
+	paperId: string
+	renderActions?: (block: Block) => React.ReactNode
+	selectedBlockId?: string | null
+}) {
+	const scrollRef = useRef<HTMLDivElement | null>(null)
+	const cardRefs = useRef(new Map<string, HTMLDivElement>())
+
+	useEffect(() => {
+		if (!selectedBlockId) return
+		const card = cardRefs.current.get(selectedBlockId)
+		const container = scrollRef.current
+		if (!card || !container) return
+		// Center the card in the scroll viewport (or as close as possible
+		// when the card sits near the top/bottom edge).
+		const target = card.offsetTop - container.clientHeight / 2 + card.offsetHeight / 2
+		const max = container.scrollHeight - container.clientHeight
+		container.scrollTo({
+			top: Math.max(0, Math.min(max, target)),
+			behavior: "smooth",
+		})
+	}, [selectedBlockId])
+
+	return (
+		<div className="flex-1 overflow-y-auto p-4" ref={scrollRef}>
+			<div className="grid gap-3">
+				{grouped.map(([page, pageBlocks]) => (
+					<section className="grid gap-3" key={page}>
+						<div className="text-xs uppercase tracking-[0.16em] text-text-tertiary">
+							Page {page}
+						</div>
+						{pageBlocks.map((block) => (
+							<BlockCard
+								block={block}
+								cardRefs={cardRefs}
+								citationCount={citationCounts?.get(block.blockId)}
+								isSelected={selectedBlockId === block.blockId}
+								key={block.blockId}
+								onDismissPopover={onDismissPopover}
+								onSelect={onSelectBlock}
+								onTogglePopover={onTogglePopover}
+								paperId={paperId}
+								popoverOpen={openPopoverFor === block.blockId}
+								renderActions={renderActions}
+							/>
+						))}
+					</section>
+				))}
 			</div>
+			{/* `blocks` reference forces a re-mount of the effect when blocks load */}
+			<span className="hidden" data-block-count={blocks.length} />
 		</div>
 	)
 }
 
 function BlockCard({
 	block,
+	cardRefs,
 	citationCount,
 	isSelected,
 	onDismissPopover,
@@ -134,6 +200,7 @@ function BlockCard({
 	renderActions,
 }: {
 	block: Block
+	cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
 	citationCount: number | undefined
 	isSelected: boolean
 	onDismissPopover?: () => void
@@ -143,12 +210,10 @@ function BlockCard({
 	popoverOpen: boolean
 	renderActions?: (block: Block) => React.ReactNode
 }) {
-	const ref = useRef<HTMLDivElement | null>(null)
-
-	useEffect(() => {
-		if (!isSelected || !ref.current) return
-		ref.current.scrollIntoView({ behavior: "smooth", block: "center" })
-	}, [isSelected])
+	const setRef = (el: HTMLDivElement | null) => {
+		if (el) cardRefs.current.set(block.blockId, el)
+		else cardRefs.current.delete(block.blockId)
+	}
 
 	const subtitle = isSelected
 		? "Selected block"
@@ -173,7 +238,7 @@ function BlockCard({
 					onSelect?.(block)
 				}
 			}}
-			ref={ref}
+			ref={setRef}
 			role="button"
 			tabIndex={0}
 		>
