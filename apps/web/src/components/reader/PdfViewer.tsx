@@ -399,16 +399,28 @@ function PdfPageWithOverlay({
 				renderTextLayer={true}
 				scale={scale}
 			/>
-			{blocks && blocks.length > 0 && pointDims && canvasRect ? (
+			{blocks && blocks.length > 0 && pointDims ? (
+				// Prefer the measured canvas rect (pixel-perfect alignment with
+				// react-pdf's actual canvas), fall back to inset-0 with the
+				// computed canvas dims when canvas can't be measured (e.g. JSDOM
+				// in tests, where react-pdf's canvas isn't rendered).
 				<div
 					aria-hidden="true"
 					className="pointer-events-none absolute"
-					style={{
-						left: canvasRect.left,
-						top: canvasRect.top,
-						width: canvasRect.width,
-						height: canvasRect.height,
-					}}
+					style={
+						canvasRect
+							? {
+									left: canvasRect.left,
+									top: canvasRect.top,
+									width: canvasRect.width,
+									height: canvasRect.height,
+								}
+							: {
+									inset: 0,
+									width: pointDims.w * scale,
+									height: pointDims.h * scale,
+								}
+					}
 				>
 					{blocks.map((block) => {
 						if (!isRenderableBbox(block.bbox)) return null

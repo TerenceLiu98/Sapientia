@@ -1,7 +1,12 @@
 import "@blocknote/mantine/style.css"
-import type { Block } from "@blocknote/core"
+import { type Block, filterSuggestionItems } from "@blocknote/core"
 import { BlockNoteView } from "@blocknote/mantine"
-import { useCreateBlockNote } from "@blocknote/react"
+import {
+	type DefaultReactSuggestionItem,
+	getDefaultReactSlashMenuItems,
+	SuggestionMenuController,
+	useCreateBlockNote,
+} from "@blocknote/react"
 import type { ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import { useNote, useUpdateNote } from "@/api/hooks/notes"
@@ -16,6 +21,82 @@ const AUTOSAVE_DEBOUNCE_MS = 1500
 // the schema's BlockNoteEditor instead of trying to chase
 // useCreateBlockNote's generics.
 export type NoteEditorRef = typeof noteSchema.BlockNoteEditor
+
+// Markdown-shortcut: the user types "$$" in a paragraph block, and we
+// replace that paragraph with an empty math block (which auto-enters edit
+// mode because its latex is empty). Triggered from the editor's onChange so
+// it fires the moment the second `$` lands, not on Enter.
+//
+// We type the editor loosely (`unknown`) here because BlockNote's generics
+// don't flow through `useCreateBlockNote` cleanly with our custom schema.
+// The runtime contract — `replaceBlocks([Block], [PartialBlock])` — is
+// stable across BlockNote versions; the wrapper just narrows what we touch.
+function tryUpgradeMathShortcut(editor: unknown) {
+	const ed = editor as {
+		getTextCursorPosition: () => {
+			block: { type?: string; content?: unknown }
+		}
+		replaceBlocks: (existing: unknown[], next: unknown[]) => void
+	}
+	const block = ed.getTextCursorPosition().block
+	if (!block || block.type !== "paragraph") return
+	const content = Array.isArray(block.content)
+		? (block.content as Array<{ type?: string; text?: string }>)
+		: []
+	if (content.length !== 1) return
+	const item = content[0]
+	if (!item || item.type !== "text" || item.text !== "$$") return
+	ed.replaceBlocks([block], [{ type: "mathBlock", props: { latex: "" } }])
+}
+
+// Default slash items + our math additions. The `aliases` are what the user
+// can type after `/` to filter; e.g. /math, /equation, /latex all match.
+//
+// We defer the actual insert via queueMicrotask: BlockNote's
+// SuggestionMenuController is mid-transaction (deleting the "/query" trigger
+// text) when onItemClick fires synchronously. Mutating the editor at that
+// moment can race with the cleanup transaction and throw "Block doesn't have
+// id". One microtask later, the slash text is gone and the cursor position
+// is stable, so the insert lands cleanly.
+function getMathSlashItems(editor: NoteEditorRef): DefaultReactSuggestionItem[] {
+	const defaults = getDefaultReactSlashMenuItems(editor as never)
+	const ed = editor as {
+		getTextCursorPosition: () => { block: unknown }
+		insertBlocks: (
+			blocks: unknown[],
+			reference: unknown,
+			placement: "before" | "after" | "nested",
+		) => void
+		insertInlineContent: (content: unknown[]) => void
+	}
+
+	const insertMathBlock: DefaultReactSuggestionItem = {
+		title: "Math block",
+		subtext: "Display LaTeX equation",
+		aliases: ["math", "equation", "latex", "$$"],
+		group: "Other",
+		icon: <span className="font-serif text-sm">∑</span>,
+		onItemClick: () => {
+			queueMicrotask(() => {
+				const cursor = ed.getTextCursorPosition()
+				ed.insertBlocks([{ type: "mathBlock", props: { latex: "" } }], cursor.block, "after")
+			})
+		},
+	}
+	const insertInlineMath: DefaultReactSuggestionItem = {
+		title: "Inline math",
+		subtext: "Inline LaTeX expression",
+		aliases: ["imath", "inline-math", "$"],
+		group: "Other",
+		icon: <span className="font-serif text-sm">∫</span>,
+		onItemClick: () => {
+			queueMicrotask(() => {
+				ed.insertInlineContent([{ type: "math", props: { latex: "" } }, " "])
+			})
+		},
+	}
+	return [...defaults, insertMathBlock, insertInlineMath]
+}
 
 interface Props {
 	noteId: string
@@ -119,6 +200,11 @@ function NoteEditorInner({
 	useEffect(() => {
 		if (!editor) return
 		const handle = (e: { document: unknown }) => {
+			// Markdown shortcut: paragraph that is *just* "$$" gets replaced
+			// with an empty math block. We do this on every change so it
+			// triggers as soon as the user finishes typing the second `$`.
+			tryUpgradeMathShortcut(editor)
+
 			setSaveStatus("saving")
 			if (debounceRef.current) clearTimeout(debounceRef.current)
 			debounceRef.current = setTimeout(async () => {
@@ -177,7 +263,14 @@ function NoteEditorInner({
 				</div>
 			</div>
 			<div className="note-editor__body flex-1 overflow-y-auto">
-				<BlockNoteView className="note-editor__blocknote" editor={editor} />
+				<BlockNoteView className="note-editor__blocknote" editor={editor} slashMenu={false}>
+					<SuggestionMenuController
+						getItems={async (query) =>
+							filterSuggestionItems(getMathSlashItems(editor as never), query)
+						}
+						triggerCharacter="/"
+					/>
+				</BlockNoteView>
 			</div>
 		</div>
 	)

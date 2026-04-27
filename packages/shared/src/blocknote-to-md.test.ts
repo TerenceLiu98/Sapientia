@@ -83,6 +83,35 @@ describe("blocknoteJsonToMarkdown", () => {
 		expect(blocknoteJsonToMarkdown([])).toBe("")
 	})
 
+	it("serializes inline math as $latex$", () => {
+		const md = blocknoteJsonToMarkdown([
+			{
+				type: "paragraph",
+				content: [
+					{ type: "text", text: "Energy is " },
+					{ type: "math", props: { latex: "E = mc^2" } },
+				],
+			},
+		])
+		expect(md).toBe("Energy is $E = mc^2$")
+	})
+
+	it("serializes block math as $$ ... $$", () => {
+		const md = blocknoteJsonToMarkdown([
+			{ type: "mathBlock", props: { latex: "\\sum_{i=1}^n x_i" } },
+		])
+		expect(md).toBe("$$\n\\sum_{i=1}^n x_i\n$$")
+	})
+
+	it("drops empty math blocks (no orphan delimiters)", () => {
+		const md = blocknoteJsonToMarkdown([
+			{ type: "paragraph", content: [{ type: "text", text: "before" }] },
+			{ type: "mathBlock", props: { latex: "" } },
+			{ type: "paragraph", content: [{ type: "text", text: "after" }] },
+		])
+		expect(md).toBe("before\n\nafter")
+	})
+
 	it("emits the canonical citation token for blockCitation inline nodes", () => {
 		const md = blocknoteJsonToMarkdown([
 			{

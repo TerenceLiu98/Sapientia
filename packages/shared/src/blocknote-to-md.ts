@@ -62,6 +62,14 @@ function blockToMd(block: unknown, indent: number): string {
 		case "table":
 			// Tables don't round-trip well lossy; emit raw text.
 			return prefix + text
+		case "mathBlock": {
+			// Display math: serialize as $$ ... $$ on its own block. Empty
+			// latex collapses to a single placeholder so re-parsing later
+			// doesn't leave a stray block in the markdown.
+			const latex = typeof node.props?.latex === "string" ? (node.props.latex as string) : ""
+			if (latex.length === 0) return ""
+			return `$$\n${latex}\n$$`
+		}
 		default:
 			// Unknown / custom block — fall back to plain text content.
 			return prefix + text + child
@@ -88,6 +96,13 @@ function inlinesToMd(content: unknown): string {
 			if (node.type === "link") {
 				const inner = inlinesToMd(node.content ?? [])
 				return `[${inner}](${node.href ?? ""})`
+			}
+			// Inline math: emit as $latex$ so the LLM and search index see
+			// the actual expression. Round-trips with markdown shortcut on
+			// re-parse if/when we add one.
+			if (node.type === "math") {
+				const latex = typeof node.props?.latex === "string" ? (node.props.latex as string) : ""
+				return latex.length > 0 ? `$${latex}$` : ""
 			}
 			// Block citations get the canonical token form so the markdown
 			// surface stays grep-able and round-trippable.
