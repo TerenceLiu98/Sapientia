@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 
 type NavItem = {
 	label: string
@@ -14,14 +15,22 @@ const navItems: NavItem[] = [
 ]
 
 export function LeftNav() {
+	const { data: workspace } = useCurrentWorkspace()
+
 	return (
 		<div className="flex h-full flex-col p-4">
 			<div className="text-xs font-medium uppercase tracking-[0.16em] text-text-secondary">
 				Workspace
 			</div>
 			<div className="mt-3 rounded-lg border border-border-subtle bg-surface-selected px-3 py-3">
-				<div className="font-medium text-text-accent">My Research</div>
-				<p className="mt-1 text-sm text-text-secondary">Personal workspace, created on sign-up.</p>
+				<div className="font-medium text-text-accent">
+					{workspace?.name ?? "Loading workspace…"}
+				</div>
+				<p className="mt-1 text-sm text-text-secondary">
+					{workspace
+						? `${workspace.type} workspace · ${workspace.role}`
+						: "Fetching your current workspace."}
+				</p>
 			</div>
 
 			<nav className="mt-8 space-y-1">

@@ -22,6 +22,9 @@ export interface Block {
 	headingLevel: number | null
 	caption: string | null
 	imageObjectKey: string | null
+	// Short-lived presigned URL for figure/table crops. Server inlines it on
+	// the blocks list response so the panel can render thumbnails directly.
+	imageUrl: string | null
 	metadata: Record<string, unknown> | null
 }
 

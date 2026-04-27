@@ -41,10 +41,52 @@ describe("parseContentList", () => {
 		])
 	})
 
-	it("converts MinerU [x1,y1,x2,y2] bbox into {x, y, w, h}", () => {
+	it("normalizes bbox by 1000x1000 (MinerU's abstract canvas)", () => {
+		// MinerU treats every page as a 1000x1000 square regardless of the
+		// PDF's actual aspect — both x and y values are in 0-1000.
 		const blocks = parseContentList(fixture)
-		expect(blocks[0].bbox).toEqual({ x: 40, y: 50, w: 160, h: 30 })
+		expect(blocks[0].bbox).toEqual({
+			x: 40 / 1000,
+			y: 50 / 1000,
+			w: 160 / 1000,
+			h: 30 / 1000,
+		})
 		expect(blocks[5].bbox).toBeNull() // header had no bbox
+	})
+
+	it("ignores pdfPageDims because canvas is always 1000x1000", () => {
+		// pageSizesPx is accepted for API compat but has no effect on math.
+		const blocks = parseContentList(fixture, {
+			pageSizesPx: new Map([[0, { w: 612, h: 792 }]]),
+		})
+		expect(blocks[0].bbox).toEqual({
+			x: 40 / 1000,
+			y: 50 / 1000,
+			w: 160 / 1000,
+			h: 30 / 1000,
+		})
+	})
+
+	it("recovers correct ratios for centered MinerU bboxes", () => {
+		// "Department of Statistics..." centered → ratio center should be ~0.5.
+		const wider = JSON.stringify([
+			{ type: "text", text: "Department", page_idx: 0, bbox: [292, 234, 702, 265] },
+		])
+		const blocks = parseContentList(wider, {
+			pageSizesPx: new Map([[0, { w: 612, h: 792 }]]),
+		})
+		const bb = blocks[0].bbox
+		expect(bb).not.toBeNull()
+		if (!bb) return
+		const center = bb.x + bb.w / 2
+		expect(center).toBeCloseTo(0.5, 2) // centered on the page within ±1%
+	})
+
+	it("stamps imageObjectKey on figure blocks when imageKeys map is provided", () => {
+		const blocks = parseContentList(fixture, {
+			imageKeys: new Map([["images/abc.jpg", "papers/u1/p1/images/abc.jpg"]]),
+		})
+		expect(blocks[2].imageObjectKey).toBe("papers/u1/p1/images/abc.jpg")
 	})
 
 	it("converts page_idx (0-based) into page (1-based)", () => {

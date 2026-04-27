@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Block } from "@/api/hooks/blocks"
 
 const refetchMock = vi.fn()
 const usePaperPdfUrlMock = vi.fn()
@@ -23,11 +24,22 @@ vi.mock("react-pdf", () => ({
 		queueMicrotask(() => onLoadSuccess?.({ numPages: 3 }))
 		return <div data-testid="pdf-document">{children}</div>
 	},
-	Page: ({ pageNumber, scale }: { pageNumber: number; scale: number }) => (
-		<div data-testid={`pdf-page-${pageNumber}`} data-scale={scale}>
-			page {pageNumber}
-		</div>
-	),
+	Page: ({
+		pageNumber,
+		scale,
+		onLoadSuccess,
+	}: {
+		pageNumber: number
+		scale: number
+		onLoadSuccess?: (page: { view: number[] }) => void
+	}) => {
+		queueMicrotask(() => onLoadSuccess?.({ view: [0, 0, 600, 800] }))
+		return (
+			<div data-testid={`pdf-page-${pageNumber}`} data-scale={scale}>
+				page {pageNumber}
+			</div>
+		)
+	},
 }))
 
 function makeWrapper() {
@@ -42,10 +54,17 @@ function makeWrapper() {
 beforeEach(async () => {
 	refetchMock.mockReset()
 	usePaperPdfUrlMock.mockReset()
+	Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+		configurable: true,
+		get() {
+			return 872
+		},
+	})
 })
 
 afterEach(() => {
 	vi.clearAllMocks()
+	delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
 })
 
 async function importPdfViewer() {
@@ -118,13 +137,67 @@ describe("PdfViewer", () => {
 		expect(screen.getByRole("button", { name: /zoom out/i })).toBeInTheDocument()
 		expect(screen.getByRole("button", { name: /fit width/i })).toBeInTheDocument()
 
-		// 100% → 110% on click of "+"
-		expect(screen.getByText("100%")).toBeInTheDocument()
-		await user.click(screen.getByRole("button", { name: /zoom in/i }))
-		expect(screen.getByText("110%")).toBeInTheDocument()
+		// Default mode is fit-width; with the mocked container and page size
+		// that computes to 140%.
+		expect(await screen.findByText("140%")).toBeInTheDocument()
 
-		// "Fit" jumps to 140%
+		// 140% → 150% on click of "+"
+		await user.click(screen.getByRole("button", { name: /zoom in/i }))
+		expect(screen.getByText("150%")).toBeInTheDocument()
+
+		// "Fit" returns to the computed fit-width scale.
 		await user.click(screen.getByRole("button", { name: /fit width/i }))
 		expect(screen.getByText("140%")).toBeInTheDocument()
+	})
+
+	it("skips malformed bbox overlays instead of rendering page-covering hit targets", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "good",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Good block",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+			{
+				paperId: "paper-1",
+				blockId: "bad",
+				blockIndex: 1,
+				page: 1,
+				type: "text",
+				text: "Bad block",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 1.23, y: 0.2, w: 1.15, h: 0.2 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer blocks={blocks} paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		expect(await screen.findByTestId("pdf-document")).toBeInTheDocument()
+		expect(await screen.findByTitle("Good block")).toBeInTheDocument()
+		expect(screen.queryByTitle("Bad block")).not.toBeInTheDocument()
 	})
 })

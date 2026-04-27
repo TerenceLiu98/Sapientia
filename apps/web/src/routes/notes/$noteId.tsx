@@ -15,7 +15,7 @@ function NoteEditorPage() {
 	return (
 		<ProtectedRoute>
 			<AppShell title={note?.title ?? "Note"}>
-				<div className="mx-auto h-full max-w-[800px] px-4 sm:px-6 lg:px-10">
+				<div className="mx-auto h-full max-w-[var(--content-default)] px-4 sm:px-6 lg:px-10">
 					<NoteEditor noteId={noteId} />
 				</div>
 			</AppShell>

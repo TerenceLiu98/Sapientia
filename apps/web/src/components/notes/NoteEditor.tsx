@@ -2,6 +2,7 @@ import "@blocknote/mantine/style.css"
 import type { Block } from "@blocknote/core"
 import { BlockNoteView } from "@blocknote/mantine"
 import { useCreateBlockNote } from "@blocknote/react"
+import type { ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import { useNote, useUpdateNote } from "@/api/hooks/notes"
 import { noteSchema } from "./citation-schema"
@@ -19,9 +20,10 @@ export type NoteEditorRef = typeof noteSchema.BlockNoteEditor
 interface Props {
 	noteId: string
 	onEditorReady?: (editor: NoteEditorRef) => void
+	headerActions?: ReactNode
 }
 
-export function NoteEditor({ noteId, onEditorReady }: Props) {
+export function NoteEditor({ noteId, onEditorReady, headerActions }: Props) {
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
@@ -70,6 +72,7 @@ export function NoteEditor({ noteId, onEditorReady }: Props) {
 			updateNote={updateNote}
 			debounceRef={debounceRef}
 			onEditorReady={onEditorReady}
+			headerActions={headerActions}
 		/>
 	)
 }
@@ -84,6 +87,7 @@ function NoteEditorInner({
 	updateNote,
 	debounceRef,
 	onEditorReady,
+	headerActions,
 }: {
 	note: { id: string; title: string }
 	initialContent: Block[]
@@ -94,6 +98,7 @@ function NoteEditorInner({
 	updateNote: ReturnType<typeof useUpdateNote>
 	debounceRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
 	onEditorReady?: (editor: NoteEditorRef) => void
+	headerActions?: ReactNode
 }) {
 	// BlockNote's schema generics don't flow cleanly into useCreateBlockNote,
 	// so we keep the runtime call right and silence TS at the boundary.
@@ -146,8 +151,8 @@ function NoteEditorInner({
 	}
 
 	return (
-		<div className="flex h-full flex-col">
-			<div className="flex items-center justify-between border-b border-border-subtle px-4 py-2 text-sm">
+		<div className="note-editor flex h-full flex-col bg-[var(--color-reading-bg)]">
+			<div className="flex items-center justify-between border-b border-border-subtle/80 px-5 py-2.5 text-sm">
 				<input
 					className="mr-2 flex-1 bg-transparent font-serif text-lg text-text-primary outline-none"
 					onBlur={commitTitle}
@@ -162,14 +167,17 @@ function NoteEditorInner({
 					type="text"
 					value={titleDraft}
 				/>
-				<div className="text-xs text-text-tertiary">
-					{saveStatus === "saving" && "Saving…"}
-					{saveStatus === "saved" && "Saved"}
-					{saveStatus === "failed" && <span className="text-text-error">Save failed</span>}
+				<div className="ml-4 flex items-center gap-3">
+					{headerActions}
+					<div className="text-xs text-text-tertiary">
+						{saveStatus === "saving" && "Saving…"}
+						{saveStatus === "saved" && "Saved"}
+						{saveStatus === "failed" && <span className="text-text-error">Save failed</span>}
+					</div>
 				</div>
 			</div>
-			<div className="flex-1 overflow-y-auto">
-				<BlockNoteView editor={editor} />
+			<div className="note-editor__body flex-1 overflow-y-auto">
+				<BlockNoteView className="note-editor__blocknote" editor={editor} />
 			</div>
 		</div>
 	)

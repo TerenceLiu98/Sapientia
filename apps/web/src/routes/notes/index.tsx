@@ -12,7 +12,9 @@ function NotesIndexPage() {
 	return (
 		<ProtectedRoute>
 			<AppShell title="Notes">
-				<NotesList />
+				<div className="h-full overflow-y-auto">
+					<NotesList />
+				</div>
 			</AppShell>
 		</ProtectedRoute>
 	)
@@ -37,7 +39,7 @@ function NotesList() {
 	}
 
 	return (
-		<div className="mx-auto max-w-[800px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">
+		<div className="mx-auto max-w-[var(--content-default)] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">
 			<div className="mb-6 flex items-center justify-between">
 				<h1 className="font-serif text-3xl text-text-primary">Notes</h1>
 				<button

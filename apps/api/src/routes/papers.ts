@@ -150,9 +150,22 @@ paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
 		.where(eq(blocks.paperId, id))
 		.orderBy(asc(blocks.blockIndex))
 
+	// Inline a presigned image URL on figure/table rows so the frontend can
+	// render thumbnails directly. Presigning is local HMAC, so doing this
+	// per-row is cheap. TTL matches the Cache-Control on this response so the
+	// browser doesn't try to render an already-expired URL.
+	const imageTtl = 60 * 5
+	const enriched = await Promise.all(
+		rows.map(async (row) => {
+			if (!row.imageObjectKey) return { ...row, imageUrl: null }
+			const imageUrl = await generatePresignedGetUrl(row.imageObjectKey, imageTtl)
+			return { ...row, imageUrl }
+		}),
+	)
+
 	c.header("etag", etag)
 	c.header("cache-control", "private, max-age=60")
-	return c.json(rows)
+	return c.json(enriched)
 })
 
 // Aggregate citation counts across all notes the caller can see, grouped

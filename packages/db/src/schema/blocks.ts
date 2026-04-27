@@ -28,7 +28,9 @@ export const blocks = pgTable(
 		}).notNull(),
 		// 1-indexed for the UI; MinerU's page_idx is 0-indexed and we translate.
 		page: integer("page").notNull(),
-		// {x, y, w, h} in PDF coordinates. Null when MinerU doesn't report it.
+		// {x, y, w, h} as ratios in [0, 1] of the page's rasterized pixel
+		// dimensions. If page size is unavailable, bbox is stored as null rather
+		// than raw pixels so the frontend never mis-renders overlays.
 		bbox: jsonb("bbox").$type<{ x: number; y: number; w: number; h: number } | null>(),
 		text: text("text").notNull().default(""),
 		headingLevel: integer("heading_level"),

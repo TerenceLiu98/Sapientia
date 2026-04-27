@@ -11,10 +11,13 @@ import yazl from "yazl"
 
 const migrationsFolder = fileURLToPath(new URL("../../../packages/db/migrations", import.meta.url))
 
-function buildMineruZip(contentListJson: string): Promise<Buffer> {
+function buildMineruZip(args: { contentListJson: string; layoutJson?: string }): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
 		const zipfile = new yazl.ZipFile()
-		zipfile.addBuffer(Buffer.from(contentListJson), "abc_content_list.json")
+		zipfile.addBuffer(Buffer.from(args.contentListJson), "abc_content_list.json")
+		if (args.layoutJson) {
+			zipfile.addBuffer(Buffer.from(args.layoutJson), "layout.json")
+		}
 		zipfile.addBuffer(Buffer.from("# pretend markdown"), "abc.md")
 		zipfile.end()
 
@@ -96,7 +99,14 @@ describe("paper-parse worker (real MinerU integration)", () => {
 		const { CreateBucketCommand } = await import("@aws-sdk/client-s3")
 		await s3Test.send(new CreateBucketCommand({ Bucket: bucket }))
 
-		zipBytes = await buildMineruZip(JSON.stringify([{ type: "text", text: "Hello.", page_idx: 0 }]))
+		zipBytes = await buildMineruZip({
+			contentListJson: JSON.stringify([
+				{ type: "text", text: "Hello.", page_idx: 0, bbox: [100, 200, 300, 260] },
+			]),
+			layoutJson: JSON.stringify({
+				pdf_info: [{ page_idx: 0, page_size: [1000, 2000] }],
+			}),
+		})
 		mineruZipUrl = "https://cdn-mineru.mock/result.zip"
 	})
 
@@ -256,6 +266,7 @@ describe("paper-parse worker (real MinerU integration)", () => {
 		expect(rows[0].text).toBe("Hello.")
 		expect(rows[0].page).toBe(1)
 		expect(rows[0].type).toBe("text")
+		expect(rows[0].bbox).toEqual({ x: 0.1, y: 0.1, w: 0.2, h: 0.03 })
 
 		await worker.close()
 		fetchMock.mockRestore()

@@ -2,7 +2,6 @@ import { PutObjectCommand } from "@aws-sdk/client-s3"
 import { blocks as blocksTable, papers } from "@sapientia/db"
 import { type Job, Worker } from "bullmq"
 import { eq } from "drizzle-orm"
-import yauzl from "yauzl"
 import { config } from "../config"
 import { db } from "../db"
 import { logger } from "../logger"
@@ -21,6 +20,8 @@ import {
 	submitFileBatch,
 	uploadFileToMineru,
 } from "../services/mineru-client"
+import { extractMineruZip, parsePageSizes } from "../services/mineru-zip"
+import { readPdfPageSizes } from "../services/pdf-dims"
 import { downloadFromS3, s3Client } from "../services/s3-client"
 
 const POLL_INTERVAL_MS = process.env.MINERU_POLL_INTERVAL_MS
@@ -101,7 +102,7 @@ async function processPaperParse(
 	}
 	const zipBuffer = Buffer.from(await zipRes.arrayBuffer())
 
-	const blocksJson = await extractContentList(zipBuffer)
+	const { contentList: blocksJson, middle, layout, images } = await extractMineruZip(zipBuffer)
 
 	const blocksKey = `papers/${userId}/${paperId}/blocks.json`
 	await s3Client.send(
@@ -126,10 +127,52 @@ async function processPaperParse(
 		}),
 	)
 
+	// Upload each MinerU image crop to its own S3 key. Returns img_path →
+	// object_key so the parser can stamp `imageObjectKey` on figure/table
+	// blocks. Skipped silently when there are no images.
+	const imageKeys = new Map<string, string>()
+	const imagePrefix = `papers/${userId}/${paperId}/`
+	for (const [imgPath, bytes] of images) {
+		const objectKey = `${imagePrefix}${imgPath}`
+		const contentType = imgPath.endsWith(".png")
+			? "image/png"
+			: imgPath.endsWith(".jpeg") || imgPath.endsWith(".jpg")
+				? "image/jpeg"
+				: "application/octet-stream"
+		await s3Client.send(
+			new PutObjectCommand({
+				Bucket: config.S3_BUCKET,
+				Key: objectKey,
+				Body: bytes,
+				ContentType: contentType,
+				ContentLength: bytes.byteLength,
+			}),
+		)
+		imageKeys.set(imgPath, objectKey)
+	}
+
+	// Page dims for bbox normalization. Source priority:
+	//   1. PDF MediaBox (read from the original PDF) — ground truth, always
+	//      in the same coordinate system as content_list.json bbox.
+	//   2. middle.json / layout.json `page_size` — fallback only, since
+	//      MinerU has been observed to report dims here in different units
+	//      than content_list bbox (e.g. US-Letter [612, 792] for a page
+	//      whose bbox values clearly span ~1000pt wide).
+	let pageSizes = await readPdfPageSizes(pdfBytes).catch((err) => {
+		log.warn({ err: err instanceof Error ? err.message : String(err) }, "pdf_dims_read_failed")
+		return new Map<number, { w: number; h: number }>()
+	})
+	if (pageSizes.size === 0) {
+		pageSizes = parsePageSizes({ middle, layout })
+	}
+
 	// Parse the block list and bulk-replace this paper's rows. Idempotent —
 	// re-running on the same paper produces the same blocks (block_id is a
 	// content hash + index).
-	const parsedBlocks = parseContentList(blocksJson)
+	const parsedBlocks = parseContentList(blocksJson, {
+		pageSizesPx: pageSizes,
+		imageKeys,
+	})
 	await db.delete(blocksTable).where(eq(blocksTable.paperId, paperId))
 	if (parsedBlocks.length > 0) {
 		await db.insert(blocksTable).values(parsedBlocks.map((b) => ({ ...b, paperId })))
@@ -195,38 +238,6 @@ async function pollBatchUntilDone(args: {
 	throw new Error(`MinerU batch ${batchId} did not complete within ${POLL_TIMEOUT_MS}ms`)
 }
 
-// Pull `*_content_list.json` out of a MinerU result zip in memory.
-async function extractContentList(zipBuffer: Buffer): Promise<Buffer> {
-	return new Promise((resolve, reject) => {
-		yauzl.fromBuffer(zipBuffer, { lazyEntries: true }, (err, zipfile) => {
-			if (err) return reject(err)
-			if (!zipfile) return reject(new Error("zip file is empty"))
-
-			let foundEntry = false
-			zipfile.readEntry()
-			zipfile.on("entry", (entry) => {
-				if (entry.fileName.endsWith("_content_list.json")) {
-					foundEntry = true
-					zipfile.openReadStream(entry, (streamErr, stream) => {
-						if (streamErr) return reject(streamErr)
-						if (!stream) return reject(new Error("read stream is null"))
-						const chunks: Buffer[] = []
-						stream.on("data", (c: Buffer) => chunks.push(c))
-						stream.on("end", () => resolve(Buffer.concat(chunks)))
-						stream.on("error", reject)
-					})
-				} else {
-					zipfile.readEntry()
-				}
-			})
-			zipfile.on("end", () => {
-				if (!foundEntry) reject(new Error("content_list.json not found in MinerU zip"))
-			})
-			zipfile.on("error", reject)
-		})
-	})
-}
-
 // Treat these as "do not retry" — they will not get better with another shot.
 function isPermanent(err: Error): boolean {
 	if (err instanceof MissingCredentialError) return true
@@ -255,10 +266,21 @@ function isPermanent(err: Error): boolean {
 }
 
 export function createPaperParseWorker() {
+	// MinerU polls take up to POLL_TIMEOUT_MS (10 min by default), plus zip
+	// download + image uploads can add another minute or two on a large paper.
+	// BullMQ's default 30s lock would expire mid-job, fire a "could not renew
+	// lock" error, mark the job stalled, and retry it from scratch — so we
+	// extend the lock to comfortably cover the full pipeline.
+	const lockDurationMs = POLL_TIMEOUT_MS + 5 * 60 * 1000
 	const worker = new Worker<PaperParseJobData, PaperParseJobResult>(
 		PAPER_PARSE_QUEUE,
 		processPaperParse,
-		{ connection: queueConnection, concurrency: 2 },
+		{
+			connection: queueConnection,
+			concurrency: 2,
+			lockDuration: lockDurationMs,
+			stalledInterval: lockDurationMs,
+		},
 	)
 
 	worker.on("failed", async (job, err) => {

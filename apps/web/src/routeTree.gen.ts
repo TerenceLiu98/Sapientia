@@ -17,6 +17,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as NotesIndexRouteImport } from './routes/notes/index'
 import { Route as PapersPaperIdRouteImport } from './routes/papers/$paperId'
 import { Route as NotesNoteIdRouteImport } from './routes/notes/$noteId'
+import { Route as PapersPaperIdIndexRouteImport } from './routes/papers/$paperId.index'
 import { Route as PapersPaperIdNotesNoteIdRouteImport } from './routes/papers/$paperId.notes.$noteId'
 
 const SignUpRoute = SignUpRouteImport.update({
@@ -59,6 +60,11 @@ const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
   path: '/notes/$noteId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PapersPaperIdIndexRoute = PapersPaperIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PapersPaperIdRoute,
+} as any)
 const PapersPaperIdNotesNoteIdRoute =
   PapersPaperIdNotesNoteIdRouteImport.update({
     id: '/notes/$noteId',
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
   '/notes/': typeof NotesIndexRoute
+  '/papers/$paperId/': typeof PapersPaperIdIndexRoute
   '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRoutesByTo {
@@ -84,8 +91,8 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
-  '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
   '/notes': typeof NotesIndexRoute
+  '/papers/$paperId': typeof PapersPaperIdIndexRoute
   '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRoutesById {
@@ -98,6 +105,7 @@ export interface FileRoutesById {
   '/notes/$noteId': typeof NotesNoteIdRoute
   '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
   '/notes/': typeof NotesIndexRoute
+  '/papers/$paperId/': typeof PapersPaperIdIndexRoute
   '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRouteTypes {
@@ -111,6 +119,7 @@ export interface FileRouteTypes {
     | '/notes/$noteId'
     | '/papers/$paperId'
     | '/notes/'
+    | '/papers/$paperId/'
     | '/papers/$paperId/notes/$noteId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -120,8 +129,8 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/notes/$noteId'
-    | '/papers/$paperId'
     | '/notes'
+    | '/papers/$paperId'
     | '/papers/$paperId/notes/$noteId'
   id:
     | '__root__'
@@ -133,6 +142,7 @@ export interface FileRouteTypes {
     | '/notes/$noteId'
     | '/papers/$paperId'
     | '/notes/'
+    | '/papers/$paperId/'
     | '/papers/$paperId/notes/$noteId'
   fileRoutesById: FileRoutesById
 }
@@ -205,6 +215,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotesNoteIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/papers/$paperId/': {
+      id: '/papers/$paperId/'
+      path: '/'
+      fullPath: '/papers/$paperId/'
+      preLoaderRoute: typeof PapersPaperIdIndexRouteImport
+      parentRoute: typeof PapersPaperIdRoute
+    }
     '/papers/$paperId/notes/$noteId': {
       id: '/papers/$paperId/notes/$noteId'
       path: '/notes/$noteId'
@@ -216,10 +233,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface PapersPaperIdRouteChildren {
+  PapersPaperIdIndexRoute: typeof PapersPaperIdIndexRoute
   PapersPaperIdNotesNoteIdRoute: typeof PapersPaperIdNotesNoteIdRoute
 }
 
 const PapersPaperIdRouteChildren: PapersPaperIdRouteChildren = {
+  PapersPaperIdIndexRoute: PapersPaperIdIndexRoute,
   PapersPaperIdNotesNoteIdRoute: PapersPaperIdNotesNoteIdRoute,
 }
 

@@ -25,7 +25,7 @@ export function AuthPageFrame(props: {
 					</div>
 				</section>
 
-				<section className="mx-auto w-full max-w-[640px]">
+				<section className="mx-auto w-full max-w-[var(--content-narrow)]">
 					<div className="rounded-xl border border-border-subtle bg-bg-overlay p-6 shadow-[var(--shadow-popover)] sm:p-8">
 						<div className="text-xs font-medium uppercase tracking-[0.18em] text-text-secondary">
 							{props.eyebrow}

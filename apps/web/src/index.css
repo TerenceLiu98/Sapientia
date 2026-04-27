@@ -30,6 +30,7 @@
 	--color-bg-primary: var(--color-neutral-50);
 	--color-bg-secondary: var(--color-neutral-100);
 	--color-bg-tertiary: var(--color-neutral-200);
+	--color-reading-bg: oklch(0.99 0.005 80);
 	--color-bg-overlay: oklch(1 0 0 / 0.95);
 	--color-surface-default: var(--color-neutral-50);
 	--color-surface-hover: var(--color-neutral-100);
@@ -48,6 +49,12 @@
 	--color-border-default: var(--color-neutral-300);
 	--color-border-strong: var(--color-neutral-400);
 	--color-border-accent: var(--color-accent-500);
+	--color-status-success-bg: oklch(0.92 0.035 145);
+	--color-status-success-text: oklch(0.42 0.085 145);
+	--color-status-warning-bg: oklch(0.94 0.04 80);
+	--color-status-warning-text: oklch(0.55 0.11 70);
+	--color-status-error-bg: oklch(0.93 0.035 25);
+	--color-status-error-text: oklch(0.45 0.13 25);
 
 	--font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
 	--font-sans: "Inter", system-ui, -apple-system, sans-serif;
@@ -57,9 +64,20 @@
 	--shadow-focus: 0 0 0 3px oklch(from var(--color-border-accent) l c h / 0.3);
 	--shadow-popover: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.05);
 
-	--container-narrow: 640px;
-	--container-content: 800px;
-	--container-wide: 1200px;
+	--content-narrow: 640px;
+	--content-default: 800px;
+	--content-wide: 1200px;
+	--content-max: 1440px;
+	--container-narrow: var(--content-narrow);
+	--container-content: var(--content-default);
+	--container-wide: var(--content-wide);
+
+	--shell-nav-width-expanded: 240px;
+	--shell-rightpanel-width: 380px;
+	--shell-header-height: 56px;
+	--shell-toolbar-height: 40px;
+
+	--table-row-height: 44px;
 }
 
 html,
@@ -104,4 +122,61 @@ kbd {
 :focus-visible {
 	outline: none;
 	box-shadow: var(--shadow-focus);
+}
+
+.note-editor {
+	--bn-colors-editor-text: var(--color-text-primary);
+	--bn-colors-editor-background: transparent;
+	--bn-colors-menu-text: var(--color-text-primary);
+	--bn-colors-menu-background: var(--color-bg-primary);
+	--bn-colors-tooltip-text: var(--color-text-primary);
+	--bn-colors-tooltip-background: var(--color-bg-primary);
+	--bn-colors-hovered-text: var(--color-text-primary);
+	--bn-colors-hovered-background: var(--color-neutral-100);
+	--bn-colors-selected-text: var(--color-text-inverse);
+	--bn-colors-selected-background: var(--color-accent-600);
+	--bn-colors-disabled-text: var(--color-text-disabled);
+	--bn-colors-disabled-background: var(--color-neutral-100);
+	--bn-colors-shadow: oklch(0 0 0 / 0.08);
+	--bn-colors-border: var(--color-border-subtle);
+	--bn-colors-side-menu: var(--color-neutral-300);
+	--bn-font-family: var(--font-serif);
+}
+
+.note-editor__body {
+	background: var(--color-reading-bg);
+}
+
+.note-editor__blocknote.bn-mantine,
+.note-editor__blocknote .bn-root,
+.note-editor__blocknote .bn-editor {
+	background: transparent;
+}
+
+.note-editor__blocknote .bn-editor {
+	border-radius: 0;
+	min-height: 100%;
+	padding: 0 0 24px;
+}
+
+.note-editor__blocknote .bn-block-content {
+	font-size: var(--text-md);
+	line-height: 1.72;
+}
+
+.note-editor__blocknote .ProseMirror {
+	min-height: 100%;
+	padding: 8px 24px 28px;
+}
+
+.note-editor__blocknote .bn-side-menu {
+	background: color-mix(in oklch, var(--color-reading-bg) 84%, white 16%);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: 10px;
+}
+
+.note-editor__blocknote .bn-mantine .bn-toolbar {
+	background: color-mix(in oklch, var(--color-bg-primary) 96%, var(--color-reading-bg) 4%);
+	border-color: var(--color-border-subtle);
+	box-shadow: var(--shadow-popover);
 }

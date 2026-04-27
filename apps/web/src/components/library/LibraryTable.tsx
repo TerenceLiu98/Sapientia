@@ -13,8 +13,8 @@ const columnHelper = createColumnHelper<Paper>()
 const STATUS_STYLES: Record<Paper["parseStatus"], string> = {
 	pending: "bg-bg-tertiary text-text-secondary",
 	parsing: "bg-accent-100 text-accent-700",
-	done: "bg-[oklch(0.92_0.035_145)] text-[oklch(0.42_0.085_145)]",
-	failed: "bg-[oklch(0.93_0.035_25)] text-[oklch(0.45_0.13_25)]",
+	done: "bg-[var(--color-status-success-bg)] text-[var(--color-status-success-text)]",
+	failed: "bg-[var(--color-status-error-bg)] text-[var(--color-status-error-text)]",
 }
 
 function StatusBadge({ paper }: { paper: Paper }) {
@@ -50,7 +50,7 @@ function DeleteAction({ paper, workspaceId }: { paper: Paper; workspaceId: strin
 		return (
 			<span className="inline-flex gap-2">
 				<button
-					className="rounded-md bg-[oklch(0.45_0.13_25)] px-2 py-1 text-xs text-text-inverse hover:opacity-90"
+					className="rounded-md bg-[var(--color-status-error-text)] px-2 py-1 text-xs text-text-inverse hover:opacity-90"
 					onClick={() => del.mutate(paper.id)}
 					type="button"
 				>
@@ -135,7 +135,7 @@ export function LibraryTable({ papers, workspaceId }: { papers: Paper[]; workspa
 
 	return (
 		<table className="w-full table-auto">
-			<thead className="border-b border-border-subtle">
+			<thead className="border-b border-border-subtle bg-bg-secondary">
 				{table.getHeaderGroups().map((hg) => (
 					<tr key={hg.id}>
 						{hg.headers.map((header) => {
@@ -155,7 +155,7 @@ export function LibraryTable({ papers, workspaceId }: { papers: Paper[]; workspa
 			<tbody>
 				{table.getRowModel().rows.map((row) => (
 					<tr
-						className="border-b border-border-subtle transition-colors hover:bg-surface-hover"
+						className="h-[var(--table-row-height)] border-b border-border-subtle transition-colors hover:bg-surface-hover"
 						key={row.id}
 					>
 						{row.getVisibleCells().map((cell) => {

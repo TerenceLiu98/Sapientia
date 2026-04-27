@@ -11,11 +11,17 @@ import { count, eq, isNotNull } from "drizzle-orm"
 import { closeDb, db } from "../src/db"
 import { logger } from "../src/logger"
 import { parseContentList } from "../src/services/block-parser"
+import { extractMineruZip, parsePageSizes } from "../src/services/mineru-zip"
 import { downloadFromS3 } from "../src/services/s3-client"
 
 async function main() {
 	const candidates = await db
-		.select({ id: papers.id, blocksKey: papers.blocksObjectKey, title: papers.title })
+		.select({
+			id: papers.id,
+			blocksKey: papers.blocksObjectKey,
+			title: papers.title,
+			ownerUserId: papers.ownerUserId,
+		})
 		.from(papers)
 		.where(isNotNull(papers.blocksObjectKey))
 
@@ -32,7 +38,19 @@ async function main() {
 
 		try {
 			const bytes = await downloadFromS3(paper.blocksKey as string)
-			const parsed = parseContentList(bytes)
+			const zipKey = `papers/${paper.ownerUserId}/${paper.id}/mineru-result.zip`
+			let pageSizesPx = new Map<number, { w: number; h: number }>()
+			try {
+				const zipBytes = await downloadFromS3(zipKey)
+				const { middle, layout } = await extractMineruZip(Buffer.from(zipBytes))
+				pageSizesPx = parsePageSizes({ middle, layout })
+			} catch (error) {
+				logger.warn(
+					{ paperId: paper.id, zipKey, err: (error as Error).message },
+					"backfill_zip_missing_or_unreadable",
+				)
+			}
+			const parsed = parseContentList(bytes, { pageSizesPx })
 			if (parsed.length === 0) {
 				logger.warn({ paperId: paper.id }, "parsed_zero_blocks")
 				continue
