@@ -172,3 +172,129 @@ describe("waitForCompletion", () => {
 		).rejects.toThrow(/did not complete/)
 	})
 })
+
+describe("submitFileBatch + uploadFileToMineru + getBatchResult", () => {
+	it("submitFileBatch returns batch_id + presigned URLs in order", async () => {
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse({
+				code: 0,
+				msg: "ok",
+				data: { batch_id: "b-1", file_urls: ["https://put.mineru.test/a"] },
+			}),
+		)
+
+		const out = await mineru.submitFileBatch({
+			token: "tok",
+			files: [{ name: "demo.pdf", dataId: "paper-9" }],
+			modelVersion: "vlm",
+		})
+		expect(out).toEqual({ batchId: "b-1", fileUrls: ["https://put.mineru.test/a"] })
+
+		const [url, init] = fetchMock.mock.calls[0]
+		expect(url).toBe("https://mineru.test/api/v4/file-urls/batch")
+		expect(init?.method).toBe("POST")
+		expect(JSON.parse(init?.body as string)).toMatchObject({
+			files: [{ name: "demo.pdf", data_id: "paper-9", is_ocr: false }],
+			model_version: "vlm",
+			enable_formula: true,
+			enable_table: true,
+		})
+	})
+
+	it("uploadFileToMineru PUTs binary with no Content-Type", async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(null, { status: 200 }))
+
+		const bytes = new Uint8Array([1, 2, 3])
+		await mineru.uploadFileToMineru("https://put.mineru.test/a", bytes)
+
+		const [, init] = fetchMock.mock.calls[0]
+		expect(init?.method).toBe("PUT")
+		// MinerU explicitly says: don't set Content-Type. We should not pass any
+		// headers, so init.headers is undefined or empty.
+		expect(init?.headers).toBeFalsy()
+	})
+
+	it("getBatchResult parses a running entry with progress", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse({
+				code: 0,
+				msg: "ok",
+				data: {
+					batch_id: "b-1",
+					extract_result: [
+						{
+							file_name: "demo.pdf",
+							state: "running",
+							err_msg: "",
+							extract_progress: { extracted_pages: 1, total_pages: 12 },
+						},
+					],
+				},
+			}),
+		)
+
+		const { results } = await mineru.getBatchResult({ token: "tok", batchId: "b-1" })
+		expect(results).toHaveLength(1)
+		expect(results[0].state).toBe("running")
+		expect(results[0].extractedPages).toBe(1)
+		expect(results[0].totalPages).toBe(12)
+	})
+
+	it("getBatchResult parses a done entry with full_zip_url", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse({
+				code: 0,
+				msg: "ok",
+				data: {
+					batch_id: "b-1",
+					extract_result: [
+						{
+							file_name: "demo.pdf",
+							data_id: "paper-9",
+							state: "done",
+							full_zip_url: "https://cdn.mineru.test/zip",
+						},
+					],
+				},
+			}),
+		)
+
+		const { results } = await mineru.getBatchResult({ token: "tok", batchId: "b-1" })
+		expect(results[0].state).toBe("done")
+		expect(results[0].zipUrl).toBe("https://cdn.mineru.test/zip")
+		expect(results[0].dataId).toBe("paper-9")
+	})
+
+	it("waitForBatchCompletion polls until every entry reaches a terminal state", async () => {
+		const responses = [
+			jsonResponse({
+				code: 0,
+				msg: "ok",
+				data: {
+					batch_id: "b-1",
+					extract_result: [{ file_name: "a.pdf", state: "running" }],
+				},
+			}),
+			jsonResponse({
+				code: 0,
+				msg: "ok",
+				data: {
+					batch_id: "b-1",
+					extract_result: [{ file_name: "a.pdf", state: "done", full_zip_url: "https://cdn/zip" }],
+				},
+			}),
+		]
+		vi.spyOn(globalThis, "fetch").mockImplementation(async () => responses.shift()!)
+
+		const out = await mineru.waitForBatchCompletion({
+			token: "tok",
+			batchId: "b-1",
+			intervalMs: 1,
+			timeoutMs: 5000,
+		})
+		expect(out).toHaveLength(1)
+		expect(out[0].state).toBe("done")
+	})
+})

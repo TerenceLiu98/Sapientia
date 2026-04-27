@@ -14,12 +14,13 @@ import {
 } from "../queues/paper-parse"
 import { getMineruToken } from "../services/credentials"
 import {
-	getTaskStatus,
+	type BatchExtractResult,
+	getBatchResult,
 	MineruApiError,
-	type MineruTaskStatus,
-	submitParseTask,
+	submitFileBatch,
+	uploadFileToMineru,
 } from "../services/mineru-client"
-import { generatePresignedGetUrl, s3Client } from "../services/s3-client"
+import { downloadFromS3, s3Client } from "../services/s3-client"
 
 const POLL_INTERVAL_MS = process.env.MINERU_POLL_INTERVAL_MS
 	? Number(process.env.MINERU_POLL_INTERVAL_MS)
@@ -60,27 +61,31 @@ async function processPaperParse(
 		})
 		.where(eq(papers.id, paperId))
 
-	// MinerU ingests by URL. Generate a presigned GET that lasts long enough
-	// for their queue plus the actual fetch (worst-case 30 min).
-	const pdfUrl = await generatePresignedGetUrl(paper.pdfObjectKey, 30 * 60)
+	// Read the PDF bytes out of our own MinIO. Going URL-based with a
+	// presigned MinIO link doesn't work for self-hosted deployments because
+	// MinerU's servers can't reach localhost / private K8s ingress; they
+	// reject those URLs at validation time with code -10002. The batch
+	// upload flow side-steps the public-reachability problem entirely:
+	// MinerU hands us a presigned PUT URL and we upload the bytes directly.
+	const pdfBytes = await downloadFromS3(paper.pdfObjectKey)
 
-	const taskId = await submitParseTask({
+	const fileName = `${paper.title.replace(/[/\\?%*:|"<>]/g, "_") || paperId}.pdf`
+	const { batchId, fileUrls } = await submitFileBatch({
 		token,
-		pdfUrl,
+		files: [{ name: fileName, dataId: paperId }],
 		modelVersion: "vlm",
-		dataId: paperId,
 	})
-	log.info({ mineruTaskId: taskId }, "mineru_task_submitted")
+	if (fileUrls.length === 0) {
+		throw new Error("MinerU returned an empty file_urls array for batch upload")
+	}
+	log.info({ mineruBatchId: batchId, fileName }, "mineru_batch_submitted")
 
-	// Inline poll loop so we can write MinerU's `extract_progress` to the DB
-	// each tick. The previous `waitForCompletion` helper hid that signal from
-	// the UI.
-	const result = await pollWithProgress({
-		token,
-		taskId,
-		paperId,
-		log,
-	})
+	await uploadFileToMineru(fileUrls[0], pdfBytes)
+	log.info({ mineruBatchId: batchId }, "mineru_file_uploaded")
+
+	// Poll the batch result endpoint, mirroring extract_progress to the DB
+	// each tick so the UI can render a live "parsing N/M pages" counter.
+	const result = await pollBatchUntilDone({ token, batchId, paperId, log })
 
 	if (result.state === "failed") {
 		throw new Error(`MinerU parse failed: ${result.errorMessage ?? "unknown error"}`)
@@ -137,42 +142,45 @@ async function processPaperParse(
 	}
 }
 
-// Polls MinerU's task status, mirrors `extract_progress` to the DB so the
-// frontend can render a live "parsing N/M pages" counter.
-async function pollWithProgress(args: {
+// Each `paper-parse` job submits a batch of exactly one file, so the result
+// array is always length 1. We extract that single entry and mirror its
+// progress to the DB so the frontend has a live signal.
+async function pollBatchUntilDone(args: {
 	token: string
-	taskId: string
+	batchId: string
 	paperId: string
 	log: typeof logger
-}): Promise<MineruTaskStatus> {
-	const { token, taskId, paperId, log } = args
+}): Promise<BatchExtractResult> {
+	const { token, batchId, paperId, log } = args
 	const start = Date.now()
 
 	while (Date.now() - start < POLL_TIMEOUT_MS) {
-		const status = await getTaskStatus({ token, taskId })
+		const { results } = await getBatchResult({ token, batchId })
+		const result = results[0]
+		if (!result) {
+			log.warn({ batchId }, "mineru_batch_returned_no_results")
+		} else {
+			await db
+				.update(papers)
+				.set({
+					parseProgressExtracted: result.extractedPages ?? null,
+					parseProgressTotal: result.totalPages ?? null,
+					updatedAt: new Date(),
+				})
+				.where(eq(papers.id, paperId))
 
-		// Persist the progress numbers (or null when MinerU hasn't reported any
-		// yet) so the UI sees movement without a separate signal channel.
-		await db
-			.update(papers)
-			.set({
-				parseProgressExtracted: status.extractedPages ?? null,
-				parseProgressTotal: status.totalPages ?? null,
-				updatedAt: new Date(),
-			})
-			.where(eq(papers.id, paperId))
+			log.debug(
+				{ state: result.state, extracted: result.extractedPages, total: result.totalPages },
+				"mineru_batch_poll",
+			)
 
-		log.debug(
-			{ state: status.state, extracted: status.extractedPages, total: status.totalPages },
-			"mineru_poll",
-		)
-
-		if (status.state === "done" || status.state === "failed") return status
+			if (result.state === "done" || result.state === "failed") return result
+		}
 
 		await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
 	}
 
-	throw new Error(`MinerU task ${taskId} did not complete within ${POLL_TIMEOUT_MS}ms`)
+	throw new Error(`MinerU batch ${batchId} did not complete within ${POLL_TIMEOUT_MS}ms`)
 }
 
 // Pull `*_content_list.json` out of a MinerU result zip in memory.

@@ -161,21 +161,39 @@ describe("paper-parse worker (real MinerU integration)", () => {
 	}
 
 	function mockMineruFetch() {
-		// Submit returns task_id; status returns done immediately; zip URL returns the bytes.
-		return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+		// New batch-upload flow:
+		//   POST /api/v4/file-urls/batch       → { batch_id, file_urls }
+		//   PUT  <file_url>                    → 200 (we ignore the body)
+		//   GET  /api/v4/extract-results/batch → { extract_result: [{ state: 'done', full_zip_url }] }
+		//   GET  <full_zip_url>                → zip bytes
+		const presignedPutUrl = "https://mineru.mock/upload/abc"
+
+		return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
 			const url = typeof input === "string" ? input : (input as Request).url
-			if (url === "https://mineru.mock/api/v4/extract/task") {
-				return new Response(JSON.stringify({ code: 0, msg: "ok", data: { task_id: "tk-1" } }), {
-					status: 200,
-					headers: { "content-type": "application/json" },
-				})
-			}
-			if (url.startsWith("https://mineru.mock/api/v4/extract/task/")) {
+			const method = (init?.method ?? (input as Request).method ?? "GET").toUpperCase()
+
+			if (method === "POST" && url === "https://mineru.mock/api/v4/file-urls/batch") {
 				return new Response(
 					JSON.stringify({
 						code: 0,
 						msg: "ok",
-						data: { task_id: "tk-1", state: "done", full_zip_url: mineruZipUrl },
+						data: { batch_id: "batch-1", file_urls: [presignedPutUrl] },
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				)
+			}
+			if (method === "PUT" && url === presignedPutUrl) {
+				return new Response(null, { status: 200 })
+			}
+			if (method === "GET" && url.startsWith("https://mineru.mock/api/v4/extract-results/batch/")) {
+				return new Response(
+					JSON.stringify({
+						code: 0,
+						msg: "ok",
+						data: {
+							batch_id: "batch-1",
+							extract_result: [{ file_name: "x.pdf", state: "done", full_zip_url: mineruZipUrl }],
+						},
 					}),
 					{ status: 200, headers: { "content-type": "application/json" } },
 				)
@@ -186,7 +204,7 @@ describe("paper-parse worker (real MinerU integration)", () => {
 					headers: { "content-type": "application/zip" },
 				})
 			}
-			throw new Error(`unexpected fetch in test: ${url}`)
+			throw new Error(`unexpected fetch in test: ${method} ${url}`)
 		})
 	}
 

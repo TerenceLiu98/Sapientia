@@ -42,3 +42,11 @@ export async function generatePresignedGetUrl(key: string, ttlSeconds = 3600): P
 		{ expiresIn: ttlSeconds },
 	)
 }
+
+export async function downloadFromS3(key: string): Promise<Uint8Array> {
+	const res = await s3Client.send(new GetObjectCommand({ Bucket: config.S3_BUCKET, Key: key }))
+	if (!res.Body) {
+		throw new Error(`object ${key} has no body`)
+	}
+	return res.Body.transformToByteArray()
+}
