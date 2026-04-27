@@ -246,6 +246,17 @@ describe("paper-parse worker (real MinerU integration)", () => {
 			}),
 		)
 
+		// And the blocks parser should have populated the blocks table.
+		const { blocks: blocksTable } = await import("@sapientia/db")
+		const rows = await dbClient.db
+			.select()
+			.from(blocksTable)
+			.where(eq(blocksTable.paperId, paperId))
+		expect(rows.length).toBe(1)
+		expect(rows[0].text).toBe("Hello.")
+		expect(rows[0].page).toBe(1)
+		expect(rows[0].type).toBe("text")
+
 		await worker.close()
 		fetchMock.mockRestore()
 	})

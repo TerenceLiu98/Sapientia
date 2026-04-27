@@ -1,5 +1,6 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
+import { BlockCitationsPopover } from "./BlockCitationsPopover"
 
 const TYPE_GLYPH: Record<Block["type"], string> = {
 	text: "¶",
@@ -30,6 +31,7 @@ export function BlocksPanel({
 	citationCounts,
 }: Props) {
 	const { data: blocks, isLoading, error } = useBlocks(paperId)
+	const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null)
 
 	const grouped = useMemo(() => {
 		if (!blocks) return [] as Array<[number, Block[]]>
@@ -78,6 +80,12 @@ export function BlocksPanel({
 								onSelect={onSelectBlock}
 								renderActions={renderActions}
 								citationCount={citationCounts?.get(block.blockId)}
+								paperId={paperId}
+								popoverOpen={openPopoverFor === block.blockId}
+								onTogglePopover={() =>
+									setOpenPopoverFor((cur) => (cur === block.blockId ? null : block.blockId))
+								}
+								onDismissPopover={() => setOpenPopoverFor(null)}
 							/>
 						))}
 					</div>
@@ -92,11 +100,19 @@ function BlockRow({
 	onSelect,
 	renderActions,
 	citationCount,
+	paperId,
+	popoverOpen,
+	onTogglePopover,
+	onDismissPopover,
 }: {
 	block: Block
 	onSelect?: (block: Block) => void
 	renderActions?: (block: Block) => React.ReactNode
 	citationCount?: number
+	paperId: string
+	popoverOpen: boolean
+	onTogglePopover: () => void
+	onDismissPopover: () => void
 }) {
 	const preview = useMemo(() => {
 		const text = block.caption ?? block.text
@@ -124,11 +140,25 @@ function BlockRow({
 				<span className={styleByType}>{preview}</span>
 			</button>
 			{citationCount && citationCount > 0 ? (
-				<span
-					className="shrink-0 rounded-md bg-bg-tertiary px-1.5 py-0.5 text-xs text-text-secondary"
-					title={`${citationCount} note${citationCount > 1 ? "s" : ""} cite this block`}
-				>
-					{citationCount}
+				<span className="relative shrink-0">
+					<button
+						className="rounded-md bg-bg-tertiary px-1.5 py-0.5 text-xs text-text-secondary hover:bg-surface-active"
+						onClick={(e) => {
+							e.stopPropagation()
+							onTogglePopover()
+						}}
+						title={`${citationCount} note${citationCount > 1 ? "s" : ""} cite this block`}
+						type="button"
+					>
+						{citationCount}
+					</button>
+					{popoverOpen ? (
+						<BlockCitationsPopover
+							blockId={block.blockId}
+							onDismiss={onDismissPopover}
+							paperId={paperId}
+						/>
+					) : null}
 				</span>
 			) : null}
 			{renderActions ? (

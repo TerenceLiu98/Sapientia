@@ -48,12 +48,15 @@ pnpm dev:web
 
 `/health` reports the status of every dependency. Returns `200 {status:"ok",db:"connected",redis:"connected",s3:"connected"}` when everything is up; `503 {status:"degraded",...}` if any service is unreachable.
 
+After signing in: configure your MinerU + LLM API keys in **/settings**. Uploaded PDFs are queued for parsing by the worker (see `pnpm worker:dev`); progress shows in the library badge as `parsing N/M`. Click into a parsed paper to see the side-by-side PDF + blocks panel; click "New note for this paper" for the three-pane reading + writing layout, with a Cite button on every block and a `(N)` badge on blocks that any of your notes already reference.
+
 ## Common scripts
 
 | Command             | What it does                                                                  |
 | ------------------- | ----------------------------------------------------------------------------- |
 | `pnpm dev:web`      | Vite dev server                                                               |
 | `pnpm dev:api`      | `bun --hot` Hono server                                                       |
+| `pnpm worker:dev`   | BullMQ worker (paper parsing). Run alongside `dev:api`                        |
 | `pnpm infra:up`     | `docker compose up -d` for Postgres + Redis + MinIO                           |
 | `pnpm infra:down`   | Stop the dev stack                                                            |
 | `pnpm infra:logs`   | Tail compose logs                                                             |
@@ -98,4 +101,4 @@ For GitHub OAuth:
 
 If you set one value from an OAuth provider pair, you must set the other too. The API config validation rejects partial provider configuration on boot.
 
-Phase 1 status and active task: [docs/STATUS.md](docs/STATUS.md).
+Current phase + status: [docs/STATUS.md](docs/STATUS.md).

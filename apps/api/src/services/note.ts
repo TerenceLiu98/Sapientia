@@ -189,8 +189,12 @@ export async function softDeleteNote(noteId: string): Promise<void> {
 }
 
 // A user can read/edit a note iff they are a member of the note's workspace.
-// We don't yet differentiate owner vs editor for note operations — v0.2 may
-// reduce delete to owner-only.
+// We deliberately don't filter out soft-deleted notes here so the route
+// layer can return a clean 404 (via getNote) instead of 403 — the access
+// decision is purely "are you allowed near this row at all", not "does it
+// still exist".
+//
+// v0.2 may reduce delete to owner-only.
 export async function userCanAccessNote(userId: string, noteId: string): Promise<boolean> {
 	const rows = await db
 		.select({ noteId: notes.id })
@@ -199,7 +203,7 @@ export async function userCanAccessNote(userId: string, noteId: string): Promise
 			memberships,
 			and(eq(memberships.workspaceId, notes.workspaceId), eq(memberships.userId, userId)),
 		)
-		.where(and(eq(notes.id, noteId), isNull(notes.deletedAt)))
+		.where(eq(notes.id, noteId))
 		.limit(1)
 	return rows.length > 0
 }
