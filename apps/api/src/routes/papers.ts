@@ -126,3 +126,27 @@ paperRoutes.get("/papers/:id/pdf-url", requireAuth, async (c) => {
 	const url = await generatePresignedGetUrl(paper.pdfObjectKey, 3600)
 	return c.json({ url, expiresInSeconds: 3600 })
 })
+
+// Soft delete: only the owner may delete; sets deleted_at so the row is
+// excluded from listings + detail lookups but the MinIO objects are
+// preserved for now (a future cleanup job can purge them once we're sure
+// no notes still reference the paper).
+paperRoutes.delete("/papers/:id", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) {
+		return c.json({ error: "not found" }, 404)
+	}
+	if (paper.ownerUserId !== user.id) {
+		return c.json({ error: "only the owner can delete this paper" }, 403)
+	}
+
+	await db
+		.update(papers)
+		.set({ deletedAt: new Date(), updatedAt: new Date() })
+		.where(eq(papers.id, id))
+
+	return c.json({ ok: true })
+})

@@ -48,7 +48,7 @@ export function LibraryView() {
 				</div>
 			) : null}
 
-			<LibraryTable papers={papers} />
+			<LibraryTable papers={papers} workspaceId={workspace.id} />
 		</div>
 	)
 }

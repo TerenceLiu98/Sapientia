@@ -117,3 +117,14 @@ export function useUploadPaper(workspaceId: string) {
 		},
 	})
 }
+
+export function useDeletePaper(workspaceId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (paperId: string) =>
+			apiFetch<{ ok: true }>(`/api/v1/papers/${paperId}`, { method: "DELETE" }),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+		},
+	})
+}
