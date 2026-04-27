@@ -13,7 +13,12 @@ import {
 	type PaperParseJobResult,
 } from "../queues/paper-parse"
 import { getMineruToken } from "../services/credentials"
-import { submitParseTask, waitForCompletion } from "../services/mineru-client"
+import {
+	getTaskStatus,
+	MineruApiError,
+	type MineruTaskStatus,
+	submitParseTask,
+} from "../services/mineru-client"
 import { generatePresignedGetUrl, s3Client } from "../services/s3-client"
 
 const POLL_INTERVAL_MS = process.env.MINERU_POLL_INTERVAL_MS
@@ -46,7 +51,13 @@ async function processPaperParse(
 
 	await db
 		.update(papers)
-		.set({ parseStatus: "parsing", parseError: null, updatedAt: new Date() })
+		.set({
+			parseStatus: "parsing",
+			parseError: null,
+			parseProgressExtracted: null,
+			parseProgressTotal: null,
+			updatedAt: new Date(),
+		})
 		.where(eq(papers.id, paperId))
 
 	// MinerU ingests by URL. Generate a presigned GET that lasts long enough
@@ -61,11 +72,14 @@ async function processPaperParse(
 	})
 	log.info({ mineruTaskId: taskId }, "mineru_task_submitted")
 
-	const result = await waitForCompletion({
+	// Inline poll loop so we can write MinerU's `extract_progress` to the DB
+	// each tick. The previous `waitForCompletion` helper hid that signal from
+	// the UI.
+	const result = await pollWithProgress({
 		token,
 		taskId,
-		intervalMs: POLL_INTERVAL_MS,
-		timeoutMs: POLL_TIMEOUT_MS,
+		paperId,
+		log,
 	})
 
 	if (result.state === "failed") {
@@ -123,6 +137,44 @@ async function processPaperParse(
 	}
 }
 
+// Polls MinerU's task status, mirrors `extract_progress` to the DB so the
+// frontend can render a live "parsing N/M pages" counter.
+async function pollWithProgress(args: {
+	token: string
+	taskId: string
+	paperId: string
+	log: typeof logger
+}): Promise<MineruTaskStatus> {
+	const { token, taskId, paperId, log } = args
+	const start = Date.now()
+
+	while (Date.now() - start < POLL_TIMEOUT_MS) {
+		const status = await getTaskStatus({ token, taskId })
+
+		// Persist the progress numbers (or null when MinerU hasn't reported any
+		// yet) so the UI sees movement without a separate signal channel.
+		await db
+			.update(papers)
+			.set({
+				parseProgressExtracted: status.extractedPages ?? null,
+				parseProgressTotal: status.totalPages ?? null,
+				updatedAt: new Date(),
+			})
+			.where(eq(papers.id, paperId))
+
+		log.debug(
+			{ state: status.state, extracted: status.extractedPages, total: status.totalPages },
+			"mineru_poll",
+		)
+
+		if (status.state === "done" || status.state === "failed") return status
+
+		await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+	}
+
+	throw new Error(`MinerU task ${taskId} did not complete within ${POLL_TIMEOUT_MS}ms`)
+}
+
 // Pull `*_content_list.json` out of a MinerU result zip in memory.
 async function extractContentList(zipBuffer: Buffer): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
@@ -158,13 +210,27 @@ async function extractContentList(zipBuffer: Buffer): Promise<Buffer> {
 // Treat these as "do not retry" — they will not get better with another shot.
 function isPermanent(err: Error): boolean {
 	if (err instanceof MissingCredentialError) return true
+
+	if (err instanceof MineruApiError) {
+		// HTTP-side: 401/403 (bad/expired token), 413/422 (bad input).
+		if (err.code === 401 || err.code === 403 || err.code === 413 || err.code === 422) return true
+		// MinerU API-side: any negative code is a validation/auth error per their
+		// docs — `-10001` invalid token, `-10002` invalid url, `-10003` file
+		// format/size/page-count, etc. Retrying won't change the outcome.
+		if (err.code < 0) return true
+	}
+
 	const msg = err.message.toLowerCase()
 	return (
+		msg.includes("http 401") ||
+		msg.includes("http 403") ||
+		msg.includes("not a valid url") ||
 		msg.includes("file format") ||
 		msg.includes("page count") ||
 		msg.includes("page exceeds") ||
 		msg.includes("file size") ||
-		msg.includes("invalid pdf")
+		msg.includes("invalid pdf") ||
+		msg.includes("token") // "API token not configured" + MinerU "invalid token"
 	)
 }
 

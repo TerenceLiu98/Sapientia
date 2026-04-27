@@ -7,6 +7,8 @@ export interface Paper {
 	fileSizeBytes: number
 	parseStatus: "pending" | "parsing" | "done" | "failed"
 	parseError: string | null
+	parseProgressExtracted: number | null
+	parseProgressTotal: number | null
 	createdAt: string
 }
 

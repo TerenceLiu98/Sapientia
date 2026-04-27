@@ -16,8 +16,21 @@ const STATUS_STYLES: Record<Paper["parseStatus"], string> = {
 	failed: "bg-[oklch(0.93_0.035_25)] text-[oklch(0.45_0.13_25)]",
 }
 
-function StatusBadge({ status }: { status: Paper["parseStatus"] }) {
-	return <span className={`rounded-md px-2 py-0.5 text-xs ${STATUS_STYLES[status]}`}>{status}</span>
+function StatusBadge({ paper }: { paper: Paper }) {
+	const { parseStatus, parseProgressExtracted, parseProgressTotal } = paper
+
+	let label: string = parseStatus
+	if (parseStatus === "parsing") {
+		if (parseProgressExtracted != null && parseProgressTotal != null) {
+			label = `parsing ${parseProgressExtracted}/${parseProgressTotal}`
+		} else {
+			label = "parsing…"
+		}
+	}
+
+	return (
+		<span className={`rounded-md px-2 py-0.5 text-xs ${STATUS_STYLES[parseStatus]}`}>{label}</span>
+	)
 }
 
 const columns = [
@@ -39,7 +52,7 @@ const columns = [
 	}),
 	columnHelper.accessor("parseStatus", {
 		header: "Status",
-		cell: (info) => <StatusBadge status={info.getValue()} />,
+		cell: (info) => <StatusBadge paper={info.row.original} />,
 	}),
 	columnHelper.accessor("fileSizeBytes", {
 		header: "Size",

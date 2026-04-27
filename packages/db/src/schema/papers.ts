@@ -3,6 +3,7 @@ import {
 	bigint,
 	check,
 	index,
+	integer,
 	jsonb,
 	pgTable,
 	primaryKey,
@@ -31,6 +32,11 @@ export const papers = pgTable(
 		blocksObjectKey: text("blocks_object_key"),
 		parseStatus: text("parse_status").notNull().default("pending"),
 		parseError: text("parse_error"),
+		// Live progress reported by MinerU during the `running` state. Both null
+		// when no parse has started; populated and updated each poll while
+		// state="running"; left in place after `done`/`failed` for the UI.
+		parseProgressExtracted: integer("parse_progress_extracted"),
+		parseProgressTotal: integer("parse_progress_total"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true })
 			.notNull()

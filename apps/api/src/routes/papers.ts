@@ -79,6 +79,8 @@ paperRoutes.get(
 				blocksObjectKey: papers.blocksObjectKey,
 				parseStatus: papers.parseStatus,
 				parseError: papers.parseError,
+				parseProgressExtracted: papers.parseProgressExtracted,
+				parseProgressTotal: papers.parseProgressTotal,
 				createdAt: papers.createdAt,
 				updatedAt: papers.updatedAt,
 				deletedAt: papers.deletedAt,

@@ -33,13 +33,20 @@ function PaperDetail() {
 }
 
 function ParseStatusBanner({ paper }: { paper: Paper }) {
-	if (paper.parseStatus === "done" || paper.parseStatus === "pending") return null
+	if (paper.parseStatus === "done") return null
 
-	if (paper.parseStatus === "parsing") {
+	if (paper.parseStatus === "pending" || paper.parseStatus === "parsing") {
+		const { parseProgressExtracted: done, parseProgressTotal: total } = paper
+		const detail =
+			done != null && total != null
+				? `${done} / ${total} pages`
+				: paper.parseStatus === "pending"
+					? "queued for parsing"
+					: "starting…"
 		return (
 			<div className="border-b border-border-subtle bg-bg-secondary px-6 py-2 text-sm text-text-secondary">
-				Parsing this paper… block-level structure will appear once it's done. You can read the PDF
-				in the meantime.
+				<span className="font-medium text-text-primary">Parsing</span> · {detail} — block-level
+				structure will appear once it's done. You can keep reading the PDF.
 			</div>
 		)
 	}

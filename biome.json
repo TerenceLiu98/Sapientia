@@ -11,7 +11,8 @@
 			"!**/*.gen.ts",
 			"!.claude",
 			"!demo",
-			"!docs/DESIGN_TOKENS.md"
+			"!docs/DESIGN_TOKENS.md",
+			"!packages/db/migrations"
 		]
 	},
 	"formatter": {
