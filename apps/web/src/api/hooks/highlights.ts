@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../client"
 
-export type HighlightColor = "questioning" | "important" | "original" | "pending" | "background"
+// Color is now a free-form string (server-side); the frontend defines a
+// builtin palette plus a localStorage-backed user palette in
+// `lib/highlight-palette.ts`. The backend just stores whatever string
+// the frontend sends, so adding a new color is purely a client change.
+export type HighlightColor = string
 
 export interface BlockHighlight {
 	id: string
@@ -9,30 +13,9 @@ export interface BlockHighlight {
 	blockId: string
 	userId: string
 	workspaceId: string
-	charStart: number | null
-	charEnd: number | null
-	selectedText: string
 	color: HighlightColor
 	createdAt: string
 	updatedAt: string
-}
-
-export interface HighlightInput {
-	blockId: string
-	charStart: number | null
-	charEnd: number | null
-	selectedText: string
-}
-
-interface BatchInput {
-	workspaceId: string
-	color: HighlightColor
-	highlights: HighlightInput[]
-}
-
-interface DeleteByRangeInput {
-	workspaceId: string
-	ranges: Array<{ blockId: string; charStart: number | null; charEnd: number | null }>
 }
 
 const highlightsKey = (paperId: string, workspaceId: string) =>
@@ -48,12 +31,26 @@ export function useHighlights(paperId: string, workspaceId: string | undefined) 
 	})
 }
 
-export function useCreateHighlightBatch(paperId: string) {
+interface SetInput {
+	workspaceId: string
+	blockId: string
+	color: HighlightColor
+}
+
+interface ClearInput {
+	workspaceId: string
+	blockId: string
+}
+
+// PUT: idempotent. Setting the same color twice is a no-op (last-write-wins
+// at the DB level via the `(paperId, blockId, userId, workspaceId)` unique
+// constraint + ON CONFLICT DO UPDATE).
+export function useSetBlockHighlight(paperId: string) {
 	const qc = useQueryClient()
 	return useMutation({
-		mutationFn: (input: BatchInput) =>
-			apiFetch<BlockHighlight[]>(`/api/v1/papers/${paperId}/highlights/batch`, {
-				method: "POST",
+		mutationFn: (input: SetInput) =>
+			apiFetch<BlockHighlight>(`/api/v1/papers/${paperId}/highlights`, {
+				method: "PUT",
 				body: JSON.stringify(input),
 			}),
 		onSuccess: (_, variables) => {
@@ -62,39 +59,11 @@ export function useCreateHighlightBatch(paperId: string) {
 	})
 }
 
-export function useUpdateHighlightColor(paperId: string, workspaceId: string | undefined) {
+export function useClearBlockHighlight(paperId: string) {
 	const qc = useQueryClient()
 	return useMutation({
-		mutationFn: (input: { id: string; color: HighlightColor }) =>
-			apiFetch<BlockHighlight>(`/api/v1/highlights/${input.id}`, {
-				method: "PATCH",
-				body: JSON.stringify({ color: input.color }),
-			}),
-		onSuccess: () => {
-			if (workspaceId) {
-				void qc.invalidateQueries({ queryKey: highlightsKey(paperId, workspaceId) })
-			}
-		},
-	})
-}
-
-export function useDeleteHighlight(paperId: string, workspaceId: string | undefined) {
-	const qc = useQueryClient()
-	return useMutation({
-		mutationFn: (id: string) => apiFetch<void>(`/api/v1/highlights/${id}`, { method: "DELETE" }),
-		onSuccess: () => {
-			if (workspaceId) {
-				void qc.invalidateQueries({ queryKey: highlightsKey(paperId, workspaceId) })
-			}
-		},
-	})
-}
-
-export function useDeleteHighlightsByRange(paperId: string) {
-	const qc = useQueryClient()
-	return useMutation({
-		mutationFn: (input: DeleteByRangeInput) =>
-			apiFetch<{ deleted: number }>(`/api/v1/papers/${paperId}/highlights/by-range`, {
+		mutationFn: (input: ClearInput) =>
+			apiFetch<{ removed: boolean }>(`/api/v1/papers/${paperId}/highlights`, {
 				method: "DELETE",
 				body: JSON.stringify(input),
 			}),

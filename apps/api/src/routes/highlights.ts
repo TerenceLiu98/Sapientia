@@ -3,42 +3,30 @@ import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import {
-	createHighlightBatch,
+	clearBlockHighlight,
 	deleteHighlight,
-	deleteHighlightsInRanges,
 	listHighlightsForPaper,
-	updateHighlightColor,
+	setBlockHighlight,
 } from "../services/highlight"
 import { userCanAccessPaper } from "../services/paper"
 
 export const highlightRoutes = new Hono<AuthContext>()
 
-const ColorSchema = z.enum(["questioning", "important", "original", "pending", "background"])
+const ColorSchema = z.string().min(1).max(64)
 
-const HighlightInputSchema = z.object({
-	blockId: z.string(),
-	charStart: z.number().int().nonnegative().nullable(),
-	charEnd: z.number().int().nonnegative().nullable(),
-	selectedText: z.string(),
-})
-
-const CreateBatchSchema = z.object({
+// PUT body: set the block's highlight to this color (creates or overwrites).
+// Frontend ships 5 built-in semantic names (questioning / important /
+// original / pending / conclusion) but custom names are accepted; the DB
+// just stores the string.
+const SetHighlightSchema = z.object({
 	workspaceId: z.string().uuid(),
+	blockId: z.string().min(1),
 	color: ColorSchema,
-	highlights: z.array(HighlightInputSchema).min(1).max(50),
 })
 
-const DeleteByRangeSchema = z.object({
+const ClearHighlightSchema = z.object({
 	workspaceId: z.string().uuid(),
-	ranges: z
-		.array(
-			z.object({
-				blockId: z.string(),
-				charStart: z.number().int().nullable(),
-				charEnd: z.number().int().nullable(),
-			}),
-		)
-		.min(1),
+	blockId: z.string().min(1),
 })
 
 highlightRoutes.get("/papers/:paperId/highlights", requireAuth, async (c) => {
@@ -55,39 +43,43 @@ highlightRoutes.get("/papers/:paperId/highlights", requireAuth, async (c) => {
 	return c.json(list)
 })
 
-highlightRoutes.post("/papers/:paperId/highlights/batch", requireAuth, async (c) => {
+highlightRoutes.put("/papers/:paperId/highlights", requireAuth, async (c) => {
 	const paperId = c.req.param("paperId")
 	const user = c.get("user")
 	if (!(await userCanAccessPaper(user.id, paperId, db))) {
 		return c.json({ error: "forbidden" }, 403)
 	}
 
-	const parsed = CreateBatchSchema.safeParse(await c.req.json())
+	const parsed = SetHighlightSchema.safeParse(await c.req.json())
 	if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400)
 
-	const inserted = await createHighlightBatch({
+	const row = await setBlockHighlight({
 		paperId,
+		blockId: parsed.data.blockId,
 		userId: user.id,
 		workspaceId: parsed.data.workspaceId,
 		color: parsed.data.color,
-		highlights: parsed.data.highlights,
 	})
-	return c.json(inserted, 201)
+	return c.json(row)
 })
 
-highlightRoutes.patch("/highlights/:id", requireAuth, async (c) => {
-	const id = c.req.param("id")
+highlightRoutes.delete("/papers/:paperId/highlights", requireAuth, async (c) => {
+	const paperId = c.req.param("paperId")
 	const user = c.get("user")
-	const parsed = z.object({ color: ColorSchema }).safeParse(await c.req.json())
+	if (!(await userCanAccessPaper(user.id, paperId, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	const parsed = ClearHighlightSchema.safeParse(await c.req.json())
 	if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400)
 
-	const updated = await updateHighlightColor({
-		highlightId: id,
+	const removed = await clearBlockHighlight({
+		paperId,
+		blockId: parsed.data.blockId,
 		userId: user.id,
-		color: parsed.data.color,
+		workspaceId: parsed.data.workspaceId,
 	})
-	if (!updated) return c.json({ error: "not found" }, 404)
-	return c.json(updated)
+	return c.json({ removed })
 })
 
 highlightRoutes.delete("/highlights/:id", requireAuth, async (c) => {
@@ -96,23 +88,4 @@ highlightRoutes.delete("/highlights/:id", requireAuth, async (c) => {
 	const ok = await deleteHighlight({ highlightId: id, userId: user.id })
 	if (!ok) return c.json({ error: "not found" }, 404)
 	return c.body(null, 204)
-})
-
-highlightRoutes.delete("/papers/:paperId/highlights/by-range", requireAuth, async (c) => {
-	const paperId = c.req.param("paperId")
-	const user = c.get("user")
-	if (!(await userCanAccessPaper(user.id, paperId, db))) {
-		return c.json({ error: "forbidden" }, 403)
-	}
-
-	const parsed = DeleteByRangeSchema.safeParse(await c.req.json())
-	if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400)
-
-	const count = await deleteHighlightsInRanges({
-		paperId,
-		userId: user.id,
-		workspaceId: parsed.data.workspaceId,
-		ranges: parsed.data.ranges,
-	})
-	return c.json({ deleted: count })
 })

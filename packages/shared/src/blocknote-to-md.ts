@@ -108,13 +108,19 @@ function inlinesToMd(content: unknown): string {
 			// surface stays grep-able and round-trippable.
 			if (node.type === "blockCitation") {
 				const props = node.props as
-					| { paperId?: string; blockId?: string; snapshot?: string }
+					| {
+							paperId?: string
+							blockId?: string
+							blockNumber?: number
+							snapshot?: string
+					  }
 					| undefined
 				if (props?.paperId && props?.blockId) {
 					return formatCitationToken({
 						paperId: props.paperId,
 						blockId: props.blockId,
-						snapshot: props.snapshot ?? "",
+						blockNumber: props.blockNumber,
+						snapshot: props.snapshot,
 					})
 				}
 				return props?.snapshot ?? ""

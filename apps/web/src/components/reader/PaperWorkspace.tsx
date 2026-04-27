@@ -1,59 +1,77 @@
-import { Link, useNavigate } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link } from "@tanstack/react-router"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
-import { usePaperCitationCounts } from "@/api/hooks/citations"
-import {
-	type HighlightColor,
-	type HighlightInput,
-	useCreateHighlightBatch,
-	useDeleteHighlight,
-	useDeleteHighlightsByRange,
-	useHighlights,
-} from "@/api/hooks/highlights"
-import { type Note, useCreateNote, useNotes } from "@/api/hooks/notes"
+import { useNotesForBlock, usePaperCitationCounts } from "@/api/hooks/citations"
+import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
+import { useCreateNote, useDeleteNote, useNotes } from "@/api/hooks/notes"
 import { type Paper, usePaper } from "@/api/hooks/papers"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
-import { AppShell } from "@/components/layout/AppShell"
+import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel } from "@/components/reader/BlocksPanel"
-import { FloatingNote } from "@/components/reader/FloatingNote"
+import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer } from "@/components/reader/PdfViewer"
+import { usePalette } from "@/lib/highlight-palette"
 
-export function PaperWorkspace({
-	paperId,
-	activeNoteId,
-}: {
-	paperId: string
-	activeNoteId: string | null
-}) {
+type ViewMode = "pdf-only" | "md-only" | "both"
+
+const VIEW_MODE_KEY = "paperWorkspace.viewMode"
+const NOTES_WIDTH_KEY = "paperWorkspace.notesWidthPct.v2"
+const NOTES_VISIBILITY_KEY = "paperWorkspace.notesVisible"
+const SPLIT_KEY = "paperWorkspace.leftPct"
+
+function loadViewMode(): ViewMode {
+	if (typeof window === "undefined") return "both"
+	const v = window.localStorage.getItem(VIEW_MODE_KEY)
+	return v === "pdf-only" || v === "md-only" || v === "both" ? v : "both"
+}
+
+function loadNotesVisible() {
+	if (typeof window === "undefined") return true
+	const v = window.localStorage.getItem(NOTES_VISIBILITY_KEY)
+	return v === null ? true : v !== "false"
+}
+
+export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const { data: paper, isLoading } = usePaper(paperId)
 	const { data: workspace } = useCurrentWorkspace()
-	const { data: paperNotes } = useNotes(workspace?.id ?? "", paperId)
+	const { data: paperNotes = [] } = useNotes(workspace?.id ?? "", paperId)
 	const createNote = useCreateNote(workspace?.id ?? "")
-	const navigate = useNavigate()
+	const deleteNote = useDeleteNote(workspace?.id ?? "")
 
 	const [requestedPage, setRequestedPage] = useState<number | undefined>()
 	const [requestedBlockY, setRequestedBlockY] = useState<number | undefined>()
 	const [requestNonce, setRequestNonce] = useState(0)
 	const [selectedBlockRequestNonce, setSelectedBlockRequestNonce] = useState(0)
 	const [currentPage, setCurrentPage] = useState(1)
+	const [currentAnchorYRatio, setCurrentAnchorYRatio] = useState(0.5)
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
 	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
-	const [showBlocks, setShowBlocks] = useState(true)
+	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
+	const [notesVisible, setNotesVisible] = useState<boolean>(() => loadNotesVisible())
+	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [editor, setEditor] = useState<NoteEditorRef | null>(null)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
+
 	const { data: blocks } = useBlocks(paperId)
 	const { data: counts } = usePaperCitationCounts(paperId)
+	const { data: notesCitingSelectedBlock = [] } = useNotesForBlock(paperId, selectedBlockId)
 	const { data: highlights = [] } = useHighlights(paperId, workspace?.id)
-	const createHighlightBatch = useCreateHighlightBatch(paperId)
-	const deleteHighlight = useDeleteHighlight(paperId, workspace?.id)
-	const deleteHighlightsByRange = useDeleteHighlightsByRange(paperId)
+	const setBlockHighlight = useSetBlockHighlight(paperId)
+	const clearBlockHighlight = useClearBlockHighlight(paperId)
+	const { palette } = usePalette()
 
-	const blocksById = useMemo(() => {
-		const map = new Map<string, Block>()
-		for (const block of blocks ?? []) map.set(block.blockId, block)
-		return map
-	}, [blocks])
+	useEffect(() => {
+		if (typeof window !== "undefined") {
+			window.localStorage.setItem(VIEW_MODE_KEY, viewMode)
+		}
+	}, [viewMode])
+
+	useEffect(() => {
+		if (typeof window !== "undefined") {
+			window.localStorage.setItem(NOTES_VISIBILITY_KEY, String(notesVisible))
+		}
+	}, [notesVisible])
 
 	const countsMap = useMemo(() => {
 		const m = new Map<string, number>()
@@ -61,15 +79,14 @@ export function PaperWorkspace({
 		return m
 	}, [counts])
 
-	const existingNote = paperNotes && paperNotes.length > 0 ? paperNotes[0] : null
-	const noteOpen = activeNoteId != null
+	const activeCitingNoteIds = useMemo(
+		() => new Set(notesCitingSelectedBlock.map((note) => note.noteId)),
+		[notesCitingSelectedBlock],
+	)
 
 	const handleSelectBlock = useCallback((block: Block) => {
 		setSelectedBlockId(block.blockId)
 		setRequestedPage(block.page)
-		// Pass the bbox y-ratio so the PDF can land on the actual block, not
-		// the page top — important at high zoom where most of the page is
-		// off-screen and a "go to page top" jump would hide the target.
 		setRequestedBlockY(block.bbox?.y)
 		setRequestNonce((n) => n + 1)
 		setSelectedBlockRequestNonce((n) => n + 1)
@@ -79,17 +96,34 @@ export function PaperWorkspace({
 		setHoveredBlockId(blockId)
 	}, [])
 
+	const handleOpenCitationBlock = useCallback(
+		(targetPaperId: string, blockId: string) => {
+			if (targetPaperId !== paperId) return
+			const block = blocks?.find((candidate) => candidate.blockId === blockId)
+			if (!block) return
+			setHoveredBlockId(block.blockId)
+			handleSelectBlock(block)
+		},
+		[blocks, handleSelectBlock, paperId],
+	)
+
+	const handleMainInteract = useCallback(() => {
+		setExpandedNoteId(null)
+	}, [])
+
+	const handleViewportAnchorChange = useCallback((page: number, yRatio: number) => {
+		setCurrentPage(page)
+		setCurrentAnchorYRatio(yRatio)
+	}, [])
+
+	// Insert a `@[block N]` chip at the cursor of the currently focused note's
+	// editor. Returns false if the editor isn't ready (e.g. a card was just
+	// expanded and the editor is still mounting), so the caller can stash the
+	// block and retry from a `useEffect`.
 	const insertCitation = useCallback(
 		(block: Block) => {
-			if (!editor || !activeNoteId) return false
-			const snapshot = (block.caption ?? block.text ?? "").slice(0, 80)
-			// Focus + position the cursor BEFORE inserting. With the floating
-			// note panel (`position: fixed`) the editor frequently has no
-			// cursor at the moment a citation lands — clicking "Cite" leaves
-			// focus on the BlocksPanel button, not in the editor — and
-			// `insertInlineContent` silently no-ops when the editor lacks a
-			// text cursor. Falling back to the last block ensures every cite
-			// has a target, even on a fresh note.
+			if (!editor || !expandedNoteId) return false
+			const blockNumber = block.blockIndex + 1
 			const ed = editor as unknown as {
 				focus: () => void
 				document: Array<{ id: string }>
@@ -107,261 +141,654 @@ export function PaperWorkspace({
 				if (last) ed.setTextCursorPosition(last, "end")
 			}
 			ed.insertInlineContent([
-				{ type: "blockCitation", props: { paperId, blockId: block.blockId, snapshot } },
+				{
+					type: "blockCitation",
+					props: { paperId, blockId: block.blockId, blockNumber },
+				},
 				" ",
 			])
 			return true
 		},
-		[activeNoteId, editor, paperId],
+		[editor, expandedNoteId, paperId],
 	)
 
-	const openOrCreatePaperNote = useCallback(
-		async (block?: Block): Promise<Note | null> => {
-			if (!workspace) return null
-			const note =
-				existingNote ??
-				(await createNote.mutateAsync({
-					paperId,
-					title: paper?.title ?? "Untitled",
-					blocknoteJson: [],
-				}))
-
-			if (block) {
-				handleSelectBlock(block)
-				setPendingCiteBlock(block)
-			}
-
-			if (activeNoteId !== note.id) {
-				await navigate({
-					to: "/papers/$paperId/notes/$noteId",
-					params: { paperId, noteId: note.id },
-				})
-			}
-
-			return note
-		},
-		[
-			activeNoteId,
-			createNote,
-			existingNote,
-			handleSelectBlock,
-			navigate,
-			paper?.title,
-			paperId,
-			workspace,
-		],
-	)
-
-	const closeNote = useCallback(async () => {
-		setPendingCiteBlock(null)
-		await navigate({ to: "/papers/$paperId", params: { paperId } })
-	}, [navigate, paperId])
-
+	// "Cite or create": if the user already has a note expanded, append the
+	// chip to that note. Otherwise create a brand-new note anchored to the
+	// block's position, expand it, and queue a citation insert for once the
+	// editor mounts (handled by the effect at the bottom).
 	const handleBlockAction = useCallback(
 		async (block: Block) => {
-			if (noteOpen) {
+			if (expandedNoteId) {
 				handleSelectBlock(block)
 				if (!insertCitation(block)) {
 					setPendingCiteBlock(block)
 				}
 				return
 			}
-
-			await openOrCreatePaperNote(block)
+			if (!workspace) return
+			const note = await createNote.mutateAsync({
+				paperId,
+				title: `Page ${block.page}`,
+				blocknoteJson: [],
+				anchorPage: block.page,
+				anchorYRatio: block.bbox?.y ?? null,
+				anchorBlockId: block.blockId,
+			})
+			handleSelectBlock(block)
+			setExpandedNoteId(note.id)
+			setPendingCiteBlock(block)
 		},
-		[handleSelectBlock, insertCitation, noteOpen, openOrCreatePaperNote],
+		[createNote, expandedNoteId, handleSelectBlock, insertCitation, paperId, workspace],
 	)
 
 	const renderActions = useCallback(
 		(block: Block) => (
 			<button
-				aria-label={noteOpen ? "Cite this block" : "Add note for this block"}
+				aria-label={expandedNoteId ? "Cite this block" : "Add note for this block"}
 				className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-accent"
 				onClick={(e) => {
 					e.stopPropagation()
 					void handleBlockAction(block)
 				}}
-				title={noteOpen ? "Cite" : "Add note"}
+				title={expandedNoteId ? "Cite" : "Add note"}
 				type="button"
 			>
-				{noteOpen ? <CiteIcon /> : <NoteIcon />}
+				{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
 			</button>
 		),
-		[handleBlockAction, noteOpen],
+		[expandedNoteId, handleBlockAction],
 	)
 
-	const handleCiteBlocks = useCallback(
-		async (blockIds: string[]) => {
-			const targets = [...new Set(blockIds)]
-				.map((blockId) => blocksById.get(blockId) ?? null)
-				.filter((block): block is Block => block != null)
-			if (targets.length === 0) return
-
-			if (!noteOpen) {
-				await openOrCreatePaperNote(targets[0])
-				return
-			}
-
-			for (const block of targets) {
-				handleSelectBlock(block)
-				if (!insertCitation(block)) {
-					setPendingCiteBlock(block)
-					break
-				}
-			}
+	const handleSetBlockHighlight = useCallback(
+		async (blockId: string, color: string) => {
+			if (!workspace) return
+			await setBlockHighlight.mutateAsync({ workspaceId: workspace.id, blockId, color })
 		},
-		[blocksById, handleSelectBlock, insertCitation, noteOpen, openOrCreatePaperNote],
+		[setBlockHighlight, workspace],
 	)
 
-	const handleApplyHighlights = useCallback(
-		async (color: HighlightColor, ranges: HighlightInput[]) => {
-			if (!workspace || ranges.length === 0) return
-			await deleteHighlightsByRange.mutateAsync({
-				workspaceId: workspace.id,
-				ranges: ranges.map((range) => ({
-					blockId: range.blockId,
-					charStart: range.charStart,
-					charEnd: range.charEnd,
-				})),
-			})
-			await createHighlightBatch.mutateAsync({
-				workspaceId: workspace.id,
-				color,
-				highlights: ranges,
-			})
+	const handleClearBlockHighlight = useCallback(
+		async (blockId: string) => {
+			if (!workspace) return
+			await clearBlockHighlight.mutateAsync({ workspaceId: workspace.id, blockId })
 		},
-		[createHighlightBatch, deleteHighlightsByRange, workspace],
+		[clearBlockHighlight, workspace],
 	)
 
-	const handleDeleteHighlight = useCallback(
-		async (highlightId: string) => {
-			await deleteHighlight.mutateAsync(highlightId)
+	const colorByBlock = useMemo(() => {
+		const map = new Map<string, string>()
+		for (const highlight of highlights) map.set(highlight.blockId, highlight.color)
+		return map
+	}, [highlights])
+
+	// Toolbar `+ Note` — creates a note anchored to the user's current reading
+	// position in the main pane.
+	const handleCreateAtCurrent = useCallback(async () => {
+		if (!workspace) return
+		const note = await createNote.mutateAsync({
+			paperId,
+			title: `Page ${currentPage}`,
+			blocknoteJson: [],
+			anchorPage: currentPage,
+			anchorYRatio: currentAnchorYRatio,
+		})
+		setExpandedNoteId(note.id)
+	}, [createNote, currentAnchorYRatio, currentPage, paperId, workspace])
+
+	const handleDeleteNote = useCallback(
+		async (noteId: string) => {
+			await deleteNote.mutateAsync(noteId)
+			if (expandedNoteId === noteId) setExpandedNoteId(null)
 		},
-		[deleteHighlight],
+		[deleteNote, expandedNoteId],
 	)
+
+	const handleJumpToPage = useCallback((page: number, yRatio?: number) => {
+		setRequestedPage(page)
+		setRequestedBlockY(yRatio)
+		setRequestNonce((n) => n + 1)
+	}, [])
 
 	useEffect(() => {
-		if (!noteOpen) {
-			setEditor(null)
-		}
-	}, [noteOpen])
+		if (!expandedNoteId) setEditor(null)
+	}, [expandedNoteId])
 
+	// Newly-created notes mount their editor a tick after we set
+	// `expandedNoteId`. Wait for `onEditorReady` to land via `setEditor`,
+	// then drop the queued citation chip.
 	useEffect(() => {
-		if (!noteOpen || !editor || !pendingCiteBlock) return
+		if (!expandedNoteId || !editor || !pendingCiteBlock) return
 		if (insertCitation(pendingCiteBlock)) {
 			setPendingCiteBlock(null)
 		}
-	}, [editor, insertCitation, noteOpen, pendingCiteBlock])
+	}, [editor, expandedNoteId, insertCitation, pendingCiteBlock])
+
+	const main = (
+		<MainView
+			blocks={blocks}
+			colorByBlock={colorByBlock}
+			countsMap={countsMap}
+			currentPage={currentPage}
+			handleClearBlockHighlight={handleClearBlockHighlight}
+			handleHoverBlock={handleHoverBlock}
+			handleMainInteract={handleMainInteract}
+			handleSelectBlock={handleSelectBlock}
+			handleSetBlockHighlight={handleSetBlockHighlight}
+			hoveredBlockId={hoveredBlockId}
+			onViewportAnchorChange={handleViewportAnchorChange}
+			palette={palette}
+			paperId={paperId}
+			renderActions={renderActions}
+			requestedBlockY={requestedBlockY}
+			requestedPage={requestedPage}
+			requestNonce={requestNonce}
+			selectedBlockId={selectedBlockId}
+			selectedBlockRequestNonce={selectedBlockRequestNonce}
+			viewMode={viewMode}
+		/>
+	)
 
 	return (
 		<AppShell title={paper?.title ?? "Paper"}>
-			{isLoading ? (
-				<div className="p-8 text-sm text-text-tertiary">Loading…</div>
-			) : !paper ? (
-				<div className="p-8 text-sm text-text-tertiary">Not found.</div>
-			) : (
-				<div className="relative flex h-full min-h-0 flex-col">
-					<ParseStatusBanner paper={paper} />
-
-					<div className="flex shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
-						<button
-							className="rounded-md border border-border-default px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover disabled:opacity-60"
-							disabled={createNote.isPending || !workspace}
-							onClick={() => {
-								if (noteOpen) void closeNote()
-								else void openOrCreatePaperNote()
-							}}
-							type="button"
-						>
-							{noteOpen
-								? "Hide note"
-								: existingNote
-									? "Open note"
-									: createNote.isPending
-										? "Creating…"
-										: "Create note"}
-						</button>
-						<button
-							aria-pressed={showBlocks}
-							className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-								showBlocks
-									? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
-									: "border-border-default text-text-secondary hover:bg-surface-hover"
-							}`}
-							onClick={() => setShowBlocks((v) => !v)}
-							type="button"
-						>
-							{showBlocks ? "Hide blocks" : "Blocks"}
-						</button>
-					</div>
-
-					<div className="min-h-0 flex-1 p-6">
-						{showBlocks ? (
-							<HorizontalSplit
-								left={
-									<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-										<PdfViewer
-											blocks={blocks}
-											highlights={highlights}
-											hoveredBlockId={hoveredBlockId}
-											onApplyHighlights={handleApplyHighlights}
-											onCiteBlocks={handleCiteBlocks}
-											onDeleteHighlight={handleDeleteHighlight}
-											onPageChange={setCurrentPage}
-											onHoverBlock={handleHoverBlock}
-											onSelectBlock={handleSelectBlock}
-											paperId={paperId}
-											requestedBlockY={requestedBlockY}
-											requestedPage={requestedPage}
-											requestedPageNonce={requestNonce}
-											selectedBlockId={selectedBlockId}
-										/>
-									</section>
-								}
-								right={
-									<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-										<BlocksPanel
-											citationCounts={countsMap}
-											currentPage={currentPage}
-											highlights={highlights}
-											hoveredBlockId={hoveredBlockId}
-											onHoverBlock={handleHoverBlock}
-											onSelectBlock={handleSelectBlock}
-											paperId={paperId}
-											renderActions={renderActions}
-											selectedBlockId={selectedBlockId}
-											selectedBlockRequestNonce={selectedBlockRequestNonce}
-										/>
-									</section>
-								}
-							/>
-						) : (
-							<div className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-								<PdfViewer
-									blocks={blocks}
-									hoveredBlockId={hoveredBlockId}
-									onPageChange={setCurrentPage}
-									onHoverBlock={handleHoverBlock}
-									onSelectBlock={handleSelectBlock}
-									paperId={paperId}
-									requestedPage={requestedPage}
-									requestedPageNonce={requestNonce}
-									selectedBlockId={selectedBlockId}
-								/>
-							</div>
-						)}
-					</div>
-
-					{activeNoteId ? (
-						<FloatingNote
-							noteId={activeNoteId}
-							onClose={() => void closeNote()}
-							onEditorReady={setEditor}
-						/>
-					) : null}
-				</div>
-			)}
+			<WorkspaceContent
+				activeCitingNoteIds={activeCitingNoteIds}
+				currentAnchorYRatio={currentAnchorYRatio}
+				currentPage={currentPage}
+				expandedNoteId={expandedNoteId}
+				isLoading={isLoading}
+				main={main}
+				notes={notesPaneFor(paperNotes)}
+				notesVisible={notesVisible}
+				onCreateAtCurrent={handleCreateAtCurrent}
+				onDeleteNote={handleDeleteNote}
+				onEditorReady={setEditor}
+				onExpand={setExpandedNoteId}
+				onJumpToPage={handleJumpToPage}
+				onOpenCitationBlock={handleOpenCitationBlock}
+				onToggleNotes={() =>
+					setNotesVisible((value) => {
+						if (value) setExpandedNoteId(null)
+						return !value
+					})
+				}
+				paper={paper}
+				viewMode={viewMode}
+				onChangeViewMode={setViewMode}
+			/>
 		</AppShell>
+	)
+}
+
+function notesPaneFor(notes: ReturnType<typeof useNotes>["data"]) {
+	return notes ?? []
+}
+
+interface WorkspaceContentProps {
+	activeCitingNoteIds: Set<string>
+	currentAnchorYRatio: number
+	currentPage: number
+	expandedNoteId: string | null
+	isLoading: boolean
+	main: React.ReactNode
+	notes: Note[]
+	notesVisible: boolean
+	onChangeViewMode: (mode: ViewMode) => void
+	onCreateAtCurrent: () => void
+	onDeleteNote: (noteId: string) => Promise<void> | void
+	onEditorReady: (editor: NoteEditorRef) => void
+	onExpand: (noteId: string | null) => void
+	onJumpToPage: (page: number, yRatio?: number) => void
+	onOpenCitationBlock: (paperId: string, blockId: string) => void
+	onToggleNotes: () => void
+	paper: Paper | undefined
+	viewMode: ViewMode
+}
+
+function WorkspaceContent({
+	activeCitingNoteIds,
+	currentAnchorYRatio,
+	currentPage,
+	expandedNoteId,
+	isLoading,
+	main,
+	notes,
+	notesVisible,
+	onChangeViewMode,
+	onCreateAtCurrent,
+	onDeleteNote,
+	onEditorReady,
+	onExpand,
+	onJumpToPage,
+	onOpenCitationBlock,
+	onToggleNotes,
+	paper,
+	viewMode,
+}: WorkspaceContentProps) {
+	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
+
+	return isLoading ? (
+		<div className="p-8 text-sm text-text-tertiary">Loading…</div>
+	) : !paper ? (
+		<div className="p-8 text-sm text-text-tertiary">Not found.</div>
+	) : (
+		<div className="relative flex h-full min-h-0 flex-col">
+			<ParseStatusBanner paper={paper} />
+
+			<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
+				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
+				<SidebarToggleButtons
+					leftOpen={isLeftNavOpen}
+					onToggleLeft={toggleLeftNav}
+					onToggleRight={onToggleNotes}
+					rightOpen={notesVisible}
+				/>
+			</div>
+
+			<div className="min-h-0 flex-1 p-6">
+				<MainNotesSplit
+					activeCitingNoteIds={activeCitingNoteIds}
+					currentAnchorYRatio={currentAnchorYRatio}
+					currentPage={currentPage}
+					expandedNoteId={expandedNoteId}
+					main={main}
+					notes={notes}
+					notesVisible={notesVisible}
+					onCreateAtCurrent={onCreateAtCurrent}
+					onDeleteNote={onDeleteNote}
+					onEditorReady={onEditorReady}
+					onExpand={onExpand}
+					onJumpToPage={onJumpToPage}
+					onOpenCitationBlock={onOpenCitationBlock}
+				/>
+			</div>
+		</div>
+	)
+}
+
+function ViewModeToggle({
+	current,
+	onChange,
+}: {
+	current: ViewMode
+	onChange: (mode: ViewMode) => void
+}) {
+	const buttons: Array<{ key: ViewMode; label: string }> = [
+		{ key: "pdf-only", label: "PDF" },
+		{ key: "both", label: "Both" },
+		{ key: "md-only", label: "Parsed" },
+	]
+	return (
+		<div className="inline-flex overflow-hidden rounded-md border border-border-default text-xs">
+			{buttons.map((b) => (
+				<button
+					aria-pressed={current === b.key}
+					className={`px-3 py-1 transition-colors ${
+						current === b.key
+							? "bg-accent-600 text-text-inverse"
+							: "bg-transparent text-text-secondary hover:bg-surface-hover"
+					}`}
+					key={b.key}
+					onClick={() => onChange(b.key)}
+					type="button"
+				>
+					{b.label}
+				</button>
+			))}
+		</div>
+	)
+}
+
+function SidebarToggleButtons({
+	leftOpen,
+	rightOpen,
+	onToggleLeft,
+	onToggleRight,
+}: {
+	leftOpen: boolean
+	rightOpen: boolean
+	onToggleLeft: () => void
+	onToggleRight: () => void
+}) {
+	return (
+		<div className="inline-flex overflow-hidden rounded-lg border border-border-default bg-bg-primary/90 p-0.5 shadow-[var(--shadow-popover)]">
+			<button
+				aria-label={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
+				aria-pressed={leftOpen}
+				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+				onClick={onToggleLeft}
+				title={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
+				type="button"
+			>
+				<SidebarIcon open={leftOpen} side="left" />
+			</button>
+			<button
+				aria-label={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
+				aria-pressed={rightOpen}
+				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+				onClick={onToggleRight}
+				title={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
+				type="button"
+			>
+				<SidebarIcon open={rightOpen} side="right" />
+			</button>
+		</div>
+	)
+}
+
+function SidebarIcon({ side, open }: { side: "left" | "right"; open: boolean }) {
+	if (side === "left") {
+		return (
+			<span
+				className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
+					open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
+				}`}
+			>
+				<span
+					className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`}
+				/>
+				<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
+				<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
+			</span>
+		)
+	}
+	return (
+		<span
+			className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
+				open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
+			}`}
+		>
+			<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
+			<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
+			<span className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`} />
+		</span>
+	)
+}
+
+interface MainViewProps {
+	blocks: Block[] | undefined
+	colorByBlock: Map<string, string>
+	countsMap: Map<string, number>
+	currentPage: number
+	handleClearBlockHighlight: (blockId: string) => Promise<void> | void
+	handleHoverBlock: (blockId: string | null) => void
+	handleMainInteract: () => void
+	handleSelectBlock: (block: Block) => void
+	handleSetBlockHighlight: (blockId: string, color: string) => Promise<void> | void
+	hoveredBlockId: string | null
+	onViewportAnchorChange: (page: number, yRatio: number) => void
+	palette: ReturnType<typeof usePalette>["palette"]
+	paperId: string
+	renderActions: (block: Block) => React.ReactNode
+	requestedBlockY: number | undefined
+	requestedPage: number | undefined
+	requestNonce: number
+	selectedBlockId: string | null
+	selectedBlockRequestNonce: number
+	viewMode: ViewMode
+}
+
+const MainView = memo(function MainView(props: MainViewProps) {
+	const pdfNode = (
+		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
+			<PdfViewer
+				blocks={props.blocks}
+				colorByBlock={props.colorByBlock}
+				hoveredBlockId={props.hoveredBlockId}
+				onClearHighlight={props.handleClearBlockHighlight}
+				onHoverBlock={props.handleHoverBlock}
+				onInteract={props.handleMainInteract}
+				onViewportAnchorChange={props.onViewportAnchorChange}
+				onSelectBlock={props.handleSelectBlock}
+				onSetHighlight={props.handleSetBlockHighlight}
+				palette={props.palette}
+				paperId={props.paperId}
+				renderActions={props.renderActions}
+				requestedBlockY={props.requestedBlockY}
+				requestedPage={props.requestedPage}
+				requestedPageNonce={props.requestNonce}
+				selectedBlockId={props.selectedBlockId}
+			/>
+		</section>
+	)
+	const mdNode = (
+		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
+			<BlocksPanel
+				citationCounts={props.countsMap}
+				colorByBlock={props.colorByBlock}
+				currentPage={props.currentPage}
+				hoveredBlockId={props.hoveredBlockId}
+				onClearHighlight={props.handleClearBlockHighlight}
+				onHoverBlock={props.handleHoverBlock}
+				onInteract={props.handleMainInteract}
+				onViewportAnchorChange={
+					props.viewMode === "md-only" ? props.onViewportAnchorChange : undefined
+				}
+				onSelectBlock={props.handleSelectBlock}
+				onSetHighlight={props.handleSetBlockHighlight}
+				paperId={props.paperId}
+				palette={props.palette}
+				requestedAnchorYRatio={props.requestedBlockY}
+				requestedPage={props.requestedPage}
+				requestedPageNonce={props.requestNonce}
+				renderActions={props.renderActions}
+				selectedBlockId={props.selectedBlockId}
+				selectedBlockRequestNonce={props.selectedBlockRequestNonce}
+			/>
+		</section>
+	)
+
+	if (props.viewMode === "pdf-only") return pdfNode
+	if (props.viewMode === "md-only") return mdNode
+	return <SplitMainBoth left={pdfNode} right={mdNode} />
+})
+
+MainView.displayName = "MainView"
+
+import type { Note } from "@/api/hooks/notes"
+
+interface MainNotesSplitProps {
+	activeCitingNoteIds: Set<string>
+	main: React.ReactNode
+	notes: Note[]
+	expandedNoteId: string | null
+	currentAnchorYRatio: number
+	currentPage: number
+	notesVisible: boolean
+	onExpand: (noteId: string | null) => void
+	onJumpToPage: (page: number, yRatio?: number) => void
+	onCreateAtCurrent: () => void
+	onDeleteNote: (noteId: string) => Promise<void> | void
+	onEditorReady: (editor: NoteEditorRef) => void
+	onOpenCitationBlock: (paperId: string, blockId: string) => void
+}
+
+function MainNotesSplit({
+	activeCitingNoteIds,
+	main,
+	notes,
+	expandedNoteId,
+	currentAnchorYRatio,
+	currentPage,
+	notesVisible,
+	onExpand,
+	onJumpToPage,
+	onCreateAtCurrent,
+	onDeleteNote,
+	onEditorReady,
+	onOpenCitationBlock,
+}: MainNotesSplitProps) {
+	const wrapRef = useRef<HTMLDivElement | null>(null)
+	const [leftPct, setLeftPct] = useState<number>(() => {
+		if (typeof window === "undefined") return 75
+		const stored = window.localStorage.getItem(NOTES_WIDTH_KEY)
+		const n = stored ? Number(stored) : NaN
+		return Number.isFinite(n) && n >= 55 && n <= 85 ? n : 75
+	})
+	const [dragging, setDragging] = useState(false)
+	const dragRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
+
+	const onPointerDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (!wrapRef.current) return
+			e.preventDefault()
+			;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+			dragRef.current = {
+				startX: e.clientX,
+				startPct: leftPct,
+				wrapW: wrapRef.current.getBoundingClientRect().width,
+			}
+			setDragging(true)
+		},
+		[leftPct],
+	)
+	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const s = dragRef.current
+		if (!s) return
+		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
+		setLeftPct(Math.max(55, Math.min(85, s.startPct + deltaPct)))
+	}, [])
+	const onPointerUp = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (!dragRef.current) return
+			;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
+			dragRef.current = null
+			setDragging(false)
+			if (typeof window !== "undefined") {
+				window.localStorage.setItem(NOTES_WIDTH_KEY, String(leftPct))
+			}
+		},
+		[leftPct],
+	)
+	useEffect(() => {
+		if (!dragging) return
+		const prev = document.body.style.cursor
+		document.body.style.cursor = "col-resize"
+		return () => {
+			document.body.style.cursor = prev
+		}
+	}, [dragging])
+
+	return (
+		<div
+			className={`grid h-full min-h-0 min-w-0 gap-0 ${
+				notesVisible ? "grid-cols-[var(--left)_8px_minmax(280px,1fr)]" : "grid-cols-[minmax(0,1fr)]"
+			}`}
+			ref={wrapRef}
+			style={{ ["--left" as string]: `${leftPct}%` }}
+		>
+			<div className="min-h-0 min-w-0">{main}</div>
+			{notesVisible ? (
+				<>
+					{/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer handlers; role="separator" is the correct ARIA */}
+					<div
+						aria-label="Resize main / notes split"
+						aria-orientation="vertical"
+						aria-valuenow={leftPct}
+						className="group relative cursor-col-resize select-none"
+						onPointerDown={onPointerDown}
+						onPointerMove={onPointerMove}
+						onPointerUp={onPointerUp}
+						role="separator"
+						tabIndex={0}
+					>
+						<div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border-subtle transition-colors group-hover:bg-accent-600" />
+					</div>
+					<div className="min-h-0 min-w-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
+						<NotesPanel
+							activeCitingNoteIds={activeCitingNoteIds}
+							currentAnchorYRatio={currentAnchorYRatio}
+							currentPage={currentPage}
+							expandedNoteId={expandedNoteId}
+							notes={notes}
+							onCreateAtCurrent={onCreateAtCurrent}
+							onDelete={onDeleteNote}
+							onEditorReady={onEditorReady}
+							onExpand={onExpand}
+							onJumpToPage={onJumpToPage}
+							onOpenCitationBlock={onOpenCitationBlock}
+						/>
+					</div>
+				</>
+			) : null}
+		</div>
+	)
+}
+
+function SplitMainBoth({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
+	const wrapRef = useRef<HTMLDivElement | null>(null)
+	const [leftPct, setLeftPct] = useState<number>(() => {
+		if (typeof window === "undefined") return 50
+		const stored = window.localStorage.getItem(SPLIT_KEY)
+		const n = stored ? Number(stored) : NaN
+		return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 50
+	})
+	const [dragging, setDragging] = useState(false)
+	const dragRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
+
+	const onPointerDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (!wrapRef.current) return
+			e.preventDefault()
+			;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+			dragRef.current = {
+				startX: e.clientX,
+				startPct: leftPct,
+				wrapW: wrapRef.current.getBoundingClientRect().width,
+			}
+			setDragging(true)
+		},
+		[leftPct],
+	)
+	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const s = dragRef.current
+		if (!s) return
+		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
+		setLeftPct(Math.max(20, Math.min(80, s.startPct + deltaPct)))
+	}, [])
+	const onPointerUp = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (!dragRef.current) return
+			;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
+			dragRef.current = null
+			setDragging(false)
+			if (typeof window !== "undefined") {
+				window.localStorage.setItem(SPLIT_KEY, String(leftPct))
+			}
+		},
+		[leftPct],
+	)
+	useEffect(() => {
+		if (!dragging) return
+		const prev = document.body.style.cursor
+		document.body.style.cursor = "col-resize"
+		return () => {
+			document.body.style.cursor = prev
+		}
+	}, [dragging])
+
+	return (
+		<div
+			className="grid h-full min-h-0 min-w-0 grid-cols-[var(--left)_8px_minmax(0,1fr)] gap-0"
+			ref={wrapRef}
+			style={{ ["--left" as string]: `${leftPct}%` }}
+		>
+			<div className="min-h-0 min-w-0">{left}</div>
+			{/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer handlers; role="separator" is the correct ARIA */}
+			<div
+				aria-label="Resize PDF / parsed-blocks split"
+				aria-orientation="vertical"
+				aria-valuenow={leftPct}
+				className="group relative cursor-col-resize select-none"
+				onPointerDown={onPointerDown}
+				onPointerMove={onPointerMove}
+				onPointerUp={onPointerUp}
+				role="separator"
+				tabIndex={0}
+			>
+				<div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border-subtle transition-colors group-hover:bg-accent-600" />
+			</div>
+			<div className="min-h-0 min-w-0">{right}</div>
+		</div>
 	)
 }
 
@@ -388,7 +815,7 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 		?.toLowerCase()
 		.includes("mineru api token not configured")
 	return (
-		<div className="shrink-0 border-b border-[oklch(0.45_0.13_25)] bg-[oklch(0.93_0.035_25)] px-6 py-3 text-sm">
+		<div className="shrink-0 border-[oklch(0.45_0.13_25)] border-b bg-[oklch(0.93_0.035_25)] px-6 py-3 text-sm">
 			<div className="text-text-error">Parsing failed. {paper.parseError ?? "Unknown error."}</div>
 			{needsCredentials ? (
 				<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">
@@ -399,95 +826,7 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 	)
 }
 
-// Resizable left|right split for the PDF + parsed-blocks panes. Stores the
-// left pane's width in localStorage so the user's preferred ratio survives
-// reloads. Both panes have a hard min so the divider can't be dragged off
-// the edge.
-function HorizontalSplit({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
-	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const [leftPct, setLeftPct] = useState<number>(() => {
-		if (typeof window === "undefined") return 50
-		const stored = window.localStorage.getItem("paperWorkspace.leftPct")
-		const n = stored ? Number(stored) : NaN
-		return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 50
-	})
-	const [dragging, setDragging] = useState(false)
-	const dragStateRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
-
-	const onPointerDown = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!wrapRef.current) return
-			e.preventDefault()
-			;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-			dragStateRef.current = {
-				startX: e.clientX,
-				startPct: leftPct,
-				wrapW: wrapRef.current.getBoundingClientRect().width,
-			}
-			setDragging(true)
-		},
-		[leftPct],
-	)
-
-	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-		const s = dragStateRef.current
-		if (!s) return
-		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
-		// Each pane gets at least 20% so the divider always has somewhere to land.
-		const next = Math.max(20, Math.min(80, s.startPct + deltaPct))
-		setLeftPct(next)
-	}, [])
-
-	const onPointerUp = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!dragStateRef.current) return
-			;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-			dragStateRef.current = null
-			setDragging(false)
-			if (typeof window !== "undefined") {
-				window.localStorage.setItem("paperWorkspace.leftPct", String(leftPct))
-			}
-		},
-		[leftPct],
-	)
-
-	useEffect(() => {
-		if (!dragging) return
-		const prev = document.body.style.cursor
-		document.body.style.cursor = "col-resize"
-		return () => {
-			document.body.style.cursor = prev
-		}
-	}, [dragging])
-
-	return (
-		<div
-			ref={wrapRef}
-			className="grid h-full min-h-0 min-w-0 grid-cols-[var(--left)_8px_minmax(0,1fr)] gap-0"
-			style={{ ["--left" as string]: `${leftPct}%` }}
-		>
-			<div className="min-h-0 min-w-0">{left}</div>
-			{/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer handlers; role="separator" is the correct ARIA for a draggable splitter */}
-			<div
-				aria-label="Resize PDF / parsed-blocks split"
-				aria-orientation="vertical"
-				aria-valuenow={leftPct}
-				className="group relative cursor-col-resize select-none"
-				onPointerDown={onPointerDown}
-				onPointerMove={onPointerMove}
-				onPointerUp={onPointerUp}
-				role="separator"
-				tabIndex={0}
-			>
-				<div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border-subtle transition-colors group-hover:bg-accent-600" />
-			</div>
-			<div className="min-h-0 min-w-0">{right}</div>
-		</div>
-	)
-}
-
 function CiteIcon() {
-	// Quote-mark glyph: signals "drop a citation chip into the note".
 	return (
 		<svg
 			aria-hidden="true"
@@ -507,7 +846,6 @@ function CiteIcon() {
 }
 
 function NoteIcon() {
-	// Pencil-on-paper glyph: signals "create a new note for this paper".
 	return (
 		<svg
 			aria-hidden="true"

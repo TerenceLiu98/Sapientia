@@ -78,21 +78,26 @@
 	--shell-toolbar-height: 40px;
 
 	--table-row-height: 44px;
+}
 
-	/* Semantic highlight palette (TASK-017). The five colors come from PRD
-	   §"颜色作为一等公民" / DESIGN_TOKENS.md §2.5. Stored as semantic names
-	   on the row, resolved to CSS vars at render time so dark mode + future
-	   palette changes don't require data migration. */
-	--note-questioning-bg: oklch(0.94 0.03 25);
-	--note-questioning-text: oklch(0.42 0.13 25);
-	--note-important-bg: oklch(0.95 0.04 80);
-	--note-important-text: oklch(0.42 0.115 75);
-	--note-original-bg: oklch(0.94 0.035 145);
-	--note-original-text: oklch(0.4 0.09 145);
-	--note-pending-bg: oklch(0.94 0.03 195);
-	--note-pending-text: oklch(0.4 0.09 195);
-	--note-background-bg: var(--color-neutral-200);
-	--note-background-text: var(--color-neutral-700);
+/* Semantic block-highlight palette. Defined outside @theme because Tailwind
+   v4 tree-shakes theme vars that aren't referenced in CSS source — these
+   are referenced at runtime via inline `var()` styles, so we keep them on
+   :root directly to bypass that pruning. Stored as the semantic *name* on
+   the highlight row; resolved to CSS vars at render time so dark mode and
+   palette tweaks don't require data migration. Users extend the palette
+   with custom colors via settings (localStorage in v0.1). */
+:root {
+	--note-questioning-bg: oklch(0.93 0.04 25); /* red */
+	--note-questioning-text: oklch(0.42 0.14 25);
+	--note-important-bg: oklch(0.95 0.06 95); /* yellow */
+	--note-important-text: oklch(0.45 0.12 75);
+	--note-original-bg: oklch(0.93 0.05 145); /* green */
+	--note-original-text: oklch(0.4 0.1 145);
+	--note-pending-bg: oklch(0.93 0.04 245); /* blue */
+	--note-pending-text: oklch(0.42 0.13 245);
+	--note-conclusion-bg: oklch(0.92 0.045 300); /* purple */
+	--note-conclusion-text: oklch(0.42 0.13 300);
 }
 
 html,
@@ -206,14 +211,15 @@ kbd {
 	display: none; /* WebKit */
 }
 
-.pdf-block-text::selection {
-	background: color-mix(in oklch, var(--note-important-bg) 72%, white 28%);
-	color: var(--color-text-primary);
-}
-
+/* Overlay text is the selection target only — its character glyphs must
+   stay transparent at all times, otherwise they paint over PDF.js's
+   already-rendered text and the user sees doubled letters. We keep a
+   custom background tint so the live selection still has visual feedback
+   matching the highlight palette, but `color` MUST stay transparent. */
+.pdf-block-text::selection,
 .pdf-block-text *::selection {
 	background: color-mix(in oklch, var(--note-important-bg) 72%, white 28%);
-	color: var(--color-text-primary);
+	color: transparent;
 }
 
 .react-pdf__Page__textContent {

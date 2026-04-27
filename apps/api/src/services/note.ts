@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { PutObjectCommand } from "@aws-sdk/client-s3"
 import { memberships, type NewNote, type Note, noteBlockRefs, notes } from "@sapientia/db"
 import { blocknoteJsonToMarkdown, extractCitations } from "@sapientia/shared"
-import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, asc, eq, isNull, sql } from "drizzle-orm"
 import { config } from "../config"
 import { db } from "../db"
 import { generatePresignedGetUrl, s3Client } from "./s3-client"
@@ -82,29 +82,17 @@ export interface CreateNoteInput {
 	paperId?: string | null
 	title?: string
 	blocknoteJson: unknown
+	// Spatial anchor (TASK-018). Optional; all three flow straight to the
+	// row. Notes without an anchor land in the "Unanchored" group in the
+	// notes pane. The cite-from-block path also sets `anchorBlockId`.
+	anchorPage?: number | null
+	anchorYRatio?: number | null
+	anchorBlockId?: string | null
 }
 
 export async function createNote(input: CreateNoteInput): Promise<Note> {
-	// "One paper-side note per (paper, owner)" is enforced by a unique
-	// index. To make the API idempotent we look first: if the same user
-	// already owns a note for this paper, hand it back. The frontend
-	// "New note for this paper" button can then click-spam without
-	// creating ghosts and without surfacing 409s.
-	if (input.paperId) {
-		const [existing] = await db
-			.select()
-			.from(notes)
-			.where(
-				and(
-					eq(notes.paperId, input.paperId),
-					eq(notes.ownerUserId, input.ownerUserId),
-					isNull(notes.deletedAt),
-				),
-			)
-			.limit(1)
-		if (existing) return existing
-	}
-
+	// Marginalia is plural by design (TASK-018) — many notes per paper, each
+	// at a different anchor. We no longer dedupe by (paper, owner).
 	const noteId = randomUUID()
 	const { jsonObjectKey, mdObjectKey, markdown } = await uploadVersion({
 		workspaceId: input.workspaceId,
@@ -126,6 +114,9 @@ export async function createNote(input: CreateNoteInput): Promise<Note> {
 			mdObjectKey,
 			agentMarkdownCache: markdown.slice(0, AGENT_MD_MAX_LEN),
 			searchText: sql`to_tsvector('english', ${markdown})` as unknown as string,
+			anchorPage: input.anchorPage ?? null,
+			anchorYRatio: input.anchorYRatio ?? null,
+			anchorBlockId: input.anchorBlockId ?? null,
 		})
 		.returning()
 
@@ -137,6 +128,10 @@ export interface UpdateNoteInput {
 	noteId: string
 	title?: string
 	blocknoteJson?: unknown
+	// Anchor edits — null means "unset", undefined means "leave alone".
+	anchorPage?: number | null
+	anchorYRatio?: number | null
+	anchorBlockId?: string | null
 }
 
 export async function updateNote(input: UpdateNoteInput): Promise<Note> {
@@ -149,6 +144,9 @@ export async function updateNote(input: UpdateNoteInput): Promise<Note> {
 
 	const updates: Partial<NewNote> = { updatedAt: new Date() }
 	if (input.title !== undefined) updates.title = input.title
+	if (input.anchorPage !== undefined) updates.anchorPage = input.anchorPage
+	if (input.anchorYRatio !== undefined) updates.anchorYRatio = input.anchorYRatio
+	if (input.anchorBlockId !== undefined) updates.anchorBlockId = input.anchorBlockId
 
 	if (input.blocknoteJson !== undefined) {
 		const newVersion = existing.currentVersion + 1
@@ -201,11 +199,15 @@ export async function listNotes(args: {
 	if (args.paperId !== undefined) {
 		conditions.push(args.paperId === null ? isNull(notes.paperId) : eq(notes.paperId, args.paperId))
 	}
+	// Paper-side ordering follows reading flow: page ascending, then within
+	// a page by y-ratio, then by createdAt as a stable tiebreak. Unanchored
+	// notes (anchorPage NULL) sort first via NULLS FIRST so they show under
+	// the dedicated "Unanchored" group at the top of the pane.
 	return db
 		.select()
 		.from(notes)
 		.where(and(...conditions))
-		.orderBy(desc(notes.updatedAt))
+		.orderBy(asc(notes.anchorPage), asc(notes.anchorYRatio), asc(notes.createdAt))
 }
 
 export async function softDeleteNote(noteId: string): Promise<void> {

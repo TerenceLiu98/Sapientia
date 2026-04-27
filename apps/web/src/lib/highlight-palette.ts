@@ -1,0 +1,108 @@
+import { useEffect, useState } from "react"
+
+// Built-in 5-color semantic palette. Each entry is the canonical name
+// (also stored on `block_highlights.color`) plus the human label and the
+// CSS variable namespace — `--note-{key}-bg` / `--note-{key}-text` resolve
+// at render time, so dark mode + future palette tweaks don't require data
+// migration.
+export interface PaletteEntry {
+	key: string
+	label: string
+	// Optional explicit CSS color values for *custom* entries that don't
+	// have a corresponding `--note-{key}-bg` token in the stylesheet.
+	bgColor?: string
+	textColor?: string
+}
+
+export const BUILTIN_PALETTE: PaletteEntry[] = [
+	{ key: "questioning", label: "Questioning" },
+	{ key: "important", label: "Important" },
+	{ key: "original", label: "Original" },
+	{ key: "pending", label: "Pending" },
+	{ key: "conclusion", label: "Conclusion" },
+]
+
+const BUILTIN_KEYS = new Set(BUILTIN_PALETTE.map((entry) => entry.key))
+const STORAGE_KEY = "sapientia.customPalette.v1"
+
+function loadCustomPalette(): PaletteEntry[] {
+	if (typeof window === "undefined") return []
+	try {
+		const raw = window.localStorage.getItem(STORAGE_KEY)
+		if (!raw) return []
+		const parsed = JSON.parse(raw) as unknown
+		if (!Array.isArray(parsed)) return []
+		return parsed
+			.filter((value): value is PaletteEntry => {
+				if (typeof value !== "object" || value === null) return false
+				const v = value as Record<string, unknown>
+				return typeof v.key === "string" && typeof v.label === "string"
+			})
+			.filter((entry) => !BUILTIN_KEYS.has(entry.key))
+	} catch {
+		return []
+	}
+}
+
+function saveCustomPalette(entries: PaletteEntry[]) {
+	if (typeof window === "undefined") return
+	window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+}
+
+// React hook backing the per-user palette. Returns the merged palette
+// (built-ins + custom) plus mutation helpers. Persistence is localStorage
+// only in v0.1; cross-device sync is v0.2.
+export function usePalette() {
+	const [custom, setCustom] = useState<PaletteEntry[]>(() => loadCustomPalette())
+
+	useEffect(() => {
+		// Sync changes from other tabs / windows.
+		const handler = (event: StorageEvent) => {
+			if (event.key !== STORAGE_KEY) return
+			setCustom(loadCustomPalette())
+		}
+		window.addEventListener("storage", handler)
+		return () => window.removeEventListener("storage", handler)
+	}, [])
+
+	const palette = [...BUILTIN_PALETTE, ...custom]
+
+	const addCustom = (entry: PaletteEntry) => {
+		if (BUILTIN_KEYS.has(entry.key)) return
+		const next = [...custom.filter((c) => c.key !== entry.key), entry]
+		setCustom(next)
+		saveCustomPalette(next)
+	}
+	const removeCustom = (key: string) => {
+		if (BUILTIN_KEYS.has(key)) return
+		const next = custom.filter((c) => c.key !== key)
+		setCustom(next)
+		saveCustomPalette(next)
+	}
+
+	return { palette, addCustom, removeCustom }
+}
+
+// CSS values for a given highlight key. Built-in keys resolve through the
+// `--note-{key}-bg|text` vars the stylesheet defines; custom keys carry
+// their own explicit colors on the entry. Falling back to neutral bg keeps
+// rendering safe for unknown keys (e.g. data persisted before the user
+// removed a custom entry).
+export function paletteColorVars(
+	palette: PaletteEntry[],
+	key: string,
+): {
+	bg: string
+	text: string
+} {
+	const entry = palette.find((p) => p.key === key)
+	if (entry?.bgColor && entry?.textColor) {
+		return { bg: entry.bgColor, text: entry.textColor }
+	}
+	if (BUILTIN_KEYS.has(key)) {
+		return { bg: `var(--note-${key}-bg)`, text: `var(--note-${key}-text)` }
+	}
+	// Unknown key — render with a neutral surface so the highlight isn't
+	// invisible. The user can re-add the custom entry via settings.
+	return { bg: "var(--color-neutral-200)", text: "var(--color-neutral-700)" }
+}

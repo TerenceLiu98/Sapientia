@@ -10,7 +10,8 @@ import {
 import type { ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import { useNote, useUpdateNote } from "@/api/hooks/notes"
-import { noteSchema } from "./citation-schema"
+import { usePalette } from "@/lib/highlight-palette"
+import { NoteCitationThemeProvider, noteSchema } from "./citation-schema"
 
 type SaveStatus = "idle" | "saving" | "saved" | "failed"
 
@@ -101,10 +102,11 @@ function getMathSlashItems(editor: NoteEditorRef): DefaultReactSuggestionItem[] 
 interface Props {
 	noteId: string
 	onEditorReady?: (editor: NoteEditorRef) => void
+	onOpenCitationBlock?: (paperId: string, blockId: string) => void
 	headerActions?: ReactNode
 }
 
-export function NoteEditor({ noteId, onEditorReady, headerActions }: Props) {
+export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerActions }: Props) {
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
@@ -153,6 +155,7 @@ export function NoteEditor({ noteId, onEditorReady, headerActions }: Props) {
 			updateNote={updateNote}
 			debounceRef={debounceRef}
 			onEditorReady={onEditorReady}
+			onOpenCitationBlock={onOpenCitationBlock}
 			headerActions={headerActions}
 		/>
 	)
@@ -168,9 +171,10 @@ function NoteEditorInner({
 	updateNote,
 	debounceRef,
 	onEditorReady,
+	onOpenCitationBlock,
 	headerActions,
 }: {
-	note: { id: string; title: string }
+	note: { id: string; title: string; workspaceId: string }
 	initialContent: Block[]
 	saveStatus: SaveStatus
 	setSaveStatus: (s: SaveStatus) => void
@@ -179,8 +183,10 @@ function NoteEditorInner({
 	updateNote: ReturnType<typeof useUpdateNote>
 	debounceRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
 	onEditorReady?: (editor: NoteEditorRef) => void
+	onOpenCitationBlock?: (paperId: string, blockId: string) => void
 	headerActions?: ReactNode
 }) {
+	const { palette } = usePalette()
 	// BlockNote's schema generics don't flow cleanly into useCreateBlockNote,
 	// so we keep the runtime call right and silence TS at the boundary.
 	const editor = useCreateBlockNote({
@@ -238,9 +244,9 @@ function NoteEditorInner({
 
 	return (
 		<div className="note-editor flex h-full flex-col bg-[var(--color-reading-bg)]">
-			<div className="flex items-center justify-between border-b border-border-subtle/80 px-5 py-2.5 text-sm">
+			<div className="flex items-start justify-between gap-3 border-b border-border-subtle/80 px-5 py-2.5 text-sm">
 				<input
-					className="mr-2 flex-1 bg-transparent font-serif text-lg text-text-primary outline-none"
+					className="min-w-0 flex-1 bg-transparent font-serif text-lg text-text-primary outline-none"
 					onBlur={commitTitle}
 					onChange={(e) => setTitleDraft(e.target.value)}
 					onKeyDown={(e) => {
@@ -253,7 +259,7 @@ function NoteEditorInner({
 					type="text"
 					value={titleDraft}
 				/>
-				<div className="ml-4 flex items-center gap-3">
+				<div className="flex max-w-[65%] flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
 					{headerActions}
 					<div className="text-xs text-text-tertiary">
 						{saveStatus === "saving" && "Saving…"}
@@ -263,14 +269,20 @@ function NoteEditorInner({
 				</div>
 			</div>
 			<div className="note-editor__body flex-1 overflow-y-auto">
-				<BlockNoteView className="note-editor__blocknote" editor={editor} slashMenu={false}>
-					<SuggestionMenuController
-						getItems={async (query) =>
-							filterSuggestionItems(getMathSlashItems(editor as never), query)
-						}
-						triggerCharacter="/"
-					/>
-				</BlockNoteView>
+				<NoteCitationThemeProvider
+					onOpenBlock={onOpenCitationBlock}
+					palette={palette}
+					workspaceId={note.workspaceId}
+				>
+					<BlockNoteView className="note-editor__blocknote" editor={editor} slashMenu={false}>
+						<SuggestionMenuController
+							getItems={async (query) =>
+								filterSuggestionItems(getMathSlashItems(editor as never), query)
+							}
+							triggerCharacter="/"
+						/>
+					</BlockNoteView>
+				</NoteCitationThemeProvider>
 			</div>
 		</div>
 	)

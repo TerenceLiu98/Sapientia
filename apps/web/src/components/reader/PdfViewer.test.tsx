@@ -200,4 +200,27 @@ describe("PdfViewer", () => {
 		expect(await screen.findByTitle("Good block")).toBeInTheDocument()
 		expect(screen.queryByTitle("Bad block")).not.toBeInTheDocument()
 	})
+
+	it("collapses notes when the user clicks back into the PDF surface", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onInteract = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+
+		render(
+			<Wrapper>
+				<PdfViewer onInteract={onInteract} paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		await user.click(await screen.findByTestId("pdf-page-1"))
+
+		expect(onInteract).toHaveBeenCalledTimes(1)
+	})
 })

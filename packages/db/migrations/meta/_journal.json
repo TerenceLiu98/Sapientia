@@ -71,6 +71,20 @@
       "when": 1777308154982,
       "tag": "0009_special_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777319298795,
+      "tag": "0010_spicy_changeling",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777324125916,
+      "tag": "0011_red_expediter",
+      "breakpoints": true
     }
   ]
 }

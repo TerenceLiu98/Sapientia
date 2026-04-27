@@ -1,12 +1,12 @@
 import { relations, sql } from "drizzle-orm"
 import {
 	customType,
+	doublePrecision,
 	index,
 	integer,
 	pgTable,
 	text,
 	timestamp,
-	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth"
@@ -37,6 +37,16 @@ export const notes = pgTable(
 		title: text("title").notNull().default("Untitled"),
 		currentVersion: integer("current_version").notNull().default(1),
 
+		// Spatial anchor for the marginalia model (TASK-018). A note pins to a
+		// (page, y_ratio) position in its paper. y_ratio is 0..1 within the
+		// page so the anchor survives zoom and device-pixel changes.
+		// `anchorBlockId` is set only by the cite-from-block path and lets us
+		// answer "show me the note(s) that cite this block" without joining
+		// note_block_refs. All three are nullable for legacy / standalone notes.
+		anchorPage: integer("anchor_page"),
+		anchorYRatio: doublePrecision("anchor_y_ratio"),
+		anchorBlockId: text("anchor_block_id"),
+
 		// MinIO keys for this note's content. The JSON is BlockNote's authoritative
 		// document; the markdown is a lossy derived sibling kept alongside for
 		// search + agent context.
@@ -59,12 +69,10 @@ export const notes = pgTable(
 		index("idx_notes_workspace").on(table.workspaceId),
 		index("idx_notes_paper").on(table.paperId),
 		index("idx_notes_owner").on(table.ownerUserId),
-		// One paper-side note per (paper, owner). Standalone notes (paper_id
-		// NULL) are unconstrained, and soft-deleted notes are excluded so a
-		// user can re-create a note after deleting the previous one.
-		uniqueIndex("uniq_notes_paper_owner_active")
-			.on(table.paperId, table.ownerUserId)
-			.where(sql`${table.paperId} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+		// Marginalia is plural by design: many notes per (paper, owner),
+		// each anchored to a different position. The legacy
+		// uniq_notes_paper_owner_active constraint is dropped (TASK-018).
+		index("idx_notes_paper_anchor").on(table.paperId, table.anchorPage, table.anchorYRatio),
 		// Manually-applied GIN index — see the migration for the SQL. Drizzle's
 		// schema layer doesn't model GIN-on-tsvector cleanly, but listing it
 		// here keeps the intent visible. The `using` here is a no-op; the real

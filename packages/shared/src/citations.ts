@@ -17,7 +17,12 @@ export interface CitationRef {
 interface InlineNodeShape {
 	type?: string
 	content?: unknown
-	props?: { paperId?: string; blockId?: string; snapshot?: string } & Record<string, unknown>
+	props?: {
+		paperId?: string
+		blockId?: string
+		blockNumber?: number
+		snapshot?: string
+	} & Record<string, unknown>
 }
 
 interface BlockShape {
@@ -64,16 +69,20 @@ export function extractCitations(doc: unknown): CitationRef[] {
 	return [...counts.values()]
 }
 
-// Markdown surface form for a citation chip:
-//   [[<paperId>#<blockId>: <snapshot>]]
-// Chosen because it's grep-able, stays readable in any markdown reader,
-// and survives processors that don't understand it (looks like a footnote).
-// `]]` inside the snapshot is escaped to `] ]` to keep the closer unique.
+// Markdown surface form for a citation chip. New format anchors the
+// citation to its 1-based block index — e.g. `[[block 12 · paperId#blockId]]`
+// — so the markdown stays readable while still being grep-able and
+// resolvable. Older notes that only stored a snapshot fall back to that
+// snapshot inside the brackets.
 export function formatCitationToken(args: {
 	paperId: string
 	blockId: string
-	snapshot: string
+	blockNumber?: number
+	snapshot?: string
 }): string {
-	const safe = args.snapshot.replace(/\]\]/g, "] ]")
-	return `[[${args.paperId}#${args.blockId}: ${safe}]]`
+	if (typeof args.blockNumber === "number" && args.blockNumber > 0) {
+		return `[[block ${args.blockNumber} · ${args.paperId}#${args.blockId}]]`
+	}
+	const safe = (args.snapshot ?? "").replace(/\]\]/g, "] ]")
+	return `[[${args.paperId}#${args.blockId}${safe ? `: ${safe}` : ""}]]`
 }

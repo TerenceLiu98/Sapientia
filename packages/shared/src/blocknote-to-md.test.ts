@@ -112,7 +112,23 @@ describe("blocknoteJsonToMarkdown", () => {
 		expect(md).toBe("before\n\nafter")
 	})
 
-	it("emits the canonical citation token for blockCitation inline nodes", () => {
+	it("emits a `block N` citation token when blockNumber is present", () => {
+		const md = blocknoteJsonToMarkdown([
+			{
+				type: "paragraph",
+				content: [
+					{ type: "text", text: "see " },
+					{
+						type: "blockCitation",
+						props: { paperId: "p1", blockId: "b1", blockNumber: 12 },
+					},
+				],
+			},
+		])
+		expect(md).toBe("see [[block 12 · p1#b1]]")
+	})
+
+	it("falls back to the legacy snapshot form for older citation chips", () => {
 		const md = blocknoteJsonToMarkdown([
 			{
 				type: "paragraph",

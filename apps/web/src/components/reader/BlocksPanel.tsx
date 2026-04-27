@@ -1,17 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
-import type { BlockHighlight, HighlightColor } from "@/api/hooks/highlights"
+import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
+import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
 interface Props {
 	paperId: string
 	currentPage?: number
+	onInteract?: () => void
+	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	hoveredBlockId?: string | null
 	selectedBlockId?: string | null
 	selectedBlockRequestNonce?: number
+	requestedAnchorYRatio?: number
+	requestedPage?: number
+	requestedPageNonce?: number
 	onHoverBlock?: (blockId: string | null) => void
 	onSelectBlock?: (block: Block) => void
-	highlights?: BlockHighlight[]
+	colorByBlock?: Map<string, string>
+	palette?: PaletteEntry[]
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
+	onClearHighlight?: (blockId: string) => Promise<void> | void
 	// Optional render slot the citation flow (TASK-013) hooks into.
 	renderActions?: (block: Block) => React.ReactNode
 	// Map of blockId → number of notes citing it. Drives the badge.
@@ -21,12 +30,20 @@ interface Props {
 export function BlocksPanel({
 	paperId,
 	currentPage,
+	onInteract,
+	onViewportAnchorChange,
 	hoveredBlockId,
 	selectedBlockId,
 	selectedBlockRequestNonce,
+	requestedAnchorYRatio,
+	requestedPage,
+	requestedPageNonce,
 	onHoverBlock,
 	onSelectBlock,
-	highlights,
+	colorByBlock,
+	palette,
+	onSetHighlight,
+	onClearHighlight,
 	renderActions,
 	citationCounts,
 }: Props) {
@@ -43,15 +60,6 @@ export function BlocksPanel({
 		}
 		return [...m.entries()].sort(([a], [b]) => a - b)
 	}, [blocks])
-	const highlightColorsByBlock = useMemo(() => {
-		const map = new Map<string, HighlightColor[]>()
-		for (const highlight of highlights ?? []) {
-			const colors = map.get(highlight.blockId) ?? []
-			if (!colors.includes(highlight.color)) colors.push(highlight.color)
-			map.set(highlight.blockId, colors)
-		}
-		return map
-	}, [highlights])
 
 	if (isLoading) {
 		return <div className="p-4 text-sm text-text-tertiary">Loading blocks…</div>
@@ -90,16 +98,24 @@ export function BlocksPanel({
 			</div>
 			<BlocksPanelScrollBody
 				citationCounts={citationCounts}
+				colorByBlock={colorByBlock}
 				currentPage={currentPage}
 				grouped={grouped}
-				highlightColorsByBlock={highlightColorsByBlock}
 				hoveredBlockId={hoveredBlockId}
+				onClearHighlight={onClearHighlight}
 				onDismissPopover={() => setOpenPopoverFor(null)}
 				onHoverBlock={onHoverBlock}
+				onInteract={onInteract}
+				onViewportAnchorChange={onViewportAnchorChange}
 				onSelect={onSelectBlock}
+				onSetHighlight={onSetHighlight}
 				onTogglePopover={(id) => setOpenPopoverFor((cur) => (cur === id ? null : id))}
 				openPopoverFor={openPopoverFor}
 				paperId={paperId}
+				palette={palette}
+				requestedAnchorYRatio={requestedAnchorYRatio}
+				requestedPage={requestedPage}
+				requestedPageNonce={requestedPageNonce}
 				renderActions={renderActions}
 				selectedBlockId={selectedBlockId}
 				selectedBlockRequestNonce={selectedBlockRequestNonce}
@@ -115,31 +131,47 @@ export function BlocksPanel({
 // overflow ancestors and the browser kept picking the wrong one.
 function BlocksPanelScrollBody({
 	citationCounts,
+	colorByBlock,
 	currentPage,
 	grouped,
-	highlightColorsByBlock,
 	hoveredBlockId,
+	onClearHighlight,
 	onDismissPopover,
 	onHoverBlock,
+	onInteract,
+	onViewportAnchorChange,
 	onSelect,
+	onSetHighlight,
 	onTogglePopover,
 	openPopoverFor,
 	paperId,
+	palette,
+	requestedAnchorYRatio,
+	requestedPage,
+	requestedPageNonce,
 	renderActions,
 	selectedBlockId,
 	selectedBlockRequestNonce,
 }: {
 	citationCounts?: Map<string, number>
+	colorByBlock?: Map<string, string>
 	currentPage?: number
 	grouped: Array<[number, Block[]]>
-	highlightColorsByBlock: Map<string, HighlightColor[]>
 	hoveredBlockId?: string | null
+	onClearHighlight?: (blockId: string) => Promise<void> | void
 	onDismissPopover: () => void
 	onHoverBlock?: (blockId: string | null) => void
+	onInteract?: () => void
+	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	onSelect?: (block: Block) => void
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	onTogglePopover: (id: string) => void
 	openPopoverFor: string | null
 	paperId: string
+	palette?: PaletteEntry[]
+	requestedAnchorYRatio?: number
+	requestedPage?: number
+	requestedPageNonce?: number
 	renderActions?: (block: Block) => React.ReactNode
 	selectedBlockId?: string | null
 	selectedBlockRequestNonce?: number
@@ -179,6 +211,82 @@ function BlocksPanelScrollBody({
 		},
 		[onSelect],
 	)
+
+	useEffect(() => {
+		void requestedPageNonce
+		if (!requestedPage) return
+		lockUntilRef.current = Date.now() + 500
+		const container = scrollRef.current
+		const header = pageHeaderRefs.current.get(requestedPage)
+		if (!container || !header) return
+		const pageBlocks = grouped.find(([page]) => page === requestedPage)?.[1] ?? []
+		const targetBlock =
+			typeof requestedAnchorYRatio === "number"
+				? pageBlocks.reduce<Block | null>((best, block) => {
+						if (!block.bbox) return best
+						if (!best?.bbox) return block
+						const bestDistance = Math.abs(best.bbox.y + best.bbox.h / 2 - requestedAnchorYRatio)
+						const nextDistance = Math.abs(block.bbox.y + block.bbox.h / 2 - requestedAnchorYRatio)
+						return nextDistance < bestDistance ? block : best
+					}, null)
+				: null
+		const targetEl = targetBlock ? (cardRefs.current.get(targetBlock.blockId) ?? header) : header
+		const targetRect = targetEl.getBoundingClientRect()
+		const containerRect = container.getBoundingClientRect()
+		const targetTopInContent = targetRect.top - containerRect.top + container.scrollTop
+		scrollContainerToOffset(targetTopInContent - 8)
+	}, [grouped, requestedAnchorYRatio, requestedPage, requestedPageNonce, scrollContainerToOffset])
+
+	useEffect(() => {
+		const container = scrollRef.current
+		if (!container) return
+
+		const handleScroll = () => {
+			let activePage = grouped[0]?.[0]
+			let activeBlocks = grouped[0]?.[1] ?? []
+			let bestRatio = -1
+			const containerRect = container.getBoundingClientRect()
+
+			for (const [page, pageBlocks] of grouped) {
+				const section = pageHeaderRefs.current.get(page)
+				if (!section) continue
+				const rect = section.getBoundingClientRect()
+				const visibleTop = Math.max(rect.top, containerRect.top)
+				const visibleBottom = Math.min(rect.bottom, containerRect.bottom)
+				const visibleHeight = Math.max(0, visibleBottom - visibleTop)
+				const ratio = visibleHeight / Math.max(rect.height, 1)
+				if (ratio > bestRatio) {
+					bestRatio = ratio
+					activePage = page
+					activeBlocks = pageBlocks
+				}
+			}
+
+			if (activePage == null) return
+
+			const probeY = containerRect.top + container.clientHeight / 2
+			let anchorYRatio = 0.5
+			let bestDistance = Number.POSITIVE_INFINITY
+
+			for (const block of activeBlocks) {
+				if (!block.bbox) continue
+				const card = cardRefs.current.get(block.blockId)
+				if (!card) continue
+				const rect = card.getBoundingClientRect()
+				const distance = Math.abs(rect.top + rect.height / 2 - probeY)
+				if (distance < bestDistance) {
+					bestDistance = distance
+					anchorYRatio = clampUnit(block.bbox.y + block.bbox.h / 2)
+				}
+			}
+
+			onViewportAnchorChange?.(activePage, anchorYRatio)
+		}
+
+		handleScroll()
+		container.addEventListener("scroll", handleScroll, { passive: true })
+		return () => container.removeEventListener("scroll", handleScroll)
+	}, [grouped, onViewportAnchorChange])
 
 	useEffect(() => {
 		void selectedBlockRequestNonce
@@ -224,8 +332,26 @@ function BlocksPanelScrollBody({
 		scrollContainerToOffset(headerTopInContent - 8)
 	}, [currentPage, scrollContainerToOffset])
 
+	const handleUserScrollIntent = useCallback(() => {
+		lockUntilRef.current = Date.now() + 500
+	}, [])
+
+	const handleMainPointerDown = useCallback(
+		(event: MouseEvent<HTMLDivElement>) => {
+			if (!shouldCollapseNotesOnMainClick(event.target)) return
+			onInteract?.()
+		},
+		[onInteract],
+	)
+
 	return (
-		<div className="scrollbar-none min-h-0 flex-1 overflow-y-auto p-4" ref={scrollRef}>
+		<div
+			className="scrollbar-none min-h-0 flex-1 overflow-y-auto p-4"
+			onMouseDown={handleMainPointerDown}
+			onTouchMove={handleUserScrollIntent}
+			onWheel={handleUserScrollIntent}
+			ref={scrollRef}
+		>
 			{grouped.map(([page, pageBlocks]) => (
 				<div
 					className="mb-5"
@@ -249,18 +375,21 @@ function BlocksPanelScrollBody({
 							<BlockRow
 								block={block}
 								cardRefs={cardRefs}
-								isHovered={hoveredBlockId === block.blockId}
-								key={block.blockId}
-								highlightColors={highlightColorsByBlock.get(block.blockId) ?? []}
-								onHoverBlock={onHoverBlock}
-								isSelected={selectedBlockId === block.blockId}
-								onSelect={handleBlockSelectFromPane}
-								renderActions={renderActions}
 								citationCount={citationCounts?.get(block.blockId)}
+								highlightColor={colorByBlock?.get(block.blockId) ?? null}
+								isHovered={hoveredBlockId === block.blockId}
+								isSelected={selectedBlockId === block.blockId}
+								key={block.blockId}
+								onClearHighlight={onClearHighlight}
+								onDismissPopover={onDismissPopover}
+								onHoverBlock={onHoverBlock}
+								onSelect={handleBlockSelectFromPane}
+								onSetHighlight={onSetHighlight}
+								onTogglePopover={() => onTogglePopover(block.blockId)}
+								palette={palette}
 								paperId={paperId}
 								popoverOpen={openPopoverFor === block.blockId}
-								onTogglePopover={() => onTogglePopover(block.blockId)}
-								onDismissPopover={onDismissPopover}
+								renderActions={renderActions}
 							/>
 						))}
 					</div>
@@ -270,37 +399,52 @@ function BlocksPanelScrollBody({
 	)
 }
 
-// A block in the parsed-blocks pane. Defaults to flowing prose / images with
-// no chrome — the panel reads like the article itself. Hover or selection
-// adds a soft outline to make the link with the PDF overlay visible.
+function clampUnit(value: number) {
+	return Math.max(0, Math.min(1, value))
+}
+
+function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
+	if (!(target instanceof HTMLElement)) return false
+	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
+}
+
+// A block in the parsed-blocks pane. Default state is invisible chrome so
+// the pane reads like an article; hover / selection / an applied highlight
+// each contribute their own visual layer (toolbar, ring, fill).
 function BlockRow({
 	block,
 	cardRefs,
-	highlightColors,
+	citationCount,
+	highlightColor,
 	isHovered,
 	isSelected,
+	onClearHighlight,
+	onDismissPopover,
 	onHoverBlock,
 	onSelect,
-	renderActions,
-	citationCount,
+	onSetHighlight,
+	onTogglePopover,
+	palette,
 	paperId,
 	popoverOpen,
-	onTogglePopover,
-	onDismissPopover,
+	renderActions,
 }: {
 	block: Block
 	cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
-	highlightColors: HighlightColor[]
+	citationCount?: number
+	highlightColor: string | null
 	isHovered: boolean
 	isSelected: boolean
+	onClearHighlight?: (blockId: string) => Promise<void> | void
+	onDismissPopover: () => void
 	onHoverBlock?: (blockId: string | null) => void
 	onSelect?: (block: Block) => void
-	renderActions?: (block: Block) => React.ReactNode
-	citationCount?: number
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
+	onTogglePopover: () => void
+	palette?: PaletteEntry[]
 	paperId: string
 	popoverOpen: boolean
-	onTogglePopover: () => void
-	onDismissPopover: () => void
+	renderActions?: (block: Block) => React.ReactNode
 }) {
 	const setRef = (el: HTMLDivElement | null) => {
 		if (el) cardRefs.current.set(block.blockId, el)
@@ -314,15 +458,22 @@ function BlockRow({
 		void navigator.clipboard?.writeText(text)
 	}
 
-	// Subtle ring + slight tint when active. Default state has no border / fill
-	// so blocks visually flow into one continuous article.
+	// Block-level fill is the only highlight rendering — soft tinted bg
+	// applied to the whole card. Hover / selected layers blend with it.
+	const fillStyle = highlightColor
+		? (() => {
+				const colors = paletteColorVars(palette ?? [], highlightColor)
+				return { backgroundColor: colors.bg }
+			})()
+		: undefined
+
 	const wrapperClass = `group relative cursor-pointer rounded-md px-3 py-2 transition-colors ${
 		isSelected
-			? "bg-accent-50/70 ring-1 ring-inset ring-accent-600/55"
+			? "ring-1 ring-inset ring-accent-600/55"
 			: isHovered
-				? "bg-accent-50/40"
-				: "hover:bg-bg-overlay/50"
-	}`
+				? "ring-1 ring-inset ring-accent-600/25"
+				: ""
+	} ${highlightColor ? "" : "hover:bg-bg-overlay/50"}`
 
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: nesting <h1>/<figure>/<pre> inside a <button> would break their semantics; role="button" on a <div> is the right escape hatch
@@ -339,32 +490,19 @@ function BlockRow({
 			onMouseLeave={() => onHoverBlock?.(null)}
 			ref={setRef}
 			role="button"
+			style={fillStyle}
 			tabIndex={0}
 		>
-			{highlightColors.length > 0 ? (
-				<div
-					aria-hidden="true"
-					className="absolute bottom-2 left-1.5 top-2 flex w-1 overflow-hidden rounded-full"
-					data-testid={`highlight-band-${block.blockId}`}
-				>
-					{highlightColors.map((color) => (
-						<span
-							className="flex-1"
-							key={color}
-							style={{ backgroundColor: `var(--note-${color}-bg)` }}
-						/>
-					))}
-				</div>
-			) : null}
 			<BlockBody block={block} />
 			{/*
-			 * Floating action toolbar — appears on hover at the top-right of
-			 * the row. Reading-view stays clean by default; the toolbar
-			 * surfaces tools only when the user is interacting with this
-			 * block. Renders the citation count too when present so the user
-			 * doesn't have to chase a separate badge.
+			 * Floating action toolbar — appears on hover, anchored centered
+			 * just below the row. Reading-view stays clean by default; the
+			 * toolbar surfaces the citation badge, the highlight color
+			 * picker, copy, and cite/add-note in one strip. `top-full`
+			 * (zero gap) keeps the toolbar a hover descendant so cursor
+			 * transit between row and toolbar doesn't fire mouseleave.
 			 */}
-			<div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-md border border-border-subtle bg-bg-overlay/95 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+			<div className="absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
 				{citationCount && citationCount > 0 ? (
 					<span className="relative">
 						<button
@@ -387,6 +525,18 @@ function BlockRow({
 							/>
 						) : null}
 					</span>
+				) : null}
+				{palette && (onSetHighlight || onClearHighlight) ? (
+					<>
+						<BlockHighlightPicker
+							currentColor={highlightColor ?? undefined}
+							onClear={() => void onClearHighlight?.(block.blockId)}
+							onPick={(color) => void onSetHighlight?.(block.blockId, color)}
+							palette={palette}
+							size="sm"
+						/>
+						<div className="mx-0.5 h-4 w-px bg-border-subtle" />
+					</>
 				) : null}
 				<button
 					aria-label="Copy block text"
@@ -422,10 +572,8 @@ function CopyIcon() {
 	)
 }
 
-// Flowing-markdown rendering of a block. Headings get heading styles, figures
-// render their image + caption, code/equation render in monospace, list items
-// fall back to bullet list. Anything we don't recognize renders as a plain
-// paragraph.
+// Flowing-markdown rendering of a block. Highlight visualization happens at
+// the row wrapper (block-level fill); BlockBody just renders the content.
 function BlockBody({ block }: { block: Block }) {
 	switch (block.type) {
 		case "heading": {
@@ -436,9 +584,10 @@ function BlockBody({ block }: { block: Block }) {
 					: level === 2
 						? "mt-3 mb-2 font-serif text-xl font-semibold text-text-primary"
 						: "mt-2 mb-1.5 font-serif text-lg font-semibold text-text-primary"
-			if (level <= 1) return <h1 className={cls}>{block.text || "[heading]"}</h1>
-			if (level === 2) return <h2 className={cls}>{block.text || "[heading]"}</h2>
-			return <h3 className={cls}>{block.text || "[heading]"}</h3>
+			const text = block.text || "[heading]"
+			if (level <= 1) return <h1 className={cls}>{text}</h1>
+			if (level === 2) return <h2 className={cls}>{text}</h2>
+			return <h3 className={cls}>{text}</h3>
 		}
 		case "figure":
 		case "table": {

@@ -18,11 +18,17 @@ const CreateNoteBodySchema = z.object({
 	paperId: z.string().uuid().nullable().optional(),
 	title: z.string().min(1).max(200).optional(),
 	blocknoteJson: z.unknown(),
+	anchorPage: z.number().int().min(1).nullable().optional(),
+	anchorYRatio: z.number().min(0).max(1).nullable().optional(),
+	anchorBlockId: z.string().min(1).max(64).nullable().optional(),
 })
 
 const UpdateNoteBodySchema = z.object({
 	title: z.string().min(1).max(200).optional(),
 	blocknoteJson: z.unknown().optional(),
+	anchorPage: z.number().int().min(1).nullable().optional(),
+	anchorYRatio: z.number().min(0).max(1).nullable().optional(),
+	anchorBlockId: z.string().min(1).max(64).nullable().optional(),
 })
 
 // Strip server-only columns (object keys, agent cache, tsvector) before
@@ -35,6 +41,9 @@ function publicNote(note: Note) {
 		paperId: note.paperId,
 		title: note.title,
 		currentVersion: note.currentVersion,
+		anchorPage: note.anchorPage,
+		anchorYRatio: note.anchorYRatio,
+		anchorBlockId: note.anchorBlockId,
 		createdAt: note.createdAt,
 		updatedAt: note.updatedAt,
 	}
@@ -71,6 +80,9 @@ noteRoutes.post(
 			paperId: body.data.paperId ?? null,
 			title: body.data.title,
 			blocknoteJson: body.data.blocknoteJson,
+			anchorPage: body.data.anchorPage ?? null,
+			anchorYRatio: body.data.anchorYRatio ?? null,
+			anchorBlockId: body.data.anchorBlockId ?? null,
 		})
 		return c.json(publicNote(note), 201)
 	},
@@ -105,6 +117,9 @@ noteRoutes.put("/notes/:id", requireAuth, async (c) => {
 		noteId: id,
 		title: body.data.title,
 		blocknoteJson: body.data.blocknoteJson,
+		anchorPage: body.data.anchorPage,
+		anchorYRatio: body.data.anchorYRatio,
+		anchorBlockId: body.data.anchorBlockId,
 	})
 	return c.json(publicNote(updated))
 })

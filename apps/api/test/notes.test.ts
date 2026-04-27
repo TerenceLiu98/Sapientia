@@ -294,7 +294,7 @@ describe("notes", () => {
 		expect(del.status).toBe(403)
 	})
 
-	it("createNote with the same (paper, owner) is idempotent — returns the existing note", async () => {
+	it("createNote allows multiple notes per (paper, owner) — marginalia is plural (TASK-018)", async () => {
 		await signUp("note-paper@example.com")
 		const cookie = await signIn("note-paper@example.com")
 		const { userId, workspaceId } = await workspaceFor("note-paper@example.com")
@@ -304,7 +304,7 @@ describe("notes", () => {
 			.values({
 				ownerUserId: userId,
 				contentHash: `hash-${userId}-idempotent`,
-				title: "Paper for one-note rule",
+				title: "Paper for many-notes rule",
 				fileSizeBytes: 100,
 				pdfObjectKey: `papers/${userId}/x/source.pdf`,
 				parseStatus: "done",
@@ -317,21 +317,40 @@ describe("notes", () => {
 		const first = await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
 			method: "POST",
 			headers: { cookie, "content-type": "application/json" },
-			body: JSON.stringify({ paperId: paper.id, title: "Take 1", blocknoteJson: sampleDoc }),
+			body: JSON.stringify({
+				paperId: paper.id,
+				title: "Take 1",
+				blocknoteJson: sampleDoc,
+				anchorPage: 1,
+				anchorYRatio: 0.1,
+			}),
 		})
-		const noteA = (await first.json()) as { id: string; title: string }
+		const noteA = (await first.json()) as {
+			id: string
+			title: string
+			anchorPage: number | null
+			anchorYRatio: number | null
+		}
 
 		const second = await app.request(`http://localhost/api/v1/workspaces/${workspaceId}/notes`, {
 			method: "POST",
 			headers: { cookie, "content-type": "application/json" },
-			body: JSON.stringify({ paperId: paper.id, title: "Take 2", blocknoteJson: sampleDoc }),
+			body: JSON.stringify({
+				paperId: paper.id,
+				title: "Take 2",
+				blocknoteJson: sampleDoc,
+				anchorPage: 3,
+				anchorYRatio: 0.5,
+			}),
 		})
 		const noteB = (await second.json()) as { id: string; title: string }
 
-		// Same row — no duplicate, and the title from the first call wins
-		// because the second call short-circuited before any new write.
-		expect(noteB.id).toBe(noteA.id)
-		expect(noteB.title).toBe("Take 1")
+		// Two distinct rows — same paper, same owner, different anchors.
+		expect(noteB.id).not.toBe(noteA.id)
+		expect(noteA.title).toBe("Take 1")
+		expect(noteB.title).toBe("Take 2")
+		expect(noteA.anchorPage).toBe(1)
+		expect(noteA.anchorYRatio).toBeCloseTo(0.1, 3)
 	})
 
 	it("listNotes filters by paperId (?paperId=null isolates standalone notes)", async () => {

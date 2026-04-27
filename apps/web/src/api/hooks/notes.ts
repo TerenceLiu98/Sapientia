@@ -8,6 +8,11 @@ export interface Note {
 	paperId: string | null
 	title: string
 	currentVersion: number
+	// Spatial anchor (TASK-018). All three may be null on legacy or
+	// standalone notes; the notes pane groups those under "Unanchored".
+	anchorPage: number | null
+	anchorYRatio: number | null
+	anchorBlockId: string | null
 	createdAt: string
 	updatedAt: string
 }
@@ -40,6 +45,9 @@ export interface CreateNoteInput {
 	paperId?: string | null
 	title?: string
 	blocknoteJson: unknown
+	anchorPage?: number | null
+	anchorYRatio?: number | null
+	anchorBlockId?: string | null
 }
 
 export function useCreateNote(workspaceId: string) {
@@ -60,6 +68,9 @@ export interface UpdateNoteInput {
 	noteId: string
 	title?: string
 	blocknoteJson?: unknown
+	anchorPage?: number | null
+	anchorYRatio?: number | null
+	anchorBlockId?: string | null
 }
 
 export function useUpdateNote() {

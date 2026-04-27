@@ -2,42 +2,135 @@ import "katex/dist/katex.min.css"
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@blocknote/core"
 import { createReactBlockSpec, createReactInlineContentSpec } from "@blocknote/react"
 import katex from "katex"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { useHighlights } from "@/api/hooks/highlights"
+import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+
+const NoteCitationThemeContext = createContext<{
+	onOpenBlock: ((paperId: string, blockId: string) => void) | null
+	workspaceId: string | null
+	palette: PaletteEntry[]
+}>({
+	onOpenBlock: null,
+	workspaceId: null,
+	palette: [],
+})
+
+export function NoteCitationThemeProvider({
+	children,
+	onOpenBlock,
+	palette,
+	workspaceId,
+}: {
+	children: React.ReactNode
+	onOpenBlock?: (paperId: string, blockId: string) => void
+	palette: PaletteEntry[]
+	workspaceId: string | null
+}) {
+	return (
+		<NoteCitationThemeContext.Provider
+			value={{ onOpenBlock: onOpenBlock ?? null, workspaceId, palette }}
+		>
+			{children}
+		</NoteCitationThemeContext.Provider>
+	)
+}
 
 // Custom BlockNote inline content for "this note cites paper X block Y".
-// `snapshot` is captured at insert time so the chip stays meaningful even
-// if the underlying block is re-parsed away.
+// The chip displays `@[block N]` where N is the block's 1-based index in
+// its paper — a precise pointer back to the source. The leading `@`
+// hints "this is a reference, click for context" without needing a
+// tutorial. Storing the number alongside the IDs keeps the chip stable
+// and resolvable even if the paper isn't loaded when the note re-renders.
 //
-// We use `createReactInlineContentSpec` from `@blocknote/react` (vs the
-// DOM-level helper in `@blocknote/core`) so we can render the chip with
-// JSX and Tailwind classes.
+// `snapshot` is kept on the prop schema for backwards compatibility with
+// notes saved before TASK-017's redesign — older chips will still carry
+// it, and the renderer falls back to it if `blockNumber` isn't present.
 export const blockCitationSpec = createReactInlineContentSpec(
 	{
 		type: "blockCitation",
 		propSchema: {
 			paperId: { default: "" },
 			blockId: { default: "" },
+			blockNumber: { default: 0 },
 			snapshot: { default: "" },
 		},
 		content: "none",
 	},
 	{
 		render: ({ inlineContent }) => {
-			const { paperId, blockId, snapshot } = inlineContent.props
-			const label = snapshot && snapshot.length > 0 ? snapshot : `${blockId.slice(0, 6)}…`
+			const { paperId, blockId, blockNumber, snapshot } = inlineContent.props
 			return (
-				<span
-					className="mx-0.5 inline-flex max-w-[280px] cursor-default items-center gap-1 rounded-md bg-accent-100 px-1.5 py-0.5 align-baseline text-sm text-accent-700"
-					contentEditable={false}
-					title={`${paperId}#${blockId}`}
-				>
-					<span className="text-accent-500">¶</span>
-					<span className="truncate">{label}</span>
-				</span>
+				<BlockCitationChip
+					blockId={blockId}
+					blockNumber={typeof blockNumber === "number" ? blockNumber : 0}
+					paperId={paperId}
+					snapshot={typeof snapshot === "string" ? snapshot : ""}
+				/>
 			)
 		},
 	},
 )
+
+export function BlockCitationChip({
+	paperId,
+	blockId,
+	blockNumber,
+	snapshot,
+}: {
+	paperId: string
+	blockId: string
+	blockNumber: number
+	snapshot: string
+}) {
+	const numericLabel = blockNumber > 0 ? `block ${blockNumber}` : null
+	const fallback = snapshot.length > 0 ? snapshot : `${blockId.slice(0, 6)}…`
+	const label = numericLabel ?? fallback
+	const { onOpenBlock, workspaceId, palette } = useContext(NoteCitationThemeContext)
+	const { data: highlights = [] } = useHighlights(paperId, workspaceId ?? undefined)
+	const highlightColor =
+		highlights.find((highlight) => highlight.blockId === blockId)?.color ?? null
+	const chipColors = highlightColor ? paletteColorVars(palette, highlightColor) : null
+
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: chip behaves like a button but must be a span to live inside BlockNote inline content; keyboard activation handled below
+		// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handler is wired alongside the click
+		// biome-ignore lint/a11y/useSemanticElements: BlockNote inline content cannot host a real <button>; role="button" on a span is the necessary escape hatch
+		<span
+			className={`relative mx-0.5 inline-flex cursor-pointer select-none items-center rounded-md px-1.5 py-0.5 align-baseline text-sm transition-colors ${
+				chipColors
+					? "ring-1 ring-inset ring-current/10 hover:brightness-[0.97]"
+					: "bg-accent-100 text-accent-700 hover:bg-accent-200"
+			}`}
+			contentEditable={false}
+			onClick={(e) => {
+				e.stopPropagation()
+				onOpenBlock?.(paperId, blockId)
+			}}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault()
+					onOpenBlock?.(paperId, blockId)
+				}
+			}}
+			role="button"
+			style={
+				chipColors
+					? {
+							backgroundColor: chipColors.bg,
+							color: chipColors.text,
+						}
+					: undefined
+			}
+			tabIndex={0}
+			title={`${paperId}#${blockId}`}
+		>
+			<span className={chipColors ? "opacity-70" : "text-accent-500"}>@[</span>
+			<span>{label}</span>
+			<span className={chipColors ? "opacity-70" : "text-accent-500"}>]</span>
+		</span>
+	)
+}
 
 function renderKatex(latex: string, displayMode: boolean): string {
 	if (!latex) return ""

@@ -111,7 +111,13 @@ describe("extractCitations", () => {
 })
 
 describe("formatCitationToken", () => {
-	it("renders the canonical [[paperId#blockId: snapshot]] form", () => {
+	it("renders the [[block N · paperId#blockId]] form when blockNumber is set", () => {
+		expect(formatCitationToken({ paperId: "p1", blockId: "b1", blockNumber: 12 })).toBe(
+			"[[block 12 · p1#b1]]",
+		)
+	})
+
+	it("falls back to the legacy snapshot form when blockNumber is missing", () => {
 		expect(formatCitationToken({ paperId: "p1", blockId: "b1", snapshot: "Figure 1" })).toBe(
 			"[[p1#b1: Figure 1]]",
 		)
@@ -121,5 +127,9 @@ describe("formatCitationToken", () => {
 		expect(
 			formatCitationToken({ paperId: "p1", blockId: "b1", snapshot: "see [[a]] inline" }),
 		).toBe("[[p1#b1: see [[a] ] inline]]")
+	})
+
+	it("emits paperId#blockId without a trailing colon when no payload is provided", () => {
+		expect(formatCitationToken({ paperId: "p1", blockId: "b1" })).toBe("[[p1#b1]]")
 	})
 })

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Document, Page } from "react-pdf"
 import type { Block } from "@/api/hooks/blocks"
-import type { BlockHighlight, HighlightColor, HighlightInput } from "@/api/hooks/highlights"
 import { usePaperPdfUrl } from "@/api/hooks/papers"
-import { computeBlockRanges } from "./highlight-utils"
-import { SelectionToolbar } from "./SelectionToolbar"
+import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
@@ -16,54 +15,41 @@ interface PdfViewerProps {
 	requestedPage?: number
 	requestedBlockY?: number
 	requestedPageNonce?: number
+	onInteract?: () => void
 	onPageChange?: (page: number) => void
+	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	blocks?: Block[]
-	highlights?: BlockHighlight[]
+	colorByBlock?: Map<string, string>
+	palette?: PaletteEntry[]
 	hoveredBlockId?: string | null
 	selectedBlockId?: string | null
 	onHoverBlock?: (blockId: string | null) => void
 	onSelectBlock?: (block: Block) => void
-	onApplyHighlights?: (color: HighlightColor, ranges: HighlightInput[]) => Promise<void> | void
-	onDeleteHighlight?: (highlightId: string) => Promise<void> | void
-	onCiteBlocks?: (blockIds: string[]) => Promise<void> | void
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
+	onClearHighlight?: (blockId: string) => Promise<void> | void
+	// Mirrors BlocksPanel's renderActions slot — caller emits the
+	// cite/add-note button so the PDF toolbar matches the parsed-blocks pane.
+	renderActions?: (block: Block) => React.ReactNode
 }
 
-interface ToolbarState {
-	position: { top: number; left: number }
-	hits: HighlightInput[]
-}
-
-interface WholeBlockPopoverState {
-	block: Block
-	page: number
-}
-
-const WHOLE_BLOCK_TYPES = new Set<Block["type"]>(["figure", "table", "equation"])
-const TEXT_SELECTABLE_TYPES = new Set<Block["type"]>(["text", "heading", "list", "code", "other"])
-
-const HIGHLIGHT_COLORS: HighlightColor[] = [
-	"questioning",
-	"important",
-	"original",
-	"pending",
-	"background",
-]
-
-export function PdfViewer({
+function PdfViewerInner({
 	paperId,
 	requestedPage,
 	requestedBlockY,
 	requestedPageNonce,
+	onInteract,
 	onPageChange,
+	onViewportAnchorChange,
 	blocks,
-	highlights,
+	colorByBlock,
+	palette,
 	hoveredBlockId,
 	selectedBlockId,
 	onHoverBlock,
 	onSelectBlock,
-	onApplyHighlights,
-	onDeleteHighlight,
-	onCiteBlocks,
+	onSetHighlight,
+	onClearHighlight,
+	renderActions,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
@@ -73,44 +59,9 @@ export function PdfViewer({
 	const [showLayoutBoxes, setShowLayoutBoxes] = useState(false)
 	const [basePageWidth, setBasePageWidth] = useState<number | null>(null)
 	const [renderError, setRenderError] = useState<string | null>(null)
-	const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null)
-	const [wholeBlockPopover, setWholeBlockPopover] = useState<WholeBlockPopoverState | null>(null)
 	const viewerRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-
-	const updateToolbarFromSelection = useCallback(() => {
-		const root = viewerRef.current
-		const selection = window.getSelection()
-		if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-			setToolbarState(null)
-			return
-		}
-		const range = selection.getRangeAt(0)
-		if (!root.contains(range.commonAncestorContainer)) {
-			setToolbarState(null)
-			return
-		}
-		const hits = computeBlockRanges(selection).map((hit) => ({
-			blockId: hit.blockId,
-			charStart: hit.charStart,
-			charEnd: hit.charEnd,
-			selectedText: hit.selectedText,
-		}))
-		if (hits.length === 0) {
-			setToolbarState(null)
-			return
-		}
-		const rect = range.getBoundingClientRect()
-		setToolbarState({
-			position: {
-				top: Math.max(12, rect.top - 56),
-				left: Math.max(12, Math.min(window.innerWidth - 252, rect.left + rect.width / 2 - 112)),
-			},
-			hits,
-		})
-		setWholeBlockPopover(null)
-	}, [])
 
 	useEffect(() => {
 		void paperId
@@ -121,8 +72,6 @@ export function PdfViewer({
 		setShowLayoutBoxes(false)
 		setBasePageWidth(null)
 		setRenderError(null)
-		setToolbarState(null)
-		setWholeBlockPopover(null)
 		pageRefs.current.clear()
 	}, [paperId])
 
@@ -136,16 +85,6 @@ export function PdfViewer({
 		}
 		return map
 	}, [blocks])
-
-	const highlightsByBlock = useMemo(() => {
-		const map = new Map<string, BlockHighlight[]>()
-		for (const highlight of highlights ?? []) {
-			const list = map.get(highlight.blockId) ?? []
-			list.push(highlight)
-			map.set(highlight.blockId, list)
-		}
-		return map
-	}, [highlights])
 
 	const scrollToPage = useCallback((page: number, blockYRatio?: number) => {
 		const el = pageRefs.current.get(page)
@@ -175,33 +114,6 @@ export function PdfViewer({
 		setScale(clamp(availableWidth / basePageWidth))
 	}, [basePageWidth])
 
-	const dismissToolbar = useCallback(() => {
-		window.getSelection()?.removeAllRanges()
-		setToolbarState(null)
-	}, [])
-
-	const applyColor = useCallback(
-		async (color: HighlightColor) => {
-			if (!toolbarState || !onApplyHighlights) return
-			await onApplyHighlights(color, toolbarState.hits)
-			dismissToolbar()
-		},
-		[dismissToolbar, onApplyHighlights, toolbarState],
-	)
-
-	const copySelection = useCallback(() => {
-		const text = toolbarState?.hits.map((hit) => hit.selectedText).join("\n") ?? ""
-		if (!text.trim()) return
-		void navigator.clipboard?.writeText(text)
-		dismissToolbar()
-	}, [dismissToolbar, toolbarState])
-
-	const citeSelection = useCallback(async () => {
-		if (!toolbarState || !onCiteBlocks) return
-		await onCiteBlocks(toolbarState.hits.map((hit) => hit.blockId))
-		dismissToolbar()
-	}, [dismissToolbar, onCiteBlocks, toolbarState])
-
 	useEffect(() => {
 		onPageChange?.(currentPage)
 	}, [currentPage, onPageChange])
@@ -219,6 +131,8 @@ export function PdfViewer({
 		const handleScroll = () => {
 			let activePage = 1
 			let bestRatio = 0
+			let activePageTop = 0
+			let activePageHeight = 1
 			const containerRect = container.getBoundingClientRect()
 			for (const [page, el] of pageRefs.current.entries()) {
 				const rect = el.getBoundingClientRect()
@@ -229,14 +143,22 @@ export function PdfViewer({
 				if (ratio > bestRatio) {
 					bestRatio = ratio
 					activePage = page
+					activePageTop = rect.top
+					activePageHeight = rect.height
 				}
 			}
 			setCurrentPage(activePage)
+			if (activePageHeight > 0) {
+				const viewportMidY = containerRect.top + container.clientHeight / 2
+				const yRatio = clampUnit((viewportMidY - activePageTop) / activePageHeight)
+				onViewportAnchorChange?.(activePage, yRatio)
+			}
 		}
 
+		handleScroll()
 		container.addEventListener("scroll", handleScroll, { passive: true })
 		return () => container.removeEventListener("scroll", handleScroll)
-	}, [numPages])
+	}, [numPages, onViewportAnchorChange])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -281,16 +203,13 @@ export function PdfViewer({
 		return () => observer.disconnect()
 	}, [fitToWidth, scaleMode])
 
-	useEffect(() => {
-		document.addEventListener("selectionchange", updateToolbarFromSelection)
-		document.addEventListener("mouseup", updateToolbarFromSelection)
-		document.addEventListener("keyup", updateToolbarFromSelection)
-		return () => {
-			document.removeEventListener("selectionchange", updateToolbarFromSelection)
-			document.removeEventListener("mouseup", updateToolbarFromSelection)
-			document.removeEventListener("keyup", updateToolbarFromSelection)
-		}
-	}, [updateToolbarFromSelection])
+	const handleMainPointerDown = useCallback(
+		(event: MouseEvent<HTMLDivElement>) => {
+			if (!shouldCollapseNotesOnMainClick(event.target)) return
+			onInteract?.()
+		},
+		[onInteract],
+	)
 
 	if (isLoading) {
 		return <div className="p-8 text-text-tertiary">Loading PDF…</div>
@@ -382,7 +301,11 @@ export function PdfViewer({
 				</div>
 			</div>
 
-			<div className="scrollbar-none flex-1 overflow-auto" ref={scrollContainerRef}>
+			<div
+				className="scrollbar-none flex-1 overflow-auto"
+				onMouseDown={handleMainPointerDown}
+				ref={scrollContainerRef}
+			>
 				<Document
 					className="flex flex-col items-center gap-4 py-4"
 					file={data.url}
@@ -400,25 +323,18 @@ export function PdfViewer({
 						? Array.from({ length: numPages }, (_, index) => index + 1).map((page) => (
 								<PdfPageWithOverlay
 									blocks={blocksByPage.get(page)}
-									highlightsByBlock={highlightsByBlock}
+									colorByBlock={colorByBlock}
 									hoveredBlockId={hoveredBlockId}
 									key={page}
-									onApplyHighlights={onApplyHighlights}
-									onDeleteHighlight={onDeleteHighlight}
+									onClearHighlight={onClearHighlight}
 									onHoverBlock={onHoverBlock}
-									onOpenWholeBlockPopover={(block) => {
-										setWholeBlockPopover((current) =>
-											current?.block.blockId === block.blockId ? null : { block, page },
-										)
-										dismissToolbar()
-									}}
 									onPointDims={(dims) => setBasePageWidth((current) => current ?? dims.w)}
 									onSelectBlock={onSelectBlock}
-									openWholeBlockId={
-										wholeBlockPopover?.page === page ? wholeBlockPopover.block.blockId : null
-									}
+									onSetHighlight={onSetHighlight}
 									page={page}
 									pageRefs={pageRefs}
+									palette={palette}
+									renderActions={renderActions}
 									scale={scale}
 									selectedBlockId={selectedBlockId}
 									showLayoutBoxes={showLayoutBoxes}
@@ -427,30 +343,24 @@ export function PdfViewer({
 						: null}
 				</Document>
 			</div>
-
-			{toolbarState ? (
-				<SelectionToolbar
-					onAsk={() => {
-						dismissToolbar()
-						window.alert("Ask agent is coming soon.")
-					}}
-					onCite={() => void citeSelection()}
-					onColor={(color) => void applyColor(color)}
-					onCopy={copySelection}
-					onDismiss={dismissToolbar}
-					position={toolbarState.position}
-				/>
-			) : (
-				<div className="pointer-events-none absolute right-4 top-14 rounded-md border border-border-subtle bg-bg-overlay/92 px-2.5 py-1.5 text-xs text-text-tertiary shadow-[var(--shadow-popover)]">
-					Select text in PDF to highlight
-				</div>
-			)}
 		</div>
 	)
 }
 
+export const PdfViewer = memo(PdfViewerInner)
+PdfViewer.displayName = "PdfViewer"
+
 function clamp(scale: number) {
 	return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale))
+}
+
+function clampUnit(value: number) {
+	return Math.max(0, Math.min(1, value))
+}
+
+function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
+	if (!(target instanceof HTMLElement)) return false
+	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
 }
 
 function isRenderableBbox(
@@ -466,35 +376,35 @@ function isRenderableBbox(
 	return true
 }
 
-function PdfPageWithOverlay({
+const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	blocks,
-	highlightsByBlock,
+	colorByBlock,
 	hoveredBlockId,
-	onApplyHighlights,
-	onDeleteHighlight,
+	onClearHighlight,
 	onHoverBlock,
-	onOpenWholeBlockPopover,
 	onPointDims,
 	onSelectBlock,
-	openWholeBlockId,
+	onSetHighlight,
 	page,
 	pageRefs,
+	palette,
+	renderActions,
 	scale,
 	selectedBlockId,
 	showLayoutBoxes,
 }: {
 	blocks: Block[] | undefined
-	highlightsByBlock: Map<string, BlockHighlight[]>
+	colorByBlock?: Map<string, string>
 	hoveredBlockId?: string | null
-	onApplyHighlights?: (color: HighlightColor, ranges: HighlightInput[]) => Promise<void> | void
-	onDeleteHighlight?: (highlightId: string) => Promise<void> | void
+	onClearHighlight?: (blockId: string) => Promise<void> | void
 	onHoverBlock?: (blockId: string | null) => void
-	onOpenWholeBlockPopover?: (block: Block) => void
 	onPointDims?: (dims: { w: number; h: number }) => void
 	onSelectBlock?: (block: Block) => void
-	openWholeBlockId?: string | null
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	page: number
 	pageRefs: React.MutableRefObject<Map<number, HTMLDivElement>>
+	palette?: PaletteEntry[]
+	renderActions?: (block: Block) => React.ReactNode
 	scale: number
 	selectedBlockId?: string | null
 	showLayoutBoxes: boolean
@@ -577,30 +487,26 @@ function PdfPageWithOverlay({
 				>
 					{blocks.map((block) => {
 						if (!isRenderableBbox(block.bbox)) return null
-						const blockHighlights = highlightsByBlock.get(block.blockId) ?? []
-						const wholeBlockHighlights = blockHighlights.filter(
-							(highlight) => highlight.charStart == null || highlight.charEnd == null,
-						)
-						const blockText = getBlockText(block)
 						const isSelected = selectedBlockId === block.blockId
 						const isHovered = hoveredBlockId === block.blockId
-						const isWholeBlockType = WHOLE_BLOCK_TYPES.has(block.type)
-						const showPopover = openWholeBlockId === block.blockId
-						const tone = wholeBlockHighlights[0]?.color
+						const highlightColor = colorByBlock?.get(block.blockId) ?? null
 						const showBoxChrome =
-							showLayoutBoxes ||
-							isSelected ||
-							isHovered ||
-							wholeBlockHighlights.length > 0 ||
-							showPopover
+							showLayoutBoxes || isSelected || isHovered || highlightColor !== null
+						const fill = highlightColor ? paletteColorVars(palette ?? [], highlightColor) : null
+						const hasToolbar = palette && (onSetHighlight || onClearHighlight || renderActions)
 
 						return (
-							// biome-ignore lint/a11y/noStaticElementInteractions: the block shell only mirrors hover state for PDF↔blocks sync; interactive actions live on descendants
+							// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
+							// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
 							<div
-								className="absolute"
+								className="group absolute cursor-pointer"
 								data-block-id={block.blockId}
 								data-block-type={block.type}
 								key={block.blockId}
+								onClick={(e) => {
+									e.stopPropagation()
+									onSelectBlock?.(block)
+								}}
 								onMouseEnter={() => onHoverBlock?.(block.blockId)}
 								onMouseLeave={() => onHoverBlock?.(null)}
 								style={{
@@ -622,80 +528,47 @@ function PdfPageWithOverlay({
 													: "border-accent-600/35 bg-accent-600/3"
 									}`}
 									style={
-										tone
+										fill
 											? {
-													background: `color-mix(in oklch, var(--note-${tone}-bg) 32%, transparent)`,
+													background: `color-mix(in oklch, ${fill.bg} 38%, transparent)`,
 												}
 											: undefined
 									}
 								/>
-								{isWholeBlockType ? (
-									<>
+								{hasToolbar ? (
+									// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
+									<div
+										className="-translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+										onClick={(e) => e.stopPropagation()}
+										onKeyDown={(e) => e.stopPropagation()}
+										onMouseDown={(e) => e.stopPropagation()}
+									>
+										{palette && (onSetHighlight || onClearHighlight) ? (
+											<>
+												<BlockHighlightPicker
+													currentColor={highlightColor ?? undefined}
+													onClear={() => void onClearHighlight?.(block.blockId)}
+													onPick={(color) => void onSetHighlight?.(block.blockId, color)}
+													palette={palette}
+													size="sm"
+												/>
+												<div className="mx-0.5 h-4 w-px bg-border-subtle" />
+											</>
+										) : null}
 										<button
-											className="absolute inset-0 z-[1] cursor-pointer rounded-[2px] bg-transparent"
+											aria-label="Copy block text"
+											className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary"
 											onClick={(e) => {
 												e.stopPropagation()
-												onSelectBlock?.(block)
-												onOpenWholeBlockPopover?.(block)
+												const text = (block.caption ?? block.text ?? "").trim()
+												if (text) void navigator.clipboard?.writeText(text)
 											}}
-											title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
+											title="Copy"
 											type="button"
-										/>
-										{showPopover && onApplyHighlights ? (
-											<div className="absolute right-1 top-1 z-[2] rounded-md border border-border-default bg-bg-overlay p-1 shadow-[var(--shadow-popover)]">
-												<div className="flex items-center gap-1">
-													{HIGHLIGHT_COLORS.map((color) => (
-														<button
-															aria-label={`Highlight ${block.type} as ${color}`}
-															className="h-5 w-5 rounded-sm border border-border-subtle"
-															key={color}
-															onClick={(e) => {
-																e.stopPropagation()
-																void onApplyHighlights(color, [
-																	{
-																		blockId: block.blockId,
-																		charStart: null,
-																		charEnd: null,
-																		selectedText: (
-																			block.caption ??
-																			block.text ??
-																			`[${block.type}]`
-																		).trim(),
-																	},
-																])
-																onOpenWholeBlockPopover?.(block)
-															}}
-															style={{ backgroundColor: `var(--note-${color}-bg)` }}
-															type="button"
-														/>
-													))}
-												</div>
-											</div>
-										) : null}
-									</>
-								) : TEXT_SELECTABLE_TYPES.has(block.type) ? (
-									// biome-ignore lint/a11y/noStaticElementInteractions: text selection needs a non-button text container so the browser selection model works normally
-									// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation is handled in the parsed-blocks pane; this click only focuses the PDF block when no text selection exists
-									<div
-										className="absolute inset-0 z-[1] overflow-hidden rounded-[2px] px-1 py-0.5"
-										onClick={(e) => {
-											if ((window.getSelection()?.toString() ?? "").trim()) return
-											e.stopPropagation()
-											onSelectBlock?.(block)
-										}}
-									>
-										<span
-											className={`pdf-block-text whitespace-pre-wrap break-words font-serif select-text ${
-												block.type === "heading" ? "font-semibold leading-[1.15]" : "leading-[1.28]"
-											}`}
-											data-block-text="true"
-											style={{
-												color: "transparent",
-												fontSize: estimateFontSize(block),
-											}}
 										>
-											{renderHighlightSegments(blockText, blockHighlights, onDeleteHighlight)}
-										</span>
+											<CopyIcon />
+										</button>
+										{renderActions ? renderActions(block) : null}
 									</div>
 								) : null}
 							</div>
@@ -705,109 +578,27 @@ function PdfPageWithOverlay({
 			) : null}
 		</div>
 	)
-}
+})
 
-function estimateFontSize(block: Block) {
-	if (block.type === "heading") {
-		const level = block.headingLevel ?? 2
-		if (level <= 1) return "22px"
-		if (level === 2) return "18px"
-		return "15px"
-	}
-	if (block.type === "code") return "11px"
-	return "12px"
-}
+PdfPageWithOverlay.displayName = "PdfPageWithOverlay"
 
-function getBlockText(block: Block) {
-	if (block.caption?.trim()) return block.caption
-	if (block.text?.trim()) return block.text
-	return `[${block.type}]`
-}
-
-function renderHighlightSegments(
-	text: string,
-	highlights: BlockHighlight[],
-	onDeleteHighlight?: (highlightId: string) => Promise<void> | void,
-) {
-	const segments = buildSegments(text, highlights)
-	return segments.map((segment) => {
-		if (segment.kind === "plain") {
-			return <span key={segment.key}>{segment.text}</span>
-		}
-		return (
-			<span
-				className="sapientia-highlight group/highlight relative rounded-[2px]"
-				data-highlight-id={segment.highlight.id}
-				key={segment.highlight.id}
-				style={{
-					backgroundColor: `var(--note-${segment.highlight.color}-bg)`,
-					color: "var(--color-text-primary)",
-				}}
-			>
-				{segment.text}
-				{onDeleteHighlight ? (
-					<button
-						aria-label="Remove highlight"
-						className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full border border-border-default bg-bg-primary text-[9px] leading-none text-text-secondary opacity-0 shadow-sm transition-opacity group-hover/highlight:opacity-100"
-						onClick={(e) => {
-							e.stopPropagation()
-							void onDeleteHighlight(segment.highlight.id)
-						}}
-						type="button"
-					>
-						×
-					</button>
-				) : null}
-			</span>
-		)
-	})
-}
-
-function buildSegments(text: string, highlights: BlockHighlight[]) {
-	const ranged = highlights
-		.filter(
-			(highlight): highlight is BlockHighlight & { charStart: number; charEnd: number } =>
-				typeof highlight.charStart === "number" && typeof highlight.charEnd === "number",
-		)
-		.filter((highlight) => highlight.charEnd > highlight.charStart)
-		.sort((a, b) => a.charStart - b.charStart || a.charEnd - b.charEnd)
-
-	const segments: Array<
-		| { kind: "plain"; key: string; text: string }
-		| { kind: "highlight"; key: string; text: string; highlight: BlockHighlight }
-	> = []
-	let cursor = 0
-
-	for (const highlight of ranged) {
-		const start = Math.max(cursor, highlight.charStart)
-		const end = Math.min(text.length, highlight.charEnd)
-		if (start > cursor) {
-			segments.push({
-				kind: "plain",
-				key: `plain-${cursor}-${start}`,
-				text: text.slice(cursor, start),
-			})
-		}
-		if (end > start) {
-			segments.push({
-				kind: "highlight",
-				key: `highlight-${highlight.id}-${start}-${end}`,
-				text: text.slice(start, end),
-				highlight,
-			})
-			cursor = end
-		}
-	}
-
-	if (cursor < text.length) {
-		segments.push({
-			kind: "plain",
-			key: `plain-${cursor}-${text.length}`,
-			text: text.slice(cursor),
-		})
-	}
-
-	return segments.length > 0 ? segments : [{ kind: "plain" as const, key: "plain-full", text }]
+function CopyIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.6"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<rect height="13" rx="2" width="13" x="9" y="9" />
+			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+		</svg>
+	)
 }
 
 function LayoutBoxesIcon() {

@@ -49,9 +49,10 @@ export function BlockCitationsPopover({
 						<li key={n.noteId}>
 							<Link
 								className="block rounded px-1.5 py-1 text-sm text-text-primary hover:bg-surface-hover"
+								hash={`note=${n.noteId}`}
 								onClick={onDismiss}
-								params={{ paperId, noteId: n.noteId }}
-								to="/papers/$paperId/notes/$noteId"
+								params={{ paperId }}
+								to="/papers/$paperId"
 							>
 								<div className="truncate font-medium">{n.title}</div>
 								<div className="text-xs text-text-tertiary">

@@ -11,7 +11,7 @@ function PaperReaderRoute() {
 
 	return (
 		<ProtectedRoute>
-			<PaperWorkspace activeNoteId={null} paperId={paperId} />
+			<PaperWorkspace paperId={paperId} />
 		</ProtectedRoute>
 	)
 }
