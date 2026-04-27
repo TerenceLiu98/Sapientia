@@ -14,11 +14,23 @@ export interface PdfUrlResponse {
 	expiresInSeconds: number
 }
 
+function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
+	return status === "pending" || status === "parsing"
+}
+
 export function usePapers(workspaceId: string) {
 	return useQuery<Paper[]>({
 		queryKey: ["papers", workspaceId],
 		queryFn: () => apiFetch<Paper[]>(`/api/v1/workspaces/${workspaceId}/papers`),
 		enabled: Boolean(workspaceId),
+		// Poll while any paper in the workspace is still being parsed so the
+		// status badge updates without a manual refresh. v0.2 should switch to
+		// SSE for cheaper, lower-latency updates.
+		refetchInterval: (query) => {
+			const list = query.state.data
+			if (!list) return false
+			return list.some((p) => isInFlightStatus(p.parseStatus)) ? 2000 : false
+		},
 	})
 }
 
@@ -27,6 +39,10 @@ export function usePaper(paperId: string) {
 		queryKey: ["paper", paperId],
 		queryFn: () => apiFetch<Paper>(`/api/v1/papers/${paperId}`),
 		enabled: Boolean(paperId),
+		refetchInterval: (query) => {
+			const status = query.state.data?.parseStatus
+			return isInFlightStatus(status) ? 2000 : false
+		},
 	})
 }
 

@@ -7,6 +7,8 @@
 		"dev": "bun --hot src/index.ts",
 		"build": "bun build src/index.ts --target=bun --outdir=dist",
 		"start": "bun dist/index.js",
+		"worker:dev": "bun src/worker.ts",
+		"worker:start": "bun src/worker.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run"
 	},
@@ -15,6 +17,7 @@
 		"@aws-sdk/s3-request-presigner": "^3.1037.0",
 		"@sapientia/db": "workspace:*",
 		"better-auth": "^1.6.9",
+		"bullmq": "^5.76.2",
 		"drizzle-orm": "^0.45.2",
 		"hono": "^4.6.0",
 		"ioredis": "^5.10.1",

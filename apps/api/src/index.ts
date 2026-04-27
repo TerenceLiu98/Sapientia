@@ -6,6 +6,7 @@ import { config } from "./config"
 import { closeDb, db } from "./db"
 import { logger as appLogger } from "./logger"
 import { authProvidersRoutes } from "./routes/auth-providers"
+import { healthRoutes } from "./routes/health"
 import { meRoutes } from "./routes/me"
 import { paperRoutes } from "./routes/papers"
 import { workspaceRoutes } from "./routes/workspaces"
@@ -48,6 +49,7 @@ app.get("/health", async (c) => {
 
 const apiV1 = new Hono()
 apiV1.route("/", authProvidersRoutes)
+apiV1.route("/", healthRoutes)
 apiV1.route("/", meRoutes)
 apiV1.route("/", workspaceRoutes)
 apiV1.route("/", paperRoutes)

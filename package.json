@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev:web": "pnpm --filter @sapientia/web dev",
 		"dev:api": "pnpm --filter @sapientia/api dev",
+		"worker:dev": "pnpm --filter @sapientia/api worker:dev",
 		"infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
 		"infra:down": "docker compose -f infra/docker/docker-compose.yml down",
 		"infra:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",

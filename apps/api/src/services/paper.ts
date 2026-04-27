@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import type { Database, Paper } from "@sapientia/db"
 import { memberships, papers, workspacePapers } from "@sapientia/db"
 import { and, eq, isNull } from "drizzle-orm"
+import { enqueuePaperParse } from "../queues/paper-parse"
 import { uploadPdfToS3 } from "./s3-client"
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
@@ -90,6 +91,11 @@ export async function uploadPaper(args: {
 		.returning()
 
 	await linkPaperToWorkspace(paper.id, workspaceId, userId, db)
+
+	// Fresh upload only — dedup hits return early above and reuse the existing
+	// paper (and thus its parse status / blocks).
+	await enqueuePaperParse({ paperId: paper.id, userId })
+
 	return paper
 }
 
