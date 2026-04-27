@@ -7,6 +7,7 @@ import { BlockHighlightPicker } from "./BlockHighlightPicker"
 interface Props {
 	paperId: string
 	currentPage?: number
+	externalFollowLockUntil?: number
 	onInteract?: () => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	hoveredBlockId?: string | null
@@ -30,6 +31,7 @@ interface Props {
 export function BlocksPanel({
 	paperId,
 	currentPage,
+	externalFollowLockUntil,
 	onInteract,
 	onViewportAnchorChange,
 	hoveredBlockId,
@@ -100,6 +102,7 @@ export function BlocksPanel({
 				citationCounts={citationCounts}
 				colorByBlock={colorByBlock}
 				currentPage={currentPage}
+				externalFollowLockUntil={externalFollowLockUntil}
 				grouped={grouped}
 				hoveredBlockId={hoveredBlockId}
 				onClearHighlight={onClearHighlight}
@@ -133,6 +136,7 @@ function BlocksPanelScrollBody({
 	citationCounts,
 	colorByBlock,
 	currentPage,
+	externalFollowLockUntil,
 	grouped,
 	hoveredBlockId,
 	onClearHighlight,
@@ -156,6 +160,7 @@ function BlocksPanelScrollBody({
 	citationCounts?: Map<string, number>
 	colorByBlock?: Map<string, string>
 	currentPage?: number
+	externalFollowLockUntil?: number
 	grouped: Array<[number, Block[]]>
 	hoveredBlockId?: string | null
 	onClearHighlight?: (blockId: string) => Promise<void> | void
@@ -204,6 +209,12 @@ function BlocksPanelScrollBody({
 	// fully-visible card scrolls it the few pixels needed to be exactly
 	// centered in the viewport.
 	const skipNextSelectionScrollRef = useRef(false)
+
+	useEffect(() => {
+		if (!externalFollowLockUntil) return
+		lockUntilRef.current = Math.max(lockUntilRef.current, externalFollowLockUntil)
+	}, [externalFollowLockUntil])
+
 	const handleBlockSelectFromPane = useCallback(
 		(block: Block) => {
 			skipNextSelectionScrollRef.current = true
@@ -216,6 +227,10 @@ function BlocksPanelScrollBody({
 		void requestedPageNonce
 		if (!requestedPage) return
 		lockUntilRef.current = Date.now() + 500
+		// A programmatic jump already positions the pane at the target block.
+		// Skip the next selection-driven recenter so we don't "correct" the
+		// scroll a second time and create a visible bounce.
+		skipNextSelectionScrollRef.current = true
 		const container = scrollRef.current
 		const header = pageHeaderRefs.current.get(requestedPage)
 		if (!container || !header) return

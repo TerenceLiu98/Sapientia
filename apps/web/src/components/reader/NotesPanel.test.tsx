@@ -1,11 +1,18 @@
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Note } from "@/api/hooks/notes"
 
 const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
 
 vi.mock("@/components/notes/NoteEditor", () => ({
-	NoteEditor: () => <div>Editor</div>,
+	NoteEditor: (props: { onOpenCitationBlock?: (paperId: string, blockId: string) => void }) => (
+		<div>
+			Editor
+			<button onClick={() => props.onOpenCitationBlock?.("paper-1", "block-9")} type="button">
+				Open citation block
+			</button>
+		</div>
+	),
 }))
 
 async function importNotesPanel() {
@@ -178,5 +185,254 @@ describe("NotesPanel", () => {
 		expect(getByText("Linked")).toBeInTheDocument()
 		expect(queryByText("1 note cites the selected block")).not.toBeInTheDocument()
 		expect(queryByText("2 notes cite the selected block")).not.toBeInTheDocument()
+	})
+
+	it("does not auto-follow while a cite chip jump from the note is in flight", async () => {
+		const notes = [
+			makeNote({ id: "note-1", title: "Focused note", anchorPage: 1, anchorYRatio: 0.2 }),
+		]
+		const scrollTo = vi.fn()
+		const onOpenCitationBlock = vi.fn()
+		Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+			configurable: true,
+			value: scrollTo,
+		})
+		HTMLElement.prototype.getBoundingClientRect = function () {
+			const text = this.textContent ?? ""
+			if (this.className.includes("overflow-y-auto")) {
+				return {
+					top: 0,
+					bottom: 400,
+					height: 400,
+					left: 0,
+					right: 320,
+					width: 320,
+					x: 0,
+					y: 0,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Focused note")) {
+				return {
+					top: 40,
+					bottom: 100,
+					height: 60,
+					left: 0,
+					right: 320,
+					width: 320,
+					x: 0,
+					y: 40,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Page 2")) {
+				return {
+					top: 16,
+					bottom: 40,
+					height: 24,
+					left: 0,
+					right: 100,
+					width: 100,
+					x: 0,
+					y: 16,
+					toJSON() {},
+				}
+			}
+			return {
+				top: 0,
+				bottom: 0,
+				height: 0,
+				left: 0,
+				right: 0,
+				width: 0,
+				x: 0,
+				y: 0,
+				toJSON() {},
+			}
+		}
+
+		const NotesPanel = await importNotesPanel()
+		const { rerender } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.2}
+				currentPage={1}
+				expandedNoteId="note-1"
+				notes={notes}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				onOpenCitationBlock={onOpenCitationBlock}
+			/>,
+		)
+
+		scrollTo.mockClear()
+		fireEvent.click(screen.getByRole("button", { name: "Open citation block" }))
+		expect(onOpenCitationBlock).toHaveBeenCalledWith("paper-1", "block-9")
+
+		rerender(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.65}
+				currentPage={2}
+				expandedNoteId="note-1"
+				notes={notes}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				onOpenCitationBlock={onOpenCitationBlock}
+			/>,
+		)
+
+		expect(scrollTo).not.toHaveBeenCalled()
+	})
+
+	it("does not auto-follow to another page while a note is expanded", async () => {
+		const notes = [
+			makeNote({ id: "note-1", title: "Page 2 note", anchorPage: 2, anchorYRatio: 0.2 }),
+			makeNote({ id: "note-2", title: "Page 1 note", anchorPage: 1, anchorYRatio: 0.4 }),
+		]
+		const scrollTo = vi.fn()
+		Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+			configurable: true,
+			value: scrollTo,
+		})
+		HTMLElement.prototype.getBoundingClientRect = function () {
+			const text = this.textContent ?? ""
+			if (this.className.includes("overflow-y-auto")) {
+				return {
+					top: 0,
+					bottom: 400,
+					height: 400,
+					left: 0,
+					right: 320,
+					width: 320,
+					x: 0,
+					y: 0,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Page 1")) {
+				return {
+					top: 16,
+					bottom: 40,
+					height: 24,
+					left: 0,
+					right: 100,
+					width: 100,
+					x: 0,
+					y: 16,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Page 2")) {
+				return {
+					top: 200,
+					bottom: 224,
+					height: 24,
+					left: 0,
+					right: 100,
+					width: 100,
+					x: 0,
+					y: 200,
+					toJSON() {},
+				}
+			}
+			return {
+				top: 0,
+				bottom: 0,
+				height: 0,
+				left: 0,
+				right: 0,
+				width: 0,
+				x: 0,
+				y: 0,
+				toJSON() {},
+			}
+		}
+
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.4}
+				currentPage={1}
+				expandedNoteId="note-1"
+				notes={notes}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		expect(scrollTo).not.toHaveBeenCalled()
+	})
+
+	it("honors an external follow lock during a cross-pane jump", async () => {
+		const notes = [
+			makeNote({ id: "note-1", title: "Page 1 note", anchorPage: 1, anchorYRatio: 0.4 }),
+		]
+		const scrollTo = vi.fn()
+		Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+			configurable: true,
+			value: scrollTo,
+		})
+		HTMLElement.prototype.getBoundingClientRect = function () {
+			const text = this.textContent ?? ""
+			if (this.className.includes("overflow-y-auto")) {
+				return {
+					top: 0,
+					bottom: 400,
+					height: 400,
+					left: 0,
+					right: 320,
+					width: 320,
+					x: 0,
+					y: 0,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Page 2")) {
+				return {
+					top: 16,
+					bottom: 40,
+					height: 24,
+					left: 0,
+					right: 100,
+					width: 100,
+					x: 0,
+					y: 16,
+					toJSON() {},
+				}
+			}
+			return {
+				top: 0,
+				bottom: 0,
+				height: 0,
+				left: 0,
+				right: 0,
+				width: 0,
+				x: 0,
+				y: 0,
+				toJSON() {},
+			}
+		}
+
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.65}
+				currentPage={2}
+				externalFollowLockUntil={Date.now() + 1000}
+				expandedNoteId={null}
+				notes={notes}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		expect(scrollTo).not.toHaveBeenCalled()
 	})
 })

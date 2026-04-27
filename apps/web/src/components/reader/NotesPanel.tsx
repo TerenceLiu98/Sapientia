@@ -7,6 +7,7 @@ interface NotesPanelProps {
 	notes: Note[]
 	currentPage: number
 	currentAnchorYRatio: number
+	externalFollowLockUntil?: number
 	expandedNoteId: string | null
 	onExpand: (noteId: string | null) => void
 	onJumpToPage: (page: number, yRatio?: number) => void
@@ -25,6 +26,7 @@ export function NotesPanel({
 	notes,
 	currentPage,
 	currentAnchorYRatio,
+	externalFollowLockUntil,
 	expandedNoteId,
 	onExpand,
 	onJumpToPage,
@@ -43,9 +45,15 @@ export function NotesPanel({
 
 	const grouped = useGrouped(notes)
 
+	useEffect(() => {
+		if (!externalFollowLockUntil) return
+		lockUntilRef.current = Math.max(lockUntilRef.current, externalFollowLockUntil)
+	}, [externalFollowLockUntil])
+
 	// Page changes from the PDF/parsed view → scroll the pane to that page's
 	// closest note anchor. Skipped while locked.
 	useEffect(() => {
+		if (expandedNoteId) return
 		if (Date.now() < lockUntilRef.current) return
 		const container = scrollRef.current
 		if (!container) return
@@ -72,11 +80,21 @@ export function NotesPanel({
 		} else {
 			container.scrollTop = top
 		}
-	}, [currentAnchorYRatio, currentPage, notes])
+	}, [currentAnchorYRatio, currentPage, expandedNoteId, notes])
 
 	const onUserScroll = useCallback(() => {
 		lockUntilRef.current = Date.now() + 500
 	}, [])
+
+	const handleOpenCitationBlock = useCallback(
+		(paperId: string, blockId: string) => {
+			// Clicking a cite chip from inside an expanded note should keep the
+			// note pane visually stable while the main reader jumps.
+			lockUntilRef.current = Date.now() + 900
+			onOpenCitationBlock?.(paperId, blockId)
+		},
+		[onOpenCitationBlock],
+	)
 
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-[var(--color-reading-bg)]">
@@ -150,7 +168,7 @@ export function NotesPanel({
 												onCollapse={() => onExpand(null)}
 												onDelete={onDelete}
 												onEditorReady={onEditorReady}
-												onOpenCitationBlock={onOpenCitationBlock}
+												onOpenCitationBlock={handleOpenCitationBlock}
 												onExpand={() => onExpand(note.id)}
 												onJumpToAnchor={
 													anchorPage != null

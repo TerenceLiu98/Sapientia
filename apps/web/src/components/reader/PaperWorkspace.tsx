@@ -19,6 +19,7 @@ const VIEW_MODE_KEY = "paperWorkspace.viewMode"
 const NOTES_WIDTH_KEY = "paperWorkspace.notesWidthPct.v2"
 const NOTES_VISIBILITY_KEY = "paperWorkspace.notesVisible"
 const SPLIT_KEY = "paperWorkspace.leftPct"
+const AUTO_FOLLOW_LOCK_MS = 1400
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "both"
@@ -52,6 +53,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [editor, setEditor] = useState<NoteEditorRef | null>(null)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
+	const [autoFollowLockUntil, setAutoFollowLockUntil] = useState(0)
 
 	const { data: blocks } = useBlocks(paperId)
 	const { data: counts } = usePaperCitationCounts(paperId)
@@ -101,6 +103,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			if (targetPaperId !== paperId) return
 			const block = blocks?.find((candidate) => candidate.blockId === blockId)
 			if (!block) return
+			setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
 			setHoveredBlockId(block.blockId)
 			handleSelectBlock(block)
 		},
@@ -265,6 +268,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 
 	const main = (
 		<MainView
+			autoFollowLockUntil={autoFollowLockUntil}
 			blocks={blocks}
 			colorByBlock={colorByBlock}
 			countsMap={countsMap}
@@ -295,6 +299,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				currentAnchorYRatio={currentAnchorYRatio}
 				currentPage={currentPage}
 				expandedNoteId={expandedNoteId}
+				autoFollowLockUntil={autoFollowLockUntil}
 				isLoading={isLoading}
 				main={main}
 				notes={notesPaneFor(paperNotes)}
@@ -325,6 +330,7 @@ function notesPaneFor(notes: ReturnType<typeof useNotes>["data"]) {
 
 interface WorkspaceContentProps {
 	activeCitingNoteIds: Set<string>
+	autoFollowLockUntil: number
 	currentAnchorYRatio: number
 	currentPage: number
 	expandedNoteId: string | null
@@ -346,6 +352,7 @@ interface WorkspaceContentProps {
 
 function WorkspaceContent({
 	activeCitingNoteIds,
+	autoFollowLockUntil,
 	currentAnchorYRatio,
 	currentPage,
 	expandedNoteId,
@@ -390,6 +397,7 @@ function WorkspaceContent({
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					expandedNoteId={expandedNoteId}
+					autoFollowLockUntil={autoFollowLockUntil}
 					main={main}
 					notes={notes}
 					notesVisible={notesVisible}
@@ -505,6 +513,7 @@ function SidebarIcon({ side, open }: { side: "left" | "right"; open: boolean }) 
 }
 
 interface MainViewProps {
+	autoFollowLockUntil: number
 	blocks: Block[] | undefined
 	colorByBlock: Map<string, string>
 	countsMap: Map<string, number>
@@ -556,6 +565,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 				citationCounts={props.countsMap}
 				colorByBlock={props.colorByBlock}
 				currentPage={props.currentPage}
+				externalFollowLockUntil={props.autoFollowLockUntil}
 				hoveredBlockId={props.hoveredBlockId}
 				onClearHighlight={props.handleClearBlockHighlight}
 				onHoverBlock={props.handleHoverBlock}
@@ -588,6 +598,7 @@ import type { Note } from "@/api/hooks/notes"
 
 interface MainNotesSplitProps {
 	activeCitingNoteIds: Set<string>
+	autoFollowLockUntil: number
 	main: React.ReactNode
 	notes: Note[]
 	expandedNoteId: string | null
@@ -604,6 +615,7 @@ interface MainNotesSplitProps {
 
 function MainNotesSplit({
 	activeCitingNoteIds,
+	autoFollowLockUntil,
 	main,
 	notes,
 	expandedNoteId,
@@ -698,6 +710,7 @@ function MainNotesSplit({
 							activeCitingNoteIds={activeCitingNoteIds}
 							currentAnchorYRatio={currentAnchorYRatio}
 							currentPage={currentPage}
+							externalFollowLockUntil={autoFollowLockUntil}
 							expandedNoteId={expandedNoteId}
 							notes={notes}
 							onCreateAtCurrent={onCreateAtCurrent}

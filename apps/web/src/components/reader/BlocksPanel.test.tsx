@@ -317,6 +317,111 @@ describe("BlocksPanel", () => {
 		expect(scrollToMock).toHaveBeenCalledWith({ top: 212, behavior: "smooth" })
 	})
 
+	it("does not double-scroll when a programmatic jump also selects the target block", async () => {
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				type: "text",
+				page: 1,
+				bbox: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 },
+				text: "Alpha text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+			{
+				paperId: "paper-1",
+				blockId: "block-2",
+				blockIndex: 1,
+				type: "text",
+				page: 2,
+				bbox: { x: 0.1, y: 0.3, w: 0.4, h: 0.2 },
+				text: "Beta text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+		]
+
+		useBlocksMock.mockReturnValue({ data: blocks, isLoading: false, error: null })
+		HTMLElement.prototype.getBoundingClientRect = function () {
+			const text = this.textContent ?? ""
+			if (this.className.includes("overflow-y-auto")) {
+				return {
+					top: 0,
+					bottom: 400,
+					height: 400,
+					left: 0,
+					right: 300,
+					width: 300,
+					x: 0,
+					y: 0,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Page 2") && text.includes("Beta text")) {
+				return {
+					top: 20,
+					bottom: 280,
+					height: 260,
+					left: 0,
+					right: 300,
+					width: 300,
+					x: 0,
+					y: 20,
+					toJSON() {},
+				}
+			}
+			if (text.includes("Beta text")) {
+				return {
+					top: 120,
+					bottom: 200,
+					height: 80,
+					left: 0,
+					right: 300,
+					width: 300,
+					x: 0,
+					y: 120,
+					toJSON() {},
+				}
+			}
+			return {
+				top: 0,
+				bottom: 0,
+				height: 0,
+				left: 0,
+				right: 0,
+				width: 0,
+				x: 0,
+				y: 0,
+				toJSON() {},
+			}
+		}
+
+		const BlocksPanel = await importBlocksPanel()
+		render(
+			<BlocksPanel
+				paperId="paper-1"
+				requestedAnchorYRatio={0.38}
+				requestedPage={2}
+				requestedPageNonce={1}
+				selectedBlockId="block-2"
+				selectedBlockRequestNonce={1}
+			/>,
+		)
+
+		await waitFor(() => {
+			expect(scrollToMock).toHaveBeenCalledTimes(1)
+		})
+		expect(scrollToMock).toHaveBeenCalledWith({ top: 212, behavior: "smooth" })
+	})
+
 	it("notifies the workspace when the user clicks back into the parsed article", async () => {
 		const blocks: Block[] = [
 			{
