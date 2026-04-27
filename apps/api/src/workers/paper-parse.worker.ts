@@ -1,5 +1,5 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3"
-import { papers } from "@sapientia/db"
+import { blocks as blocksTable, papers } from "@sapientia/db"
 import { type Job, Worker } from "bullmq"
 import { eq } from "drizzle-orm"
 import yauzl from "yauzl"
@@ -12,6 +12,7 @@ import {
 	type PaperParseJobData,
 	type PaperParseJobResult,
 } from "../queues/paper-parse"
+import { parseContentList } from "../services/block-parser"
 import { getMineruToken } from "../services/credentials"
 import {
 	type BatchExtractResult,
@@ -123,6 +124,15 @@ async function processPaperParse(
 		}),
 	)
 
+	// Parse the block list and bulk-replace this paper's rows. Idempotent —
+	// re-running on the same paper produces the same blocks (block_id is a
+	// content hash + index).
+	const parsedBlocks = parseContentList(blocksJson)
+	await db.delete(blocksTable).where(eq(blocksTable.paperId, paperId))
+	if (parsedBlocks.length > 0) {
+		await db.insert(blocksTable).values(parsedBlocks.map((b) => ({ ...b, paperId })))
+	}
+
 	await db
 		.update(papers)
 		.set({
@@ -133,7 +143,7 @@ async function processPaperParse(
 		})
 		.where(eq(papers.id, paperId))
 
-	log.info({ blocksKey }, "paper_parse_job_completed")
+	log.info({ blocksKey, blockCount: parsedBlocks.length }, "paper_parse_job_completed")
 
 	return {
 		paperId,

@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { useCallback, useState } from "react"
 import { type Paper, usePaper } from "@/api/hooks/papers"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { AppShell } from "@/components/layout/AppShell"
+import { BlocksPanel } from "@/components/reader/BlocksPanel"
 import { PdfViewer } from "@/components/reader/PdfViewer"
 
 export const Route = createFileRoute("/papers/$paperId")({
@@ -11,6 +13,14 @@ export const Route = createFileRoute("/papers/$paperId")({
 function PaperDetail() {
 	const { paperId } = Route.useParams()
 	const { data: paper, isLoading } = usePaper(paperId)
+	const [requestedPage, setRequestedPage] = useState<number | undefined>(undefined)
+	const [requestNonce, setRequestNonce] = useState(0)
+	const [currentPage, setCurrentPage] = useState(1)
+
+	const handleSelectBlock = useCallback((block: { page: number }) => {
+		setRequestedPage(block.page)
+		setRequestNonce((n) => n + 1)
+	}, [])
 
 	return (
 		<ProtectedRoute>
@@ -22,8 +32,22 @@ function PaperDetail() {
 				) : (
 					<div className="flex h-full flex-col">
 						<ParseStatusBanner paper={paper} />
-						<div className="min-h-0 flex-1">
-							<PdfViewer paperId={paperId} />
+						<div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
+							<div className="min-h-0 border-r border-border-subtle">
+								<PdfViewer
+									paperId={paperId}
+									requestedPage={requestedPage}
+									requestedPageNonce={requestNonce}
+									onPageChange={setCurrentPage}
+								/>
+							</div>
+							<aside className="min-h-0 bg-bg-secondary">
+								<BlocksPanel
+									paperId={paperId}
+									currentPage={currentPage}
+									onSelectBlock={handleSelectBlock}
+								/>
+							</aside>
 						</div>
 					</div>
 				)}
@@ -51,7 +75,6 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 		)
 	}
 
-	// failed — surface the error and offer a route to fix it.
 	const needsCredentials = paper.parseError
 		?.toLowerCase()
 		.includes("mineru api token not configured")

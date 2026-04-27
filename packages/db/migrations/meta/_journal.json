@@ -36,6 +36,13 @@
       "when": 1777249757961,
       "tag": "0004_robust_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777251494099,
+      "tag": "0005_square_jazinda",
+      "breakpoints": true
     }
   ]
 }

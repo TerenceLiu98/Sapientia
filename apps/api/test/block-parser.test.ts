@@ -1,0 +1,109 @@
+import { describe, expect, it } from "vitest"
+import { parseContentList } from "../src/services/block-parser"
+
+const fixture = JSON.stringify([
+	// Heading-style text (text_level=1)
+	{ type: "text", text: "1 Introduction", text_level: 1, page_idx: 0, bbox: [40, 50, 200, 80] },
+	{ type: "text", text: "Recent advances...", page_idx: 0, bbox: [40, 100, 500, 200] },
+	{
+		type: "image",
+		img_path: "images/abc.jpg",
+		image_caption: ["Figure 1: Architecture"],
+		page_idx: 1,
+	},
+	{
+		type: "table",
+		table_body: "<table>...</table>",
+		table_caption: ["Table 1: Results"],
+		page_idx: 2,
+	},
+	{ type: "list", list_items: ["a", "b", "c"], page_idx: 2 },
+	// MinerU "header" = page running header → other
+	{ type: "header", text: "PROCEEDINGS OF X", page_idx: 0 },
+	// page footnote → other
+	{ type: "page_footnote", text: "1 fn", page_idx: 0 },
+	// duplicated text triggers de-dup suffix
+	{ type: "text", text: "Recent advances...", page_idx: 0 },
+])
+
+describe("parseContentList", () => {
+	it("maps MinerU types to our taxonomy", () => {
+		const blocks = parseContentList(fixture)
+		expect(blocks.map((b) => b.type)).toEqual([
+			"heading",
+			"text",
+			"figure",
+			"table",
+			"list",
+			"other",
+			"other",
+			"text",
+		])
+	})
+
+	it("converts MinerU [x1,y1,x2,y2] bbox into {x, y, w, h}", () => {
+		const blocks = parseContentList(fixture)
+		expect(blocks[0].bbox).toEqual({ x: 40, y: 50, w: 160, h: 30 })
+		expect(blocks[5].bbox).toBeNull() // header had no bbox
+	})
+
+	it("converts page_idx (0-based) into page (1-based)", () => {
+		const blocks = parseContentList(fixture)
+		expect(blocks[0].page).toBe(1)
+		expect(blocks[3].page).toBe(3)
+	})
+
+	it("captures heading_level only on type=heading", () => {
+		const blocks = parseContentList(fixture)
+		expect(blocks[0].headingLevel).toBe(1)
+		expect(blocks[1].headingLevel).toBeNull()
+	})
+
+	it("stores caption on figure/table and surfaces it as searchable text", () => {
+		const blocks = parseContentList(fixture)
+		expect(blocks[2].caption).toBe("Figure 1: Architecture")
+		expect(blocks[2].text).toBe("Figure 1: Architecture")
+		expect(blocks[3].caption).toBe("Table 1: Results")
+		expect((blocks[3].metadata as { tableBody: string }).tableBody).toBe("<table>...</table>")
+	})
+
+	it("preserves the original MinerU type in metadata for `other`", () => {
+		const blocks = parseContentList(fixture)
+		expect((blocks[5].metadata as { originalType: string }).originalType).toBe("header")
+		expect((blocks[6].metadata as { originalType: string }).originalType).toBe("page_footnote")
+	})
+
+	it("produces 8-char hex block_ids", () => {
+		const blocks = parseContentList(fixture)
+		for (const b of blocks) {
+			expect(b.blockId).toMatch(/^[0-9a-f]{8}(-\d+)?$/)
+		}
+	})
+
+	it("produces stable ids across re-parse for unchanged content", () => {
+		const a = parseContentList(fixture)
+		const b = parseContentList(fixture)
+		expect(a.map((x) => x.blockId)).toEqual(b.map((x) => x.blockId))
+	})
+
+	it("guarantees uniqueness even when content + index collide", () => {
+		// Real-world dup case: three identical empty list items in a row.
+		const dup = JSON.stringify([
+			{ type: "text", text: "x", page_idx: 0 },
+			{ type: "text", text: "x", page_idx: 0 },
+		])
+		const blocks = parseContentList(dup)
+		expect(blocks[0].blockId).not.toBe(blocks[1].blockId)
+	})
+
+	it("tolerates unknown MinerU types as `other`", () => {
+		const weird = JSON.stringify([{ type: "newfangled_thing", text: "?", page_idx: 0 }])
+		const blocks = parseContentList(weird)
+		expect(blocks[0].type).toBe("other")
+		expect((blocks[0].metadata as { originalType: string }).originalType).toBe("newfangled_thing")
+	})
+
+	it("returns [] for an empty list", () => {
+		expect(parseContentList("[]")).toEqual([])
+	})
+})

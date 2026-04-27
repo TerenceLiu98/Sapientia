@@ -6,7 +6,22 @@ const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const FIT_WIDTH_SCALE = 1.4
 
-export function PdfViewer({ paperId }: { paperId: string }) {
+interface PdfViewerProps {
+	paperId: string
+	// Imperative jump request from a sibling (e.g. BlocksPanel). Bumping the
+	// nonce on each click is enough to retrigger; the page number is in the
+	// `requestedPage` prop.
+	requestedPage?: number
+	requestedPageNonce?: number
+	onPageChange?: (page: number) => void
+}
+
+export function PdfViewer({
+	paperId,
+	requestedPage,
+	requestedPageNonce,
+	onPageChange,
+}: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
 	const [currentPage, setCurrentPage] = useState(1)
@@ -19,6 +34,21 @@ export function PdfViewer({ paperId }: { paperId: string }) {
 		const el = pageRefs.current.get(page)
 		if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
 	}, [])
+
+	// Notify parent on page change (BlocksPanel uses this to highlight the
+	// current page header).
+	useEffect(() => {
+		onPageChange?.(currentPage)
+	}, [currentPage, onPageChange])
+
+	// External jump request: scroll once per nonce change. We deliberately
+	// only depend on the nonce so re-clicking the same block still retriggers
+	// the scroll, and so a stale `requestedPage` doesn't keep firing.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: nonce drives the effect
+	useEffect(() => {
+		if (requestedPage == null) return
+		scrollToPage(requestedPage)
+	}, [requestedPageNonce])
 
 	// Track which page is most visible while scrolling.
 	useEffect(() => {

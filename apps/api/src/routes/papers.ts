@@ -1,5 +1,5 @@
-import { papers, workspacePapers } from "@sapientia/db"
-import { and, desc, eq, isNull } from "drizzle-orm"
+import { blocks, papers, workspacePapers } from "@sapientia/db"
+import { and, asc, desc, eq, isNull } from "drizzle-orm"
 import { Hono } from "hono"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
@@ -125,6 +125,34 @@ paperRoutes.get("/papers/:id/pdf-url", requireAuth, async (c) => {
 
 	const url = await generatePresignedGetUrl(paper.pdfObjectKey, 3600)
 	return c.json({ url, expiresInSeconds: 3600 })
+})
+
+paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	// Blocks rarely change after parse; ETag against paper.updatedAt lets the
+	// browser skip the body on hot navigation.
+	const etag = `"${paper.updatedAt.getTime()}"`
+	if (c.req.header("if-none-match") === etag) {
+		return new Response(null, { status: 304 })
+	}
+
+	const rows = await db
+		.select()
+		.from(blocks)
+		.where(eq(blocks.paperId, id))
+		.orderBy(asc(blocks.blockIndex))
+
+	c.header("etag", etag)
+	c.header("cache-control", "private, max-age=60")
+	return c.json(rows)
 })
 
 // Soft delete: only the owner may delete; sets deleted_at so the row is

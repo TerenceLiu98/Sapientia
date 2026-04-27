@@ -1,4 +1,5 @@
 export * from "./auth"
+export * from "./blocks"
 export * from "./credentials"
 export * from "./papers"
 export * from "./workspaces"
