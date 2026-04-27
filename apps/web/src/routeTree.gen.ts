@@ -14,7 +14,10 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NotesIndexRouteImport } from './routes/notes/index'
 import { Route as PapersPaperIdRouteImport } from './routes/papers/$paperId'
+import { Route as NotesNoteIdRouteImport } from './routes/notes/$noteId'
+import { Route as PapersPaperIdNotesNoteIdRouteImport } from './routes/papers/$paperId.notes.$noteId'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -41,11 +44,27 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NotesIndexRoute = NotesIndexRouteImport.update({
+  id: '/notes/',
+  path: '/notes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PapersPaperIdRoute = PapersPaperIdRouteImport.update({
   id: '/papers/$paperId',
   path: '/papers/$paperId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
+  id: '/notes/$noteId',
+  path: '/notes/$noteId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PapersPaperIdNotesNoteIdRoute =
+  PapersPaperIdNotesNoteIdRouteImport.update({
+    id: '/notes/$noteId',
+    path: '/notes/$noteId',
+    getParentRoute: () => PapersPaperIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -53,7 +72,10 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
-  '/papers/$paperId': typeof PapersPaperIdRoute
+  '/notes/$noteId': typeof NotesNoteIdRoute
+  '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
+  '/notes/': typeof NotesIndexRoute
+  '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +83,10 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
-  '/papers/$paperId': typeof PapersPaperIdRoute
+  '/notes/$noteId': typeof NotesNoteIdRoute
+  '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
+  '/notes': typeof NotesIndexRoute
+  '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +95,10 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
-  '/papers/$paperId': typeof PapersPaperIdRoute
+  '/notes/$noteId': typeof NotesNoteIdRoute
+  '/papers/$paperId': typeof PapersPaperIdRouteWithChildren
+  '/notes/': typeof NotesIndexRoute
+  '/papers/$paperId/notes/$noteId': typeof PapersPaperIdNotesNoteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,7 +108,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/notes/$noteId'
     | '/papers/$paperId'
+    | '/notes/'
+    | '/papers/$paperId/notes/$noteId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -88,7 +119,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/notes/$noteId'
     | '/papers/$paperId'
+    | '/notes'
+    | '/papers/$paperId/notes/$noteId'
   id:
     | '__root__'
     | '/'
@@ -96,7 +130,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/notes/$noteId'
     | '/papers/$paperId'
+    | '/notes/'
+    | '/papers/$paperId/notes/$noteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -105,7 +142,9 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
-  PapersPaperIdRoute: typeof PapersPaperIdRoute
+  NotesNoteIdRoute: typeof NotesNoteIdRoute
+  PapersPaperIdRoute: typeof PapersPaperIdRouteWithChildren
+  NotesIndexRoute: typeof NotesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -145,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notes/': {
+      id: '/notes/'
+      path: '/notes'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof NotesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/papers/$paperId': {
       id: '/papers/$paperId'
       path: '/papers/$paperId'
@@ -152,8 +198,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PapersPaperIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notes/$noteId': {
+      id: '/notes/$noteId'
+      path: '/notes/$noteId'
+      fullPath: '/notes/$noteId'
+      preLoaderRoute: typeof NotesNoteIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/papers/$paperId/notes/$noteId': {
+      id: '/papers/$paperId/notes/$noteId'
+      path: '/notes/$noteId'
+      fullPath: '/papers/$paperId/notes/$noteId'
+      preLoaderRoute: typeof PapersPaperIdNotesNoteIdRouteImport
+      parentRoute: typeof PapersPaperIdRoute
+    }
   }
 }
+
+interface PapersPaperIdRouteChildren {
+  PapersPaperIdNotesNoteIdRoute: typeof PapersPaperIdNotesNoteIdRoute
+}
+
+const PapersPaperIdRouteChildren: PapersPaperIdRouteChildren = {
+  PapersPaperIdNotesNoteIdRoute: PapersPaperIdNotesNoteIdRoute,
+}
+
+const PapersPaperIdRouteWithChildren = PapersPaperIdRoute._addFileChildren(
+  PapersPaperIdRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -161,7 +233,9 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
-  PapersPaperIdRoute: PapersPaperIdRoute,
+  NotesNoteIdRoute: NotesNoteIdRoute,
+  PapersPaperIdRoute: PapersPaperIdRouteWithChildren,
+  NotesIndexRoute: NotesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

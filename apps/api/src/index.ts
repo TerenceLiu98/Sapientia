@@ -8,6 +8,7 @@ import { logger as appLogger } from "./logger"
 import { authProvidersRoutes } from "./routes/auth-providers"
 import { healthRoutes } from "./routes/health"
 import { meRoutes } from "./routes/me"
+import { noteRoutes } from "./routes/notes"
 import { paperRoutes } from "./routes/papers"
 import { workspaceRoutes } from "./routes/workspaces"
 import { checkS3Health } from "./services/s3-client"
@@ -53,6 +54,7 @@ apiV1.route("/", healthRoutes)
 apiV1.route("/", meRoutes)
 apiV1.route("/", workspaceRoutes)
 apiV1.route("/", paperRoutes)
+apiV1.route("/", noteRoutes)
 app.route("/api/v1", apiV1)
 
 appLogger.info({ port: config.PORT, env: config.NODE_ENV }, "api_starting")

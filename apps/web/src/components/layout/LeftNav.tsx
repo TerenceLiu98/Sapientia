@@ -8,7 +8,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
 	{ label: "Library", to: "/library" },
-	{ label: "Notes", hint: "Soon" },
+	{ label: "Notes", to: "/notes" },
 	{ label: "Wiki", hint: "Soon" },
 	{ label: "Graph", hint: "Soon" },
 ]

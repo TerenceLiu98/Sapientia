@@ -1,6 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useState } from "react"
+import { useCreateNote, useNotes } from "@/api/hooks/notes"
 import { type Paper, usePaper } from "@/api/hooks/papers"
+import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { AppShell } from "@/components/layout/AppShell"
 import { BlocksPanel } from "@/components/reader/BlocksPanel"
@@ -13,6 +15,11 @@ export const Route = createFileRoute("/papers/$paperId")({
 function PaperDetail() {
 	const { paperId } = Route.useParams()
 	const { data: paper, isLoading } = usePaper(paperId)
+	const { data: workspace } = useCurrentWorkspace()
+	const { data: paperNotes } = useNotes(workspace?.id ?? "", paperId)
+	const createNote = useCreateNote(workspace?.id ?? "")
+	const navigate = useNavigate()
+
 	const [requestedPage, setRequestedPage] = useState<number | undefined>(undefined)
 	const [requestNonce, setRequestNonce] = useState(0)
 	const [currentPage, setCurrentPage] = useState(1)
@@ -21,6 +28,18 @@ function PaperDetail() {
 		setRequestedPage(block.page)
 		setRequestNonce((n) => n + 1)
 	}, [])
+
+	async function onCreatePaperNote() {
+		const created = await createNote.mutateAsync({
+			paperId,
+			title: paper?.title ?? "Untitled",
+			blocknoteJson: [],
+		})
+		await navigate({
+			to: "/papers/$paperId/notes/$noteId",
+			params: { paperId, noteId: created.id },
+		})
+	}
 
 	return (
 		<ProtectedRoute>
@@ -32,6 +51,30 @@ function PaperDetail() {
 				) : (
 					<div className="flex h-full flex-col">
 						<ParseStatusBanner paper={paper} />
+						<div className="flex items-center justify-between border-b border-border-subtle px-6 py-2 text-sm">
+							<div className="flex items-center gap-3 text-text-secondary">
+								<span>
+									{paperNotes?.length ?? 0} note{paperNotes?.length === 1 ? "" : "s"} on this paper
+								</span>
+								{paperNotes && paperNotes.length > 0 ? (
+									<Link
+										className="text-text-accent hover:underline"
+										params={{ paperId, noteId: paperNotes[0].id }}
+										to="/papers/$paperId/notes/$noteId"
+									>
+										open most recent →
+									</Link>
+								) : null}
+							</div>
+							<button
+								className="h-8 rounded-md bg-accent-600 px-3 text-xs font-medium text-text-inverse transition-colors hover:bg-accent-700 disabled:opacity-60"
+								disabled={createNote.isPending || !workspace}
+								onClick={() => void onCreatePaperNote()}
+								type="button"
+							>
+								{createNote.isPending ? "Creating…" : "New note for this paper"}
+							</button>
+						</div>
 						<div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
 							<div className="min-h-0 border-r border-border-subtle">
 								<PdfViewer

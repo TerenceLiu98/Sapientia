@@ -16,6 +16,7 @@
 		"@aws-sdk/client-s3": "^3.1037.0",
 		"@aws-sdk/s3-request-presigner": "^3.1037.0",
 		"@sapientia/db": "workspace:*",
+		"@sapientia/shared": "workspace:*",
 		"better-auth": "^1.6.9",
 		"bullmq": "^5.76.2",
 		"drizzle-orm": "^0.45.2",

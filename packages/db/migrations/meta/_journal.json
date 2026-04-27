@@ -43,6 +43,13 @@
       "when": 1777251494099,
       "tag": "0005_square_jazinda",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777251989608,
+      "tag": "0006_late_baron_strucker",
+      "breakpoints": true
     }
   ]
 }
