@@ -1,9 +1,13 @@
 import { blocks, memberships, noteBlockRefs, notes, papers, workspacePapers } from "@sapientia/db"
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm"
 import { Hono } from "hono"
+import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { paperToBibtex, papersToBibtex } from "../services/bibtex"
+import { buildDisplayFilename } from "../services/filename"
+import { mergeMetadataEditedFlags } from "../services/paper-metadata"
 import {
 	InvalidPaperContentError,
 	PaperTooLargeError,
@@ -13,6 +17,15 @@ import {
 import { generatePresignedGetUrl } from "../services/s3-client"
 
 export const paperRoutes = new Hono<AuthContext>()
+
+const PatchPaperSchema = z.object({
+	title: z.string().trim().max(500).nullable().optional(),
+	authors: z.array(z.string().trim().min(1).max(200)).max(50).nullable().optional(),
+	year: z.number().int().min(1900).max(2100).nullable().optional(),
+	doi: z.string().trim().max(200).nullable().optional(),
+	arxivId: z.string().trim().max(50).nullable().optional(),
+	venue: z.string().trim().max(200).nullable().optional(),
+})
 
 paperRoutes.post(
 	"/workspaces/:workspaceId/papers",
@@ -66,31 +79,13 @@ paperRoutes.get(
 		const workspaceId = c.req.param("workspaceId")
 
 		const rows = await db
-			.select({
-				id: papers.id,
-				ownerUserId: papers.ownerUserId,
-				contentHash: papers.contentHash,
-				doi: papers.doi,
-				arxivId: papers.arxivId,
-				title: papers.title,
-				authors: papers.authors,
-				fileSizeBytes: papers.fileSizeBytes,
-				pdfObjectKey: papers.pdfObjectKey,
-				blocksObjectKey: papers.blocksObjectKey,
-				parseStatus: papers.parseStatus,
-				parseError: papers.parseError,
-				parseProgressExtracted: papers.parseProgressExtracted,
-				parseProgressTotal: papers.parseProgressTotal,
-				createdAt: papers.createdAt,
-				updatedAt: papers.updatedAt,
-				deletedAt: papers.deletedAt,
-			})
+			.select({ paper: papers })
 			.from(papers)
 			.innerJoin(workspacePapers, eq(workspacePapers.paperId, papers.id))
 			.where(and(eq(workspacePapers.workspaceId, workspaceId), isNull(papers.deletedAt)))
 			.orderBy(desc(papers.createdAt))
 
-		return c.json(rows)
+		return c.json(rows.map((row) => row.paper))
 	},
 )
 
@@ -124,7 +119,50 @@ paperRoutes.get("/papers/:id/pdf-url", requireAuth, async (c) => {
 	}
 
 	const url = await generatePresignedGetUrl(paper.pdfObjectKey, 3600)
-	return c.json({ url, expiresInSeconds: 3600 })
+	return c.json({
+		url,
+		expiresInSeconds: 3600,
+		downloadFilename: paper.displayFilename || `${paper.title}.pdf`,
+	})
+})
+
+paperRoutes.patch("/papers/:id", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+	const body = PatchPaperSchema.parse(await c.req.json())
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	const editedFields = mergeMetadataEditedFlags(paper.metadataEditedByUser, body)
+
+	const nextTitle = body.title !== undefined ? (body.title ?? "") : paper.title
+	const nextAuthors = body.authors !== undefined ? (body.authors ?? []) : (paper.authors ?? [])
+	const nextYear = body.year !== undefined ? body.year : paper.year
+	const displayFilename = buildDisplayFilename({
+		paperId: paper.id,
+		title: nextTitle,
+		authors: nextAuthors,
+		year: nextYear,
+	})
+
+	const [updated] = await db
+		.update(papers)
+		.set({
+			...body,
+			title: nextTitle,
+			authors: nextAuthors,
+			displayFilename,
+			metadataEditedByUser: editedFields,
+			updatedAt: new Date(),
+		})
+		.where(eq(papers.id, id))
+		.returning()
+
+	return c.json(updated)
 })
 
 paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
@@ -193,6 +231,46 @@ paperRoutes.get("/papers/:id/citation-counts", requireAuth, async (c) => {
 
 	return c.json(rows)
 })
+
+paperRoutes.get("/papers/:id/bibtex", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	c.header("content-type", "application/x-bibtex; charset=utf-8")
+	c.header(
+		"content-disposition",
+		`attachment; filename="${(paper.displayFilename || `${paper.title}.pdf`).replace(/\.pdf$/i, ".bib")}"`,
+	)
+	return c.body(paperToBibtex(paper))
+})
+
+paperRoutes.get(
+	"/workspaces/:workspaceId/papers/bibtex",
+	requireAuth,
+	requireMembership("reader"),
+	async (c) => {
+		const workspaceId = c.req.param("workspaceId")
+		const rows = await db
+			.select({ paper: papers })
+			.from(papers)
+			.innerJoin(workspacePapers, eq(workspacePapers.paperId, papers.id))
+			.where(and(eq(workspacePapers.workspaceId, workspaceId), isNull(papers.deletedAt)))
+			.orderBy(desc(papers.createdAt))
+
+		c.header("content-type", "application/x-bibtex; charset=utf-8")
+		c.header(
+			"content-disposition",
+			`attachment; filename="sapientia-${workspaceId.slice(0, 8)}.bib"`,
+		)
+		return c.body(papersToBibtex(rows.map((row) => row.paper)))
+	},
+)
 
 // Notes citing a specific block, scoped to notes the caller can read.
 paperRoutes.get("/papers/:id/blocks/:blockId/notes", requireAuth, async (c) => {

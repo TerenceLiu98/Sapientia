@@ -25,9 +25,22 @@ describe("usePapers", () => {
 					{
 						id: "p1",
 						title: "Paper",
+						authors: ["Ada Lovelace"],
+						year: 2024,
+						doi: null,
+						arxivId: null,
+						venue: "ICLR",
+						displayFilename: "Lovelace-2024-Paper.pdf",
 						fileSizeBytes: 12_345,
 						parseStatus: "pending",
+						parseError: null,
+						parseProgressExtracted: null,
+						parseProgressTotal: null,
+						enrichmentStatus: "enriching",
+						enrichmentSource: null,
+						metadataEditedByUser: {},
 						createdAt: "2026-04-26T00:00:00Z",
+						updatedAt: "2026-04-26T00:00:00Z",
 					},
 				]),
 				{ status: 200, headers: { "content-type": "application/json" } },
@@ -43,6 +56,7 @@ describe("usePapers", () => {
 		)
 		expect(result.current.data).toHaveLength(1)
 		expect(result.current.data?.[0]?.title).toBe("Paper")
+		expect(result.current.data?.[0]?.displayFilename).toBe("Lovelace-2024-Paper.pdf")
 	})
 
 	it("does not fire without a workspaceId", () => {

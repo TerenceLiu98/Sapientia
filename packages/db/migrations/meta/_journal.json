@@ -85,6 +85,13 @@
       "when": 1777324125916,
       "tag": "0011_red_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777332067000,
+      "tag": "0012_heavy_ego",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,20 @@ if (process.env.DOCKER_HOST?.includes(".colima/")) {
 	process.env.TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ??= "/var/run/docker.sock"
 }
 
+process.env.NODE_ENV ??= "test"
+process.env.DATABASE_URL ??= "postgresql://sapientia:dev_password@localhost:5432/sapientia_test"
+process.env.REDIS_URL ??= "redis://localhost:6379"
+process.env.S3_ENDPOINT ??= "http://localhost:9000"
+process.env.S3_ACCESS_KEY_ID ??= "minioadmin"
+process.env.S3_SECRET_ACCESS_KEY ??= "minioadmin"
+process.env.S3_BUCKET ??= "sapientia"
+process.env.S3_REGION ??= "us-east-1"
+process.env.S3_FORCE_PATH_STYLE ??= "true"
+process.env.BETTER_AUTH_SECRET ??= "test-secret-with-at-least-thirty-two-characters"
+process.env.BETTER_AUTH_URL ??= "http://localhost:3000"
+process.env.FRONTEND_ORIGIN ??= "http://localhost:5173"
+process.env.ENCRYPTION_KEY ??= "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 export default defineConfig({
 	test: {
 		globals: false,

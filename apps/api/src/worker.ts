@@ -3,11 +3,13 @@ import { config } from "./config"
 import { closeDb } from "./db"
 import { logger } from "./logger"
 import { queueConnection } from "./queues/connection"
+import { createPaperEnrichWorker } from "./workers/paper-enrich.worker"
 import { createPaperParseWorker } from "./workers/paper-parse.worker"
 
 logger.info({ env: config.NODE_ENV }, "worker_starting")
 
 const paperParseWorker = createPaperParseWorker()
+const paperEnrichWorker = createPaperEnrichWorker()
 
 // Tiny worker for /health/queue-roundtrip diagnostic pings.
 const healthcheckWorker = new Worker(
@@ -23,6 +25,7 @@ const healthcheckWorker = new Worker(
 const shutdown = async (signal: string) => {
 	logger.info({ signal }, "worker_shutdown_initiated")
 	await paperParseWorker.close()
+	await paperEnrichWorker.close()
 	await healthcheckWorker.close()
 	await queueConnection.quit()
 	await closeDb()

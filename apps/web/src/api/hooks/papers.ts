@@ -1,24 +1,87 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../client"
 
+export type PaperParseStatus = "pending" | "parsing" | "done" | "failed"
+export type PaperEnrichmentStatus =
+	| "pending"
+	| "enriching"
+	| "enriched"
+	| "partial"
+	| "failed"
+	| "skipped"
+
 export interface Paper {
 	id: string
 	title: string
+	authors: string[] | null
+	year: number | null
+	doi: string | null
+	arxivId: string | null
+	venue: string | null
+	displayFilename: string
 	fileSizeBytes: number
-	parseStatus: "pending" | "parsing" | "done" | "failed"
+	parseStatus: PaperParseStatus
 	parseError: string | null
 	parseProgressExtracted: number | null
 	parseProgressTotal: number | null
+	enrichmentStatus: PaperEnrichmentStatus
+	enrichmentSource: string | null
+	metadataEditedByUser: Partial<Record<"title" | "authors" | "year" | "doi" | "arxivId" | "venue", true>>
 	createdAt: string
+	updatedAt: string
 }
 
 export interface PdfUrlResponse {
 	url: string
 	expiresInSeconds: number
+	downloadFilename: string
+}
+
+export interface UpdatePaperInput {
+	title?: string | null
+	authors?: string[] | null
+	year?: number | null
+	doi?: string | null
+	arxivId?: string | null
+	venue?: string | null
 }
 
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
 	return status === "pending" || status === "parsing"
+}
+
+function isEnrichmentInFlight(status: Paper["enrichmentStatus"] | undefined) {
+	return status === "pending" || status === "enriching"
+}
+
+function shouldPollPaper(paper: Paper | undefined) {
+	if (!paper) return false
+	return isInFlightStatus(paper.parseStatus) || isEnrichmentInFlight(paper.enrichmentStatus)
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+	const objectUrl = URL.createObjectURL(blob)
+	const anchor = document.createElement("a")
+	anchor.href = objectUrl
+	anchor.download = filename
+	document.body.appendChild(anchor)
+	anchor.click()
+	anchor.remove()
+	window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+}
+
+async function downloadApiAsset(path: string, filename: string) {
+	const res = await fetch(path, { credentials: "include" })
+	if (!res.ok) {
+		throw new Error(`download failed (${res.status})`)
+	}
+	const blob = await res.blob()
+	downloadBlob(blob, filename)
+}
+
+function bibtexFilenameForPaper(paper: Pick<Paper, "displayFilename" | "title" | "id">) {
+	const basename = paper.displayFilename || paper.title || `paper-${paper.id.slice(0, 8)}.pdf`
+	return basename.replace(/\.pdf$/i, ".bib")
 }
 
 export function usePapers(workspaceId: string) {
@@ -32,7 +95,7 @@ export function usePapers(workspaceId: string) {
 		refetchInterval: (query) => {
 			const list = query.state.data
 			if (!list) return false
-			return list.some((p) => isInFlightStatus(p.parseStatus)) ? 2000 : false
+			return list.some((p) => shouldPollPaper(p)) ? 2000 : false
 		},
 	})
 }
@@ -43,8 +106,7 @@ export function usePaper(paperId: string) {
 		queryFn: () => apiFetch<Paper>(`/api/v1/papers/${paperId}`),
 		enabled: Boolean(paperId),
 		refetchInterval: (query) => {
-			const status = query.state.data?.parseStatus
-			return isInFlightStatus(status) ? 2000 : false
+			return shouldPollPaper(query.state.data) ? 2000 : false
 		},
 	})
 }
@@ -125,6 +187,54 @@ export function useDeletePaper(workspaceId: string) {
 			apiFetch<{ ok: true }>(`/api/v1/papers/${paperId}`, { method: "DELETE" }),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+		},
+	})
+}
+
+export function useUpdatePaper(workspaceId: string, paperId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (input: UpdatePaperInput) =>
+			apiFetch<Paper>(`/api/v1/papers/${paperId}`, {
+				method: "PATCH",
+				body: JSON.stringify(input),
+			}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper", paperId] })
+		},
+	})
+}
+
+export function useExportPaperBibtex(paper: Pick<Paper, "id" | "displayFilename" | "title">) {
+	return useMutation({
+		mutationFn: async () => {
+			await downloadApiAsset(`/api/v1/papers/${paper.id}/bibtex`, bibtexFilenameForPaper(paper))
+		},
+	})
+}
+
+export function useExportWorkspaceBibtex(workspaceId: string) {
+	return useMutation({
+		mutationFn: async () => {
+			await downloadApiAsset(
+				`/api/v1/workspaces/${workspaceId}/papers/bibtex`,
+				`sapientia-${workspaceId.slice(0, 8)}.bib`,
+			)
+		},
+	})
+}
+
+export function useDownloadPaperPdf(paperId: string) {
+	return useMutation({
+		mutationFn: async () => {
+			const response = await apiFetch<PdfUrlResponse>(`/api/v1/papers/${paperId}/pdf-url`)
+			const pdfResponse = await fetch(response.url)
+			if (!pdfResponse.ok) {
+				throw new Error(`download failed (${pdfResponse.status})`)
+			}
+			const blob = await pdfResponse.blob()
+			downloadBlob(blob, response.downloadFilename)
 		},
 	})
 }

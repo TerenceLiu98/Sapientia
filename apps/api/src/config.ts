@@ -22,6 +22,8 @@ export const ConfigSchema = z
 		BETTER_AUTH_SECRET: z.string().min(32),
 		BETTER_AUTH_URL: z.string().url(),
 		FRONTEND_ORIGIN: z.string().url().default("http://localhost:5173"),
+		CROSSREF_POLITE_EMAIL: z.string().email().optional(),
+		SEMANTIC_SCHOLAR_API_KEY: z.string().optional(),
 
 		GOOGLE_CLIENT_ID: z.string().optional(),
 		GOOGLE_CLIENT_SECRET: z.string().optional(),

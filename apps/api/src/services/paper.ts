@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto"
 import type { Database, Paper } from "@sapientia/db"
 import { memberships, papers, workspacePapers } from "@sapientia/db"
 import { and, eq, isNull } from "drizzle-orm"
+import { enqueuePaperEnrich } from "../queues/paper-enrich"
 import { enqueuePaperParse } from "../queues/paper-parse"
+import { buildDisplayFilename } from "./filename"
 import { uploadPdfToS3 } from "./s3-client"
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
@@ -84,9 +86,16 @@ export async function uploadPaper(args: {
 			ownerUserId: userId,
 			contentHash,
 			title: filename.replace(/\.pdf$/i, ""),
+			displayFilename: buildDisplayFilename({
+				paperId,
+				title: filename.replace(/\.pdf$/i, ""),
+				authors: [],
+				year: null,
+			}),
 			fileSizeBytes: fileBytes.byteLength,
 			pdfObjectKey,
 			parseStatus: "pending",
+			enrichmentStatus: "pending",
 		})
 		.returning()
 
@@ -95,6 +104,7 @@ export async function uploadPaper(args: {
 	// Fresh upload only — dedup hits return early above and reuse the existing
 	// paper (and thus its parse status / blocks).
 	await enqueuePaperParse({ paperId: paper.id, userId })
+	await enqueuePaperEnrich({ paperId: paper.id, userId })
 
 	return paper
 }

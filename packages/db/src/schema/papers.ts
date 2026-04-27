@@ -27,6 +27,9 @@ export const papers = pgTable(
 		arxivId: text("arxiv_id"),
 		title: text("title").notNull(),
 		authors: jsonb("authors").$type<string[]>(),
+		year: integer("year"),
+		venue: text("venue"),
+		displayFilename: text("display_filename").notNull().default(""),
 		fileSizeBytes: bigint("file_size_bytes", { mode: "number" }).notNull(),
 		pdfObjectKey: text("pdf_object_key").notNull(),
 		blocksObjectKey: text("blocks_object_key"),
@@ -37,6 +40,20 @@ export const papers = pgTable(
 		// state="running"; left in place after `done`/`failed` for the UI.
 		parseProgressExtracted: integer("parse_progress_extracted"),
 		parseProgressTotal: integer("parse_progress_total"),
+		enrichmentStatus: text("enrichment_status").notNull().default("pending"),
+		enrichmentSource: text("enrichment_source"),
+		enrichedAt: timestamp("enriched_at", { withTimezone: true }),
+		metadataEditedByUser: jsonb("metadata_edited_by_user")
+			.$type<{
+				title?: boolean
+				authors?: boolean
+				year?: boolean
+				doi?: boolean
+				arxivId?: boolean
+				venue?: boolean
+			}>()
+			.notNull()
+			.default({}),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true })
 			.notNull()
@@ -51,6 +68,10 @@ export const papers = pgTable(
 		check(
 			"papers_parse_status_check",
 			sql`${table.parseStatus} in ('pending', 'parsing', 'done', 'failed')`,
+		),
+		check(
+			"papers_enrichment_status_check",
+			sql`${table.enrichmentStatus} in ('pending', 'enriching', 'enriched', 'partial', 'failed', 'skipped')`,
 		),
 	],
 )
