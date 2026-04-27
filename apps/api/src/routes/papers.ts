@@ -1,5 +1,5 @@
-import { blocks, papers, workspacePapers } from "@sapientia/db"
-import { and, asc, desc, eq, isNull } from "drizzle-orm"
+import { blocks, memberships, noteBlockRefs, notes, papers, workspacePapers } from "@sapientia/db"
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
@@ -152,6 +152,67 @@ paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
 
 	c.header("etag", etag)
 	c.header("cache-control", "private, max-age=60")
+	return c.json(rows)
+})
+
+// Aggregate citation counts across all notes the caller can see, grouped
+// by block. Used for the "(N notes)" badges in the BlocksPanel.
+paperRoutes.get("/papers/:id/citation-counts", requireAuth, async (c) => {
+	const paperId = c.req.param("id")
+	const user = c.get("user")
+	if (!(await userCanAccessPaper(user.id, paperId, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	const rows = await db
+		.select({
+			blockId: noteBlockRefs.blockId,
+			count: sql<number>`sum(${noteBlockRefs.citationCount})::int`,
+		})
+		.from(noteBlockRefs)
+		.innerJoin(notes, eq(notes.id, noteBlockRefs.noteId))
+		.innerJoin(
+			memberships,
+			and(eq(memberships.workspaceId, notes.workspaceId), eq(memberships.userId, user.id)),
+		)
+		.where(and(eq(noteBlockRefs.paperId, paperId), isNull(notes.deletedAt)))
+		.groupBy(noteBlockRefs.blockId)
+
+	return c.json(rows)
+})
+
+// Notes citing a specific block, scoped to notes the caller can read.
+paperRoutes.get("/papers/:id/blocks/:blockId/notes", requireAuth, async (c) => {
+	const paperId = c.req.param("id")
+	const blockId = c.req.param("blockId")
+	const user = c.get("user")
+	if (!(await userCanAccessPaper(user.id, paperId, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	const rows = await db
+		.select({
+			noteId: notes.id,
+			title: notes.title,
+			workspaceId: notes.workspaceId,
+			citationCount: noteBlockRefs.citationCount,
+			updatedAt: notes.updatedAt,
+		})
+		.from(noteBlockRefs)
+		.innerJoin(notes, eq(notes.id, noteBlockRefs.noteId))
+		.innerJoin(
+			memberships,
+			and(eq(memberships.workspaceId, notes.workspaceId), eq(memberships.userId, user.id)),
+		)
+		.where(
+			and(
+				eq(noteBlockRefs.paperId, paperId),
+				eq(noteBlockRefs.blockId, blockId),
+				isNull(notes.deletedAt),
+			),
+		)
+		.orderBy(desc(notes.updatedAt))
+
 	return c.json(rows)
 })
 

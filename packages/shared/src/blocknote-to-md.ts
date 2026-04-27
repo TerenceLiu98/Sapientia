@@ -13,6 +13,7 @@
  * Block type is involved + customisable; we don't want this serializer to
  * reach into @blocknote/core types and force every consumer to do so too.
  */
+import { formatCitationToken } from "./citations"
 
 export type BlockNoteDoc = unknown[]
 
@@ -88,9 +89,23 @@ function inlinesToMd(content: unknown): string {
 				const inner = inlinesToMd(node.content ?? [])
 				return `[${inner}](${node.href ?? ""})`
 			}
-			// Custom inline nodes — TASK-013's blockCitation wires through here.
-			// We default to using a `snapshot` prop or any text the node carries
-			// so the markdown still has something to surface.
+			// Block citations get the canonical token form so the markdown
+			// surface stays grep-able and round-trippable.
+			if (node.type === "blockCitation") {
+				const props = node.props as
+					| { paperId?: string; blockId?: string; snapshot?: string }
+					| undefined
+				if (props?.paperId && props?.blockId) {
+					return formatCitationToken({
+						paperId: props.paperId,
+						blockId: props.blockId,
+						snapshot: props.snapshot ?? "",
+					})
+				}
+				return props?.snapshot ?? ""
+			}
+			// Other custom inline nodes — fall back to any snapshot/text they
+			// carry so the markdown isn't blank for them.
 			if (typeof node.props === "object" && node.props && typeof node.props.snapshot === "string") {
 				return node.props.snapshot
 			}

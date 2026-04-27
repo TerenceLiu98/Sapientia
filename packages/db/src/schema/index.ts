@@ -1,6 +1,7 @@
 export * from "./auth"
 export * from "./blocks"
 export * from "./credentials"
+export * from "./note-block-refs"
 export * from "./notes"
 export * from "./papers"
 export * from "./workspaces"

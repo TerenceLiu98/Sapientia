@@ -83,8 +83,7 @@ describe("blocknoteJsonToMarkdown", () => {
 		expect(blocknoteJsonToMarkdown([])).toBe("")
 	})
 
-	it("falls back to snapshot for custom inline nodes (citation chips)", () => {
-		// TASK-013's blockCitation node will surface its `snapshot` prop here.
+	it("emits the canonical citation token for blockCitation inline nodes", () => {
 		const md = blocknoteJsonToMarkdown([
 			{
 				type: "paragraph",
@@ -97,6 +96,6 @@ describe("blocknoteJsonToMarkdown", () => {
 				],
 			},
 		])
-		expect(md).toBe("see Figure 1")
+		expect(md).toBe("see [[p1#b1: Figure 1]]")
 	})
 })

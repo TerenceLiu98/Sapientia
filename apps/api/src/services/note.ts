@@ -1,13 +1,30 @@
 import { randomUUID } from "node:crypto"
 import { PutObjectCommand } from "@aws-sdk/client-s3"
-import { memberships, type NewNote, type Note, notes } from "@sapientia/db"
-import { blocknoteJsonToMarkdown } from "@sapientia/shared"
+import { memberships, type NewNote, type Note, noteBlockRefs, notes } from "@sapientia/db"
+import { blocknoteJsonToMarkdown, extractCitations } from "@sapientia/shared"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { config } from "../config"
 import { db } from "../db"
 import { generatePresignedGetUrl, s3Client } from "./s3-client"
 
 const AGENT_MD_MAX_LEN = 4000
+
+// Rebuild this note's block-ref rows from scratch on every save. Idempotent
+// and trivially correct: if the citation set hasn't actually changed, the
+// new INSERT writes the exact same rows we just deleted.
+async function syncNoteBlockRefs(noteId: string, blocknoteJson: unknown): Promise<void> {
+	const refs = extractCitations(blocknoteJson)
+	await db.delete(noteBlockRefs).where(eq(noteBlockRefs.noteId, noteId))
+	if (refs.length === 0) return
+	await db.insert(noteBlockRefs).values(
+		refs.map((r) => ({
+			noteId,
+			paperId: r.paperId,
+			blockId: r.blockId,
+			citationCount: r.count,
+		})),
+	)
+}
 
 function jsonKey(workspaceId: string, noteId: string, version: number) {
 	return `workspaces/${workspaceId}/notes/${noteId}/v${version}.json`
@@ -84,6 +101,8 @@ export async function createNote(input: CreateNoteInput): Promise<Note> {
 			searchText: sql`to_tsvector('english', ${markdown})` as unknown as string,
 		})
 		.returning()
+
+	await syncNoteBlockRefs(note.id, input.blocknoteJson)
 	return note
 }
 
@@ -124,6 +143,12 @@ export async function updateNote(input: UpdateNoteInput): Promise<Note> {
 		.set(updates)
 		.where(eq(notes.id, input.noteId))
 		.returning()
+
+	// Rebuild citation refs only when the document body actually changed —
+	// title-only edits don't touch citations.
+	if (input.blocknoteJson !== undefined) {
+		await syncNoteBlockRefs(updated.id, input.blocknoteJson)
+	}
 	return updated
 }
 

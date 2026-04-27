@@ -1,19 +1,27 @@
 import "@blocknote/mantine/style.css"
-import type { Block, BlockNoteEditor } from "@blocknote/core"
+import type { Block } from "@blocknote/core"
 import { BlockNoteView } from "@blocknote/mantine"
 import { useCreateBlockNote } from "@blocknote/react"
 import { useEffect, useRef, useState } from "react"
 import { useNote, useUpdateNote } from "@/api/hooks/notes"
+import { noteSchema } from "./citation-schema"
 
 type SaveStatus = "idle" | "saving" | "saved" | "failed"
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
 
+// Loose alias — BlockNote's editor type fully parametrized by our schema is
+// noisy and only the paper-side note route actually consumes it. We expose
+// the schema's BlockNoteEditor instead of trying to chase
+// useCreateBlockNote's generics.
+export type NoteEditorRef = typeof noteSchema.BlockNoteEditor
+
 interface Props {
 	noteId: string
+	onEditorReady?: (editor: NoteEditorRef) => void
 }
 
-export function NoteEditor({ noteId }: Props) {
+export function NoteEditor({ noteId, onEditorReady }: Props) {
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
@@ -61,6 +69,7 @@ export function NoteEditor({ noteId }: Props) {
 			setTitleDraft={setTitleDraft}
 			updateNote={updateNote}
 			debounceRef={debounceRef}
+			onEditorReady={onEditorReady}
 		/>
 	)
 }
@@ -74,6 +83,7 @@ function NoteEditorInner({
 	setTitleDraft,
 	updateNote,
 	debounceRef,
+	onEditorReady,
 }: {
 	note: { id: string; title: string }
 	initialContent: Block[]
@@ -83,10 +93,19 @@ function NoteEditorInner({
 	setTitleDraft: (s: string) => void
 	updateNote: ReturnType<typeof useUpdateNote>
 	debounceRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
+	onEditorReady?: (editor: NoteEditorRef) => void
 }) {
+	// BlockNote's schema generics don't flow cleanly into useCreateBlockNote,
+	// so we keep the runtime call right and silence TS at the boundary.
 	const editor = useCreateBlockNote({
-		initialContent: initialContent.length > 0 ? initialContent : undefined,
+		schema: noteSchema as never,
+		initialContent: initialContent.length > 0 ? (initialContent as never) : undefined,
 	})
+
+	// Hand the editor up to whichever pane wants to insert citations.
+	useEffect(() => {
+		if (editor && onEditorReady) onEditorReady(editor as unknown as NoteEditorRef)
+	}, [editor, onEditorReady])
 
 	// We deliberately re-bind onChange only when editor identity or note id
 	// changes; callbacks (setSaveStatus, updateNote) are stable in practice
@@ -94,7 +113,7 @@ function NoteEditorInner({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: stable callbacks intentionally omitted
 	useEffect(() => {
 		if (!editor) return
-		const handle = (e: BlockNoteEditor) => {
+		const handle = (e: { document: unknown }) => {
 			setSaveStatus("saving")
 			if (debounceRef.current) clearTimeout(debounceRef.current)
 			debounceRef.current = setTimeout(async () => {

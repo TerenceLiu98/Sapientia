@@ -18,9 +18,17 @@ interface Props {
 	onSelectBlock?: (block: Block) => void
 	// Optional render slot the citation flow (TASK-013) hooks into.
 	renderActions?: (block: Block) => React.ReactNode
+	// Map of blockId → number of notes citing it. Drives the badge.
+	citationCounts?: Map<string, number>
 }
 
-export function BlocksPanel({ paperId, currentPage, onSelectBlock, renderActions }: Props) {
+export function BlocksPanel({
+	paperId,
+	currentPage,
+	onSelectBlock,
+	renderActions,
+	citationCounts,
+}: Props) {
 	const { data: blocks, isLoading, error } = useBlocks(paperId)
 
 	const grouped = useMemo(() => {
@@ -69,6 +77,7 @@ export function BlocksPanel({ paperId, currentPage, onSelectBlock, renderActions
 								key={block.blockId}
 								onSelect={onSelectBlock}
 								renderActions={renderActions}
+								citationCount={citationCounts?.get(block.blockId)}
 							/>
 						))}
 					</div>
@@ -82,10 +91,12 @@ function BlockRow({
 	block,
 	onSelect,
 	renderActions,
+	citationCount,
 }: {
 	block: Block
 	onSelect?: (block: Block) => void
 	renderActions?: (block: Block) => React.ReactNode
+	citationCount?: number
 }) {
 	const preview = useMemo(() => {
 		const text = block.caption ?? block.text
@@ -112,6 +123,14 @@ function BlockRow({
 				</span>
 				<span className={styleByType}>{preview}</span>
 			</button>
+			{citationCount && citationCount > 0 ? (
+				<span
+					className="shrink-0 rounded-md bg-bg-tertiary px-1.5 py-0.5 text-xs text-text-secondary"
+					title={`${citationCount} note${citationCount > 1 ? "s" : ""} cite this block`}
+				>
+					{citationCount}
+				</span>
+			) : null}
 			{renderActions ? (
 				<span className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
 					{renderActions(block)}
