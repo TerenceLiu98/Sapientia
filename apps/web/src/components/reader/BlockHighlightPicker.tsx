@@ -1,4 +1,4 @@
-import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 
 interface Props {
 	palette: PaletteEntry[]
@@ -26,7 +26,7 @@ export function BlockHighlightPicker({
 	return (
 		<div className="flex items-center gap-1">
 			{palette.map((entry) => {
-				const colors = paletteColorVars(palette, entry.key)
+				const colors = paletteVisualTokens(palette, entry.key)
 				const isActive = currentColor === entry.key
 				return (
 					<button
@@ -42,7 +42,7 @@ export function BlockHighlightPicker({
 							else onPick(entry.key)
 						}}
 						onMouseDown={(e) => e.stopPropagation()}
-						style={{ backgroundColor: colors.bg }}
+						style={{ backgroundColor: colors.fillBg }}
 						title={`${entry.label}${isActive ? " · click to clear" : ""}`}
 						type="button"
 					/>

@@ -687,59 +687,74 @@ interface MainViewProps {
 	viewMode: ViewMode
 }
 
+// Lazy-mount + keep-mounted: each view mode is mounted the first time it
+// becomes active and stays in the tree thereafter, hidden via `display: none`
+// when inactive. Without this, every PDF↔Markdown toggle paid the cold-mount
+// cost (BlocksPanel effects + KaTeX rendering, react-pdf re-init), which
+// surfaced as a ~1s freeze on the first switch and noticeable jank on every
+// switch after. Hidden panels still receive prop updates, so cross-view
+// follow requests (`requestedPage`/nonce) leave the inactive panel scrolled
+// to the right spot — toggling back is instant and already aligned.
 const MainView = memo(function MainView(props: MainViewProps) {
-	const pdfNode = (
-		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-				<PdfViewer
-					blocks={props.blocks}
-					colorByBlock={props.colorByBlock}
-					onClearHighlight={props.handleClearBlockHighlight}
-					onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
-					onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
-					onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
-					onClearSelectedBlock={props.handleClearSelectedBlock}
-					onInteract={props.handleMainInteract}
-					onViewportAnchorChange={props.onViewportAnchorChange}
-					onSelectBlock={props.handleSelectBlock}
-				onSetHighlight={props.handleSetBlockHighlight}
-				palette={props.palette}
-				paperId={props.paperId}
-				readerAnnotations={props.readerAnnotations}
-				renderActions={props.renderActions}
-				requestedBlockY={props.requestedBlockY}
-				requestedPage={props.requestedPage}
-				requestedPageNonce={props.requestNonce}
-				selectedBlockId={props.selectedBlockId}
-			/>
-		</section>
-	)
-	const mdNode = (
-		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-				<BlocksPanel
-					citationCounts={props.countsMap}
-					colorByBlock={props.colorByBlock}
-					currentPage={props.currentPage}
-					externalFollowLockUntil={props.autoFollowLockUntil}
-					onClearHighlight={props.handleClearBlockHighlight}
-					onInteract={props.handleMainInteract}
-					onViewportAnchorChange={props.onViewportAnchorChange}
-					onSelectBlock={props.handleSelectBlockFromPane}
-				onSetHighlight={props.handleSetBlockHighlight}
-				paperId={props.paperId}
-				palette={props.palette}
-				followCurrentPage={props.viewMode === "pdf-only"}
-				requestedAnchorYRatio={props.requestedBlockY}
-				requestedPage={props.requestedPage}
-				requestedPageNonce={props.requestNonce}
-				renderActions={props.renderActions}
-				selectedBlockId={props.selectedBlockId}
-				selectedBlockRequestNonce={props.selectedBlockRequestNonce}
-			/>
-		</section>
-	)
+	const visitedRef = useRef<Set<ViewMode>>(new Set([props.viewMode]))
+	visitedRef.current.add(props.viewMode)
 
-	if (props.viewMode === "pdf-only") return pdfNode
-	return mdNode
+	const sectionClass =
+		"h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]"
+
+	return (
+		<>
+			{visitedRef.current.has("pdf-only") ? (
+				<section className={sectionClass} hidden={props.viewMode !== "pdf-only"}>
+					<PdfViewer
+						blocks={props.blocks}
+						colorByBlock={props.colorByBlock}
+						onClearHighlight={props.handleClearBlockHighlight}
+						onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
+						onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
+						onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
+						onClearSelectedBlock={props.handleClearSelectedBlock}
+						onInteract={props.handleMainInteract}
+						onViewportAnchorChange={props.onViewportAnchorChange}
+						onSelectBlock={props.handleSelectBlock}
+						onSetHighlight={props.handleSetBlockHighlight}
+						palette={props.palette}
+						paperId={props.paperId}
+						readerAnnotations={props.readerAnnotations}
+						renderActions={props.renderActions}
+						requestedBlockY={props.requestedBlockY}
+						requestedPage={props.requestedPage}
+						requestedPageNonce={props.requestNonce}
+						selectedBlockId={props.selectedBlockId}
+					/>
+				</section>
+			) : null}
+			{visitedRef.current.has("md-only") ? (
+				<section className={sectionClass} hidden={props.viewMode !== "md-only"}>
+					<BlocksPanel
+						citationCounts={props.countsMap}
+						colorByBlock={props.colorByBlock}
+						currentPage={props.currentPage}
+						externalFollowLockUntil={props.autoFollowLockUntil}
+						onClearHighlight={props.handleClearBlockHighlight}
+						onInteract={props.handleMainInteract}
+						onViewportAnchorChange={props.onViewportAnchorChange}
+						onSelectBlock={props.handleSelectBlockFromPane}
+						onSetHighlight={props.handleSetBlockHighlight}
+						paperId={props.paperId}
+						palette={props.palette}
+						followCurrentPage={props.viewMode === "pdf-only"}
+						requestedAnchorYRatio={props.requestedBlockY}
+						requestedPage={props.requestedPage}
+						requestedPageNonce={props.requestNonce}
+						renderActions={props.renderActions}
+						selectedBlockId={props.selectedBlockId}
+						selectedBlockRequestNonce={props.selectedBlockRequestNonce}
+					/>
+				</section>
+			) : null}
+		</>
+	)
 })
 
 MainView.displayName = "MainView"

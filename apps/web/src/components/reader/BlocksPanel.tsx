@@ -2,7 +2,7 @@ import "katex/dist/katex.min.css"
 import { memo, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import katex from "katex"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
-import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
 import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
@@ -208,20 +208,15 @@ function BlocksPanelScrollBody({
 		() => grouped.find(([, pageBlocks]) => pageBlocks.some((block) => block.blockId === selectedBlockId))?.[0],
 		[grouped, selectedBlockId],
 	)
-	const activeRequestedJumpKey = useMemo(
-		() =>
-			requestedPage
-				? `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedAnchorYRatio ?? "none"}`
-				: null,
-		[requestedAnchorYRatio, requestedPage, requestedPageNonce],
-	)
-	const hasPendingRequestedJump =
-		activeRequestedJumpKey != null && handledRequestedJumpRef.current !== activeRequestedJumpKey
-
 	const renderedPages = useMemo(() => {
-		if (hasPendingRequestedJump) {
-			return new Set(grouped.map(([page]) => page))
-		}
+		// Window pages around the centers of interest; out-of-window pages
+		// fall back to a placeholder with estimated height. Crucial during
+		// the cold mount on view-mode switch — rendering all pages here
+		// pinned a ~1s synchronous KaTeX render across the entire paper. The
+		// jump-handling effect tolerates the target page not being rendered
+		// yet (it bails and re-runs once `cardRefsVersion` ticks), and page
+		// headers render for every page regardless, so scroll alignment
+		// still works.
 		const centers = new Set<number>()
 		if (currentPage != null) centers.add(currentPage)
 		if (requestedPage != null) centers.add(requestedPage)
@@ -233,7 +228,7 @@ function BlocksPanelScrollBody({
 			}
 		}
 		return next
-	}, [currentPage, grouped, hasPendingRequestedJump, requestedPage, selectedBlockPage])
+	}, [currentPage, grouped, requestedPage, selectedBlockPage])
 
 	const averageMeasuredBodyHeight = useMemo(() => {
 		const values = Array.from(pageBodyHeights.values()).filter((value) => value > 0)
@@ -786,8 +781,8 @@ const BlockRow = memo(function BlockRow({
 	// applied to the whole card. Hover / selected layers blend with it.
 	const fillStyle = highlightColor
 		? (() => {
-				const colors = paletteColorVars(palette ?? [], highlightColor)
-				return { backgroundColor: colors.bg }
+				const colors = paletteVisualTokens(palette ?? [], highlightColor)
+				return { backgroundColor: colors.fillBg }
 			})()
 		: undefined
 

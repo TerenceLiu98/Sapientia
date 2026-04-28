@@ -83,26 +83,66 @@ export function usePalette() {
 	return { palette, addCustom, removeCustom }
 }
 
-// CSS values for a given highlight key. Built-in keys resolve through the
-// `--note-{key}-bg|text` vars the stylesheet defines; custom keys carry
-// their own explicit colors on the entry. Falling back to neutral bg keeps
-// rendering safe for unknown keys (e.g. data persisted before the user
-// removed a custom entry).
-export function paletteColorVars(
+// Visual tokens for a highlight color, namespaced by UI role. Use these
+// for *any* surface that should reflect a block's highlight color — never
+// reach for `bg-accent-600` or another neutral accent token, otherwise the
+// surface stops tracking the per-block color (a recurring bug class).
+//
+// Roles:
+// - `chipBg` + `chipText`: solid label / pill that *carries text on the
+//   color* (PDF block tag, citation chip in note body). Pair both fields.
+// - `fillBg`: soft pastel area in a panel where body text reads on top in
+//   the default text color (parsed-block row card, picker swatch).
+// - `fillWash`: translucent overlay for surfaces with their own content
+//   underneath (PDF bbox highlight on the page). The page shows through.
+//
+// Built-in keys resolve to `--note-{key}-bg|text` from the stylesheet;
+// `chipBg` and `fillBg` share the same hue (different roles), and
+// `fillWash` mixes that hue with transparent at a fixed strength so all
+// PDF overlays feel consistent. Custom entries reuse their explicit
+// `bgColor`/`textColor` across roles. Unknown keys (e.g. a removed custom
+// entry persisted on a block) fall back to neutral so the highlight isn't
+// invisible.
+export interface PaletteVisualTokens {
+	chipBg: string
+	chipText: string
+	fillBg: string
+	fillWash: string
+}
+
+const WASH_STRENGTH = "38%"
+
+function washOf(bg: string): string {
+	return `color-mix(in oklch, ${bg} ${WASH_STRENGTH}, transparent)`
+}
+
+export function paletteVisualTokens(
 	palette: PaletteEntry[],
 	key: string,
-): {
-	bg: string
-	text: string
-} {
+): PaletteVisualTokens {
 	const entry = palette.find((p) => p.key === key)
 	if (entry?.bgColor && entry?.textColor) {
-		return { bg: entry.bgColor, text: entry.textColor }
+		return {
+			chipBg: entry.bgColor,
+			chipText: entry.textColor,
+			fillBg: entry.bgColor,
+			fillWash: washOf(entry.bgColor),
+		}
 	}
 	if (BUILTIN_KEYS.has(key)) {
-		return { bg: `var(--note-${key}-bg)`, text: `var(--note-${key}-text)` }
+		const bg = `var(--note-${key}-bg)`
+		return {
+			chipBg: bg,
+			chipText: `var(--note-${key}-text)`,
+			fillBg: bg,
+			fillWash: washOf(bg),
+		}
 	}
-	// Unknown key — render with a neutral surface so the highlight isn't
-	// invisible. The user can re-add the custom entry via settings.
-	return { bg: "var(--color-neutral-200)", text: "var(--color-neutral-700)" }
+	const neutralBg = "var(--color-neutral-200)"
+	return {
+		chipBg: neutralBg,
+		chipText: "var(--color-neutral-700)",
+		fillBg: neutralBg,
+		fillWash: washOf(neutralBg),
+	}
 }

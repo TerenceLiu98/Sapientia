@@ -4,7 +4,7 @@ import { createReactBlockSpec, createReactInlineContentSpec } from "@blocknote/r
 import katex from "katex"
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { useHighlights } from "@/api/hooks/highlights"
-import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 
 const NoteCitationThemeContext = createContext<{
 	onOpenBlock: ((paperId: string, blockId: string) => void) | null
@@ -90,7 +90,7 @@ export function BlockCitationChip({
 	const { data: highlights = [] } = useHighlights(paperId, workspaceId ?? undefined)
 	const highlightColor =
 		highlights.find((highlight) => highlight.blockId === blockId)?.color ?? null
-	const chipColors = highlightColor ? paletteColorVars(palette, highlightColor) : null
+	const chipColors = highlightColor ? paletteVisualTokens(palette, highlightColor) : null
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: chip behaves like a button but must be a span to live inside BlockNote inline content; keyboard activation handled below
@@ -117,8 +117,8 @@ export function BlockCitationChip({
 			style={
 				chipColors
 					? {
-							backgroundColor: chipColors.bg,
-							color: chipColors.text,
+							backgroundColor: chipColors.chipBg,
+							color: chipColors.chipText,
 						}
 					: undefined
 			}

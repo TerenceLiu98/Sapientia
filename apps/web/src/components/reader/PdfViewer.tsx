@@ -13,7 +13,7 @@ import { Document, Page } from "react-pdf"
 import type { Block } from "@/api/hooks/blocks"
 import type { ReaderAnnotation } from "@/api/hooks/reader-annotations"
 import { usePaperPdfUrl } from "@/api/hooks/papers"
-import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 import {
 	READER_ANNOTATION_COLORS,
 	clampUnit as clampAnnotationUnit,
@@ -43,6 +43,10 @@ const HIGHLIGHT_MIN_H = 0.018
 const HIGHLIGHT_MIN_W = 0.01
 const VIRTUAL_WINDOW_RADIUS = 2
 const DEFAULT_PAGE_ASPECT_RATIO = 11 / 8.5
+
+// Module-level cache of figure/table image URLs we've already warmed in
+// the browser image cache. See the preload effect in PdfPageWithOverlay.
+const preloadedPreviewImageUrls = new Set<string>()
 
 interface PdfViewerProps {
 	paperId: string
@@ -1014,6 +1018,25 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 }) {
 	const wrapRef = useRef<HTMLDivElement | null>(null)
 	const annotationSvgRef = useRef<SVGSVGElement | null>(null)
+
+	// Warm the browser image cache for previewable figures/tables on this
+	// page as soon as it's been rendered. The selected-block popup uses
+	// `block.imageUrl` (a presigned MinIO URL); without this preload the
+	// image only starts fetching when the user clicks, which surfaced as a
+	// 100–500 ms gap between click and visible figure. Per-URL idempotent
+	// via the module-level cache so repeated remounts (e.g. on view-mode
+	// toggle) don't re-fetch.
+	useEffect(() => {
+		if (!isPageRendered || !blocks || typeof Image === "undefined") return
+		for (const block of blocks) {
+			if (!isPreviewableBlock(block) || !block.imageUrl) continue
+			if (preloadedPreviewImageUrls.has(block.imageUrl)) continue
+			preloadedPreviewImageUrls.add(block.imageUrl)
+			const img = new Image()
+			img.src = block.imageUrl
+		}
+	}, [blocks, isPageRendered])
+
 	const [pointDims, setPointDims] = useState<{ w: number; h: number } | null>(null)
 	// Real, measured CSS dimensions of the rendered canvas. We use these
 	// for the SVG and viewBox so coordinates are in screen pixels and
@@ -1202,7 +1225,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				const highlightColor = colorByBlock?.get(block.blockId) ?? null
 				const showBoxChrome =
 					showLayoutBoxes || isSelected || isHovered || highlightColor !== null
-				const fill = highlightColor ? paletteColorVars(palette ?? [], highlightColor) : null
+				const fill = highlightColor ? paletteVisualTokens(palette ?? [], highlightColor) : null
 				const hasToolbar = palette && (onSetHighlight || onClearHighlight || renderActions)
 
 				return (
@@ -1246,7 +1269,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 							style={
 								fill
 									? {
-											background: `color-mix(in oklch, ${fill.bg} 38%, transparent)`,
+											background: fill.fillWash,
 										}
 									: undefined
 							}
@@ -1261,8 +1284,8 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 								style={
 									fill
 										? {
-												background: fill.bg,
-												color: fill.text,
+												background: fill.chipBg,
+												color: fill.chipText,
 												opacity: isSelected || isHovered ? 1 : 0.95,
 											}
 										: undefined
