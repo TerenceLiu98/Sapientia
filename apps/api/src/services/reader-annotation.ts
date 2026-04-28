@@ -43,6 +43,21 @@ export async function createReaderAnnotation(args: {
 	return row
 }
 
+export async function updateReaderAnnotationColor(args: {
+	annotationId: string
+	userId: string
+	color: string
+}): Promise<ReaderAnnotation | null> {
+	const [row] = await db
+		.update(readerAnnotations)
+		.set({ color: args.color })
+		.where(
+			and(eq(readerAnnotations.id, args.annotationId), eq(readerAnnotations.userId, args.userId)),
+		)
+		.returning()
+	return row ?? null
+}
+
 export async function deleteReaderAnnotation(args: {
 	annotationId: string
 	userId: string

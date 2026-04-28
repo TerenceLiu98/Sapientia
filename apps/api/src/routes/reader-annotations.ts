@@ -7,6 +7,7 @@ import {
 	createReaderAnnotation,
 	deleteReaderAnnotation,
 	listReaderAnnotationsForPaper,
+	updateReaderAnnotationColor,
 } from "../services/reader-annotation"
 
 export const readerAnnotationRoutes = new Hono<AuthContext>()
@@ -98,6 +99,24 @@ readerAnnotationRoutes.post("/papers/:paperId/reader-annotations", requireAuth, 
 		body: parsed.data.body,
 	})
 	return c.json(row, 201)
+})
+
+const PatchReaderAnnotationSchema = z.object({
+	color: ColorSchema,
+})
+
+readerAnnotationRoutes.patch("/reader-annotations/:id", requireAuth, async (c) => {
+	const user = c.get("user")
+	const parsed = PatchReaderAnnotationSchema.safeParse(await c.req.json())
+	if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400)
+
+	const updated = await updateReaderAnnotationColor({
+		annotationId: c.req.param("id"),
+		userId: user.id,
+		color: parsed.data.color,
+	})
+	if (!updated) return c.json({ error: "not found" }, 404)
+	return c.json(updated)
 })
 
 readerAnnotationRoutes.delete("/reader-annotations/:id", requireAuth, async (c) => {

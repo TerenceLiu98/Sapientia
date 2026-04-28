@@ -54,6 +54,26 @@ export function useCreateReaderAnnotation(paperId: string) {
 	})
 }
 
+export function useUpdateReaderAnnotationColor(
+	paperId: string,
+	workspaceId: string | undefined,
+) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: ({ annotationId, color }: { annotationId: string; color: string }) =>
+			apiFetch<ReaderAnnotation>(`/api/v1/reader-annotations/${annotationId}`, {
+				method: "PATCH",
+				body: JSON.stringify({ color }),
+			}),
+		onSuccess: () => {
+			if (!workspaceId) return
+			void qc.invalidateQueries({
+				queryKey: readerAnnotationsKey(paperId, workspaceId),
+			})
+		},
+	})
+}
+
 export function useDeleteReaderAnnotation(paperId: string, workspaceId: string | undefined) {
 	const qc = useQueryClient()
 	return useMutation({

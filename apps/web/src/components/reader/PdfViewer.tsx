@@ -64,6 +64,10 @@ interface PdfViewerProps {
 		body: ReaderAnnotationBody
 	}) => Promise<unknown> | unknown
 	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
+	onUpdateReaderAnnotationColor?: (
+		annotationId: string,
+		color: string,
+	) => Promise<unknown> | unknown
 	// Mirrors BlocksPanel's renderActions slot — caller emits the
 	// cite/add-note button so the PDF toolbar matches the parsed-blocks pane.
 	renderActions?: (block: Block) => React.ReactNode
@@ -90,6 +94,7 @@ function PdfViewerInner({
 	readerAnnotations,
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
+	onUpdateReaderAnnotationColor,
 	renderActions,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
@@ -319,79 +324,22 @@ function PdfViewerInner({
 				</div>
 				<div className="flex items-center gap-1">
 					{canAnnotate ? (
-						<>
-							<button
-								aria-pressed={annotationMode}
-								className={`mr-2 flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
-									annotationMode
-										? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
-										: "border-border-default text-text-secondary hover:bg-surface-hover"
-								}`}
-								onClick={() => {
-									setAnnotationMode((value) => !value)
-									setSelectedAnnotationId(null)
-								}}
-								title={annotationMode ? "Exit markup mode" : "Enter markup mode"}
-								type="button"
-							>
-								<MarkupIcon />
-							</button>
-							{annotationMode ? (
-								<>
-									<div className="mr-2 flex items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/80 px-1.5 py-1">
-										<AnnotationToolButton
-											active={annotationTool === "highlight"}
-											ariaLabel="Highlight tool"
-											icon={<HighlightToolIcon />}
-											onClick={() => setAnnotationTool("highlight")}
-										/>
-										<AnnotationToolButton
-											active={annotationTool === "underline"}
-											ariaLabel="Underline tool"
-											icon={<UnderlineToolIcon />}
-											onClick={() => setAnnotationTool("underline")}
-										/>
-										<AnnotationToolButton
-											active={annotationTool === "ink"}
-											ariaLabel="Freehand tool"
-											icon={<InkToolIcon />}
-											onClick={() => setAnnotationTool("ink")}
-										/>
-										<div className="mx-1 h-4 w-px bg-border-subtle" />
-										{READER_ANNOTATION_COLORS.map((entry) => (
-											<button
-												aria-label={`${entry.label} markup color`}
-												aria-pressed={annotationColor === entry.value}
-												className={`h-5 w-5 rounded-full border transition-transform hover:scale-105 ${
-													annotationColor === entry.value
-														? "border-text-primary ring-2 ring-accent-600/35"
-														: "border-border-default"
-												}`}
-												key={entry.value}
-												onClick={() => setAnnotationColor(entry.value)}
-												style={{ backgroundColor: entry.value }}
-												type="button"
-											/>
-										))}
-										<div className="mx-1 h-4 w-px bg-border-subtle" />
-										<button
-											aria-label="Delete selected annotation"
-											className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-											disabled={!selectedAnnotationId}
-											onClick={() => {
-												if (!selectedAnnotationId) return
-												void onDeleteReaderAnnotation?.(selectedAnnotationId)
-												setSelectedAnnotationId(null)
-											}}
-											title="Delete selected annotation"
-											type="button"
-										>
-											<TrashIcon />
-										</button>
-									</div>
-								</>
-							) : null}
-						</>
+						<button
+							aria-pressed={annotationMode}
+							className={`mr-2 flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+								annotationMode
+									? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
+									: "border-border-default text-text-secondary hover:bg-surface-hover"
+							}`}
+							onClick={() => {
+								setAnnotationMode((value) => !value)
+								setSelectedAnnotationId(null)
+							}}
+							title={annotationMode ? "Exit markup mode" : "Enter markup mode"}
+							type="button"
+						>
+							<MarkupIcon />
+						</button>
 					) : null}
 					<button
 						aria-pressed={showLayoutBoxes}
@@ -476,11 +424,13 @@ function PdfViewerInner({
 									key={page}
 									onClearHighlight={onClearHighlight}
 									onCreateReaderAnnotation={onCreateReaderAnnotation}
+									onDeleteReaderAnnotation={onDeleteReaderAnnotation}
 									onHoverBlock={onHoverBlock}
 									onPointDims={(dims) => setBasePageWidth((current) => current ?? dims.w)}
 									onSelectAnnotation={setSelectedAnnotationId}
 									onSelectBlock={onSelectBlock}
 									onSetHighlight={onSetHighlight}
+									onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
 									page={page}
 									pageRefs={pageRefs}
 									palette={palette}
@@ -499,6 +449,18 @@ function PdfViewerInner({
 					block={selectedBlock}
 					key={selectedBlock.blockId}
 					onDismiss={onClearSelectedBlock}
+				/>
+			) : null}
+			{canAnnotate && annotationMode ? (
+				<FloatingMarkupPalette
+					color={annotationColor}
+					onChangeColor={setAnnotationColor}
+					onChangeTool={setAnnotationTool}
+					onClose={() => {
+						setAnnotationMode(false)
+						setSelectedAnnotationId(null)
+					}}
+					tool={annotationTool}
 				/>
 			) : null}
 		</div>
@@ -797,11 +759,13 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	hoveredBlockId,
 	onClearHighlight,
 	onCreateReaderAnnotation,
+	onDeleteReaderAnnotation,
 	onHoverBlock,
 	onPointDims,
 	onSelectAnnotation,
 	onSelectBlock,
 	onSetHighlight,
+	onUpdateReaderAnnotationColor,
 	page,
 	pageRefs,
 	palette,
@@ -825,11 +789,16 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		color: string
 		body: ReaderAnnotationBody
 	}) => Promise<unknown> | unknown
+	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
 	onPointDims?: (dims: { w: number; h: number }) => void
 	onSelectAnnotation?: (annotationId: string | null) => void
 	onSelectBlock?: (block: Block) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
+	onUpdateReaderAnnotationColor?: (
+		annotationId: string,
+		color: string,
+	) => Promise<unknown> | unknown
 	page: number
 	pageRefs: React.MutableRefObject<Map<number, HTMLDivElement>>
 	palette?: PaletteEntry[]
@@ -1240,6 +1209,20 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					<div className={`absolute inset-0 z-[2] ${annotationMode ? "pointer-events-none" : ""}`}>
 						{blocksLayer}
 					</div>
+					{selectedAnnotation ? (
+						<ReaderAnnotationActionsPopover
+							annotation={selectedAnnotation}
+							H={displayH}
+							onChangeColor={(color: string) => {
+								void onUpdateReaderAnnotationColor?.(selectedAnnotation.id, color)
+							}}
+							onDelete={() => {
+								void onDeleteReaderAnnotation?.(selectedAnnotation.id)
+								onSelectAnnotation?.(null)
+							}}
+							W={displayW}
+						/>
+					) : null}
 				</div>
 			) : null}
 		</div>
@@ -1404,6 +1387,225 @@ function ReaderAnnotationSelectionOutline({
 			x={x}
 			y={y}
 		/>
+	)
+}
+
+function FloatingMarkupPalette({
+	color,
+	onChangeColor,
+	onChangeTool,
+	onClose,
+	tool,
+}: {
+	color: string
+	onChangeColor: (color: string) => void
+	onChangeTool: (tool: ReaderAnnotationTool) => void
+	onClose: () => void
+	tool: ReaderAnnotationTool
+}) {
+	// Position is local to the PdfViewer's relative root. Initial position
+	// is top-center of the PDF area; user can drag the handle to relocate.
+	const [pos, setPos] = useState<{ x: number; y: number }>({ x: 24, y: 16 })
+	const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number } | null>(
+		null,
+	)
+
+	const onPointerMove = useCallback((event: PointerEvent) => {
+		const drag = dragRef.current
+		if (!drag) return
+		setPos({
+			x: drag.originX + (event.clientX - drag.startX),
+			y: drag.originY + (event.clientY - drag.startY),
+		})
+	}, [])
+
+	const endDrag = useCallback(() => {
+		dragRef.current = null
+	}, [])
+
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		window.addEventListener("pointermove", onPointerMove)
+		window.addEventListener("pointerup", endDrag)
+		window.addEventListener("pointercancel", endDrag)
+		return () => {
+			window.removeEventListener("pointermove", onPointerMove)
+			window.removeEventListener("pointerup", endDrag)
+			window.removeEventListener("pointercancel", endDrag)
+		}
+	}, [endDrag, onPointerMove])
+
+	const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+		event.preventDefault()
+		dragRef.current = {
+			originX: pos.x,
+			originY: pos.y,
+			startX: event.clientX,
+			startY: event.clientY,
+		}
+	}
+
+	return (
+		<div
+			className="absolute z-[20] flex select-none items-center gap-1 rounded-lg border border-border-subtle bg-bg-overlay/95 px-1.5 py-1 shadow-[var(--shadow-popover)] backdrop-blur"
+			style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
+		>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle */}
+			<div
+				className="flex h-7 w-5 cursor-grab items-center justify-center text-text-tertiary hover:text-text-secondary active:cursor-grabbing"
+				onPointerDown={onHandlePointerDown}
+				title="Drag to move"
+			>
+				<DragHandleIcon />
+			</div>
+			<div className="mx-0.5 h-4 w-px bg-border-subtle" />
+			<AnnotationToolButton
+				active={tool === "highlight"}
+				ariaLabel="Highlight tool"
+				icon={<HighlightToolIcon />}
+				onClick={() => onChangeTool("highlight")}
+			/>
+			<AnnotationToolButton
+				active={tool === "underline"}
+				ariaLabel="Underline tool"
+				icon={<UnderlineToolIcon />}
+				onClick={() => onChangeTool("underline")}
+			/>
+			<AnnotationToolButton
+				active={tool === "ink"}
+				ariaLabel="Freehand tool"
+				icon={<InkToolIcon />}
+				onClick={() => onChangeTool("ink")}
+			/>
+			<div className="mx-1 h-4 w-px bg-border-subtle" />
+			{READER_ANNOTATION_COLORS.map((entry) => (
+				<button
+					aria-label={`${entry.label} markup color`}
+					aria-pressed={color === entry.value}
+					className={`h-5 w-5 rounded-full border transition-transform hover:scale-110 ${
+						color === entry.value
+							? "border-text-primary ring-2 ring-accent-600/35"
+							: "border-border-default"
+					}`}
+					key={entry.value}
+					onClick={() => onChangeColor(entry.value)}
+					style={{ backgroundColor: entry.value }}
+					type="button"
+				/>
+			))}
+			<div className="mx-1 h-4 w-px bg-border-subtle" />
+			<button
+				aria-label="Exit markup mode"
+				className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover"
+				onClick={onClose}
+				title="Close markup palette"
+				type="button"
+			>
+				<CloseIcon />
+			</button>
+		</div>
+	)
+}
+
+function DragHandleIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeWidth="1.6"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<circle cx="9" cy="6" r="0.6" fill="currentColor" />
+			<circle cx="9" cy="12" r="0.6" fill="currentColor" />
+			<circle cx="9" cy="18" r="0.6" fill="currentColor" />
+			<circle cx="15" cy="6" r="0.6" fill="currentColor" />
+			<circle cx="15" cy="12" r="0.6" fill="currentColor" />
+			<circle cx="15" cy="18" r="0.6" fill="currentColor" />
+		</svg>
+	)
+}
+
+function CloseIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="m6 6 12 12M18 6 6 18" />
+		</svg>
+	)
+}
+
+function ReaderAnnotationActionsPopover({
+	annotation,
+	H,
+	onChangeColor,
+	onDelete,
+	W,
+}: {
+	annotation: ReaderAnnotation
+	H: number
+	onChangeColor: (color: string) => void
+	onDelete: () => void
+	W: number
+}) {
+	const bbox = annotationBoundingBox(annotation)
+	if (!bbox) return null
+	// Anchor above the bbox (or below if too close to the page top), centered.
+	const POPOVER_HEIGHT = 36
+	const GAP = 8
+	const centerX = (bbox.x + bbox.w / 2) * W
+	const topAbove = bbox.y * H - POPOVER_HEIGHT - GAP
+	const showBelow = topAbove < 0
+	const top = showBelow ? (bbox.y + bbox.h) * H + GAP : topAbove
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: presentational; clicks within shouldn't bubble to the SVG and clear selection
+		<div
+			className="absolute z-[3] -translate-x-1/2 flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-1 shadow-[var(--shadow-popover)] backdrop-blur"
+			onClick={(e) => e.stopPropagation()}
+			onMouseDown={(e) => e.stopPropagation()}
+			onPointerDown={(e) => e.stopPropagation()}
+			style={{ left: `${centerX}px`, top: `${top}px` }}
+		>
+			{READER_ANNOTATION_COLORS.map((entry) => (
+				<button
+					aria-label={`Set ${entry.label}`}
+					aria-pressed={annotation.color === entry.value}
+					className={`h-5 w-5 rounded-full border transition-transform hover:scale-110 ${
+						annotation.color === entry.value
+							? "border-text-primary ring-2 ring-accent-600/35"
+							: "border-border-default"
+					}`}
+					key={entry.value}
+					onClick={() => {
+						if (annotation.color !== entry.value) onChangeColor(entry.value)
+					}}
+					style={{ backgroundColor: entry.value }}
+					type="button"
+				/>
+			))}
+			<div className="mx-1 h-4 w-px bg-border-subtle" />
+			<button
+				aria-label="Delete annotation"
+				className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-error"
+				onClick={onDelete}
+				title="Delete"
+				type="button"
+			>
+				<TrashIcon />
+			</button>
+		</div>
 	)
 }
 
