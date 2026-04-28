@@ -53,7 +53,46 @@ export function useSetBlockHighlight(paperId: string) {
 				method: "PUT",
 				body: JSON.stringify(input),
 			}),
-		onSuccess: (_, variables) => {
+		onMutate: async (variables) => {
+			const key = highlightsKey(paperId, variables.workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<BlockHighlight[]>(key) ?? []
+			const existing = previous.find((highlight) => highlight.blockId === variables.blockId)
+			const optimistic: BlockHighlight = existing
+				? { ...existing, color: variables.color, updatedAt: new Date().toISOString() }
+				: {
+						id: `optimistic-${variables.workspaceId}-${variables.blockId}`,
+						paperId,
+						blockId: variables.blockId,
+						userId: "optimistic",
+						workspaceId: variables.workspaceId,
+						color: variables.color,
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString(),
+					}
+			qc.setQueryData<BlockHighlight[]>(
+				key,
+				existing
+					? previous.map((highlight) =>
+							highlight.blockId === variables.blockId ? optimistic : highlight,
+						)
+					: [...previous, optimistic],
+			)
+			return { key, previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSuccess: (saved, variables) => {
+			const key = highlightsKey(paperId, variables.workspaceId)
+			const current = qc.getQueryData<BlockHighlight[]>(key) ?? []
+			const next = current.some((highlight) => highlight.blockId === saved.blockId)
+				? current.map((highlight) => (highlight.blockId === saved.blockId ? saved : highlight))
+				: [...current, saved]
+			qc.setQueryData<BlockHighlight[]>(key, next)
+		},
+		onSettled: (_data, _error, variables) => {
 			void qc.invalidateQueries({ queryKey: highlightsKey(paperId, variables.workspaceId) })
 		},
 	})
@@ -67,7 +106,21 @@ export function useClearBlockHighlight(paperId: string) {
 				method: "DELETE",
 				body: JSON.stringify(input),
 			}),
-		onSuccess: (_, variables) => {
+		onMutate: async (variables) => {
+			const key = highlightsKey(paperId, variables.workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<BlockHighlight[]>(key) ?? []
+			qc.setQueryData<BlockHighlight[]>(
+				key,
+				previous.filter((highlight) => highlight.blockId !== variables.blockId),
+			)
+			return { key, previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSettled: (_data, _error, variables) => {
 			void qc.invalidateQueries({ queryKey: highlightsKey(paperId, variables.workspaceId) })
 		},
 	})

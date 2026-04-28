@@ -46,7 +46,40 @@ export function useCreateReaderAnnotation(paperId: string) {
 				method: "POST",
 				body: JSON.stringify(input),
 			}),
-		onSuccess: (_, variables) => {
+		onMutate: async (variables) => {
+			const key = readerAnnotationsKey(paperId, variables.workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			const optimistic: ReaderAnnotation = {
+				id: `optimistic-${variables.workspaceId}-${Date.now()}`,
+				paperId,
+				workspaceId: variables.workspaceId,
+				userId: "optimistic",
+				page: variables.page,
+				kind: variables.kind,
+				color: variables.color,
+				body: variables.body,
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
+			}
+			qc.setQueryData<ReaderAnnotation[]>(key, [...previous, optimistic])
+			return { key, previous, optimisticId: optimistic.id }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSuccess: (saved, variables, context) => {
+			const key = readerAnnotationsKey(paperId, variables.workspaceId)
+			const current = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				current.map((annotation) =>
+					annotation.id === context?.optimisticId ? saved : annotation,
+				),
+			)
+		},
+		onSettled: (_data, _error, variables) => {
 			void qc.invalidateQueries({
 				queryKey: readerAnnotationsKey(paperId, variables.workspaceId),
 			})
@@ -65,7 +98,35 @@ export function useUpdateReaderAnnotationColor(
 				method: "PATCH",
 				body: JSON.stringify({ color }),
 			}),
-		onSuccess: () => {
+		onMutate: async ({ annotationId, color }) => {
+			if (!workspaceId) return
+			const key = readerAnnotationsKey(paperId, workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				previous.map((annotation) =>
+					annotation.id === annotationId
+						? { ...annotation, color, updatedAt: new Date().toISOString() }
+						: annotation,
+				),
+			)
+			return { key, previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSuccess: (saved) => {
+			if (!workspaceId) return
+			const key = readerAnnotationsKey(paperId, workspaceId)
+			const current = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				current.map((annotation) => (annotation.id === saved.id ? saved : annotation)),
+			)
+		},
+		onSettled: () => {
 			if (!workspaceId) return
 			void qc.invalidateQueries({
 				queryKey: readerAnnotationsKey(paperId, workspaceId),
@@ -79,7 +140,22 @@ export function useDeleteReaderAnnotation(paperId: string, workspaceId: string |
 	return useMutation({
 		mutationFn: (annotationId: string) =>
 			apiFetch<void>(`/api/v1/reader-annotations/${annotationId}`, { method: "DELETE" }),
-		onSuccess: () => {
+		onMutate: async (annotationId) => {
+			if (!workspaceId) return
+			const key = readerAnnotationsKey(paperId, workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				previous.filter((annotation) => annotation.id !== annotationId),
+			)
+			return { key, previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSettled: () => {
 			if (!workspaceId) return
 			void qc.invalidateQueries({
 				queryKey: readerAnnotationsKey(paperId, workspaceId),

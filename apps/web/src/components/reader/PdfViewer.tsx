@@ -115,6 +115,8 @@ function PdfViewerInner({
 	const [annotationColor, setAnnotationColor] = useState(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 	const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
 	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
+	const [pageRefsVersion, setPageRefsVersion] = useState(0)
+	const [pageCanvasVersion, setPageCanvasVersion] = useState(0)
 	const viewerRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -122,6 +124,7 @@ function PdfViewerInner({
 	const activePageRef = useRef(1)
 	const intersectionObserverRef = useRef<IntersectionObserver | null>(null)
 	const scrollRafRef = useRef<number | null>(null)
+	const handledJumpRequestRef = useRef<string | null>(null)
 
 	useEffect(() => {
 		void paperId
@@ -138,9 +141,12 @@ function PdfViewerInner({
 		setAnnotationColor(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 		setSelectedAnnotationId(null)
 		setHoveredBlockId(null)
+		setPageRefsVersion(0)
+		setPageCanvasVersion(0)
 		pageRefs.current.clear()
 		intersectionRatiosRef.current.clear()
 		activePageRef.current = 1
+		handledJumpRequestRef.current = null
 	}, [paperId])
 
 	const blocksByPage = useMemo(() => {
@@ -221,9 +227,11 @@ function PdfViewerInner({
 	const scrollToPage = useCallback((page: number, blockYRatio?: number) => {
 		const el = pageRefs.current.get(page)
 		const container = scrollContainerRef.current
-		if (!el || !container) return
+		if (!el || !container) return false
 		if (typeof blockYRatio === "number") {
-			const elRect = el.getBoundingClientRect()
+			const canvas = el.querySelector("canvas")
+			if (!(canvas instanceof HTMLCanvasElement)) return false
+			const elRect = canvas.getBoundingClientRect()
 			const containerRect = container.getBoundingClientRect()
 			const pageTopInContent = elRect.top - containerRect.top + container.scrollTop
 			const blockTopInContent = pageTopInContent + blockYRatio * elRect.height
@@ -234,9 +242,10 @@ function PdfViewerInner({
 				top: Math.max(0, Math.min(max, target)),
 				behavior: "smooth",
 			})
-			return
+			return true
 		}
 		el.scrollIntoView({ behavior: "smooth", block: "start" })
+		return true
 	}, [])
 
 	const fitToWidth = useCallback(() => {
@@ -255,12 +264,14 @@ function PdfViewerInner({
 	}, [currentPage])
 
 	useEffect(() => {
-		void requestedPageNonce
 		if (requestedPage == null) return
 		if (numPages == null) return
 		if (!renderedPages.has(requestedPage)) return
-		scrollToPage(requestedPage, requestedBlockY)
-	}, [numPages, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
+		const requestKey = `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedBlockY ?? "none"}`
+		if (handledJumpRequestRef.current === requestKey) return
+		if (!scrollToPage(requestedPage, requestedBlockY)) return
+		handledJumpRequestRef.current = requestKey
+	}, [numPages, pageCanvasVersion, pageRefsVersion, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
 
 	useEffect(() => {
 		const container = scrollContainerRef.current
@@ -430,6 +441,7 @@ function PdfViewerInner({
 		if (el) {
 			pageRefs.current.set(page, el)
 			intersectionObserverRef.current?.observe(el)
+			setPageRefsVersion((value) => value + 1)
 			return
 		}
 		if (prev) {
@@ -437,6 +449,11 @@ function PdfViewerInner({
 		}
 		pageRefs.current.delete(page)
 		intersectionRatiosRef.current.delete(page)
+		setPageRefsVersion((value) => value + 1)
+	}, [])
+
+	const handlePageCanvasReady = useCallback((_page: number) => {
+		setPageCanvasVersion((value) => value + 1)
 	}, [])
 
 	const handlePageDims = useCallback((page: number, dims: { w: number; h: number }) => {
@@ -567,6 +584,7 @@ function PdfViewerInner({
 										onCreateReaderAnnotation={onCreateReaderAnnotation}
 										onDeleteReaderAnnotation={onDeleteReaderAnnotation}
 										onHoverBlock={setHoveredBlockId}
+										onPageCanvasReady={handlePageCanvasReady}
 										onPageDims={handlePageDims}
 										onPageRef={registerPageRef}
 										onSelectAnnotation={setSelectedAnnotationId}
@@ -941,6 +959,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
 	onHoverBlock,
+	onPageCanvasReady,
 	onPageDims,
 	onPageRef,
 	onSelectAnnotation,
@@ -975,6 +994,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	}) => Promise<unknown> | unknown
 	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
+	onPageCanvasReady?: (page: number) => void
 	onPageDims?: (page: number, dims: { w: number; h: number }) => void
 	onPageRef?: (page: number, el: HTMLDivElement | null) => void
 	onSelectAnnotation?: (annotationId: string | null) => void
@@ -1311,6 +1331,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					onRenderSuccess={() => {
 						lastRenderedScaleRef.current = scale
 						setIsRendering(false)
+						onPageCanvasReady?.(page)
 					}}
 					pageNumber={page}
 					renderAnnotationLayer={false}

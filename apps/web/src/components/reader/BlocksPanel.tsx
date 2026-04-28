@@ -6,6 +6,8 @@ import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
 import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
+const BLOCKS_WINDOW_RADIUS = 1
+
 interface Props {
 	paperId: string
 	currentPage?: number
@@ -192,12 +194,52 @@ function BlocksPanelScrollBody({
 }) {
 	const scrollRef = useRef<HTMLDivElement | null>(null)
 	const cardRefs = useRef(new Map<string, HTMLDivElement>())
+	const [cardRefsVersion, setCardRefsVersion] = useState(0)
 	const pageHeaderRefs = useRef(new Map<number, HTMLDivElement>())
 	const pageIntersectionRatiosRef = useRef(new Map<number, number>())
 	const activePageRef = useRef(currentPage ?? grouped[0]?.[0] ?? 1)
 	const pageObserverRef = useRef<IntersectionObserver | null>(null)
 	const scrollMeasureFrameRef = useRef<number | null>(null)
 	const lastReportedViewportRef = useRef<{ page: number; yRatio: number } | null>(null)
+	const handledRequestedJumpRef = useRef<string | null>(null)
+	const [pageBodyHeights, setPageBodyHeights] = useState<Map<number, number>>(() => new Map())
+
+	const selectedBlockPage = useMemo(
+		() => grouped.find(([, pageBlocks]) => pageBlocks.some((block) => block.blockId === selectedBlockId))?.[0],
+		[grouped, selectedBlockId],
+	)
+	const activeRequestedJumpKey = useMemo(
+		() =>
+			requestedPage
+				? `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedAnchorYRatio ?? "none"}`
+				: null,
+		[requestedAnchorYRatio, requestedPage, requestedPageNonce],
+	)
+	const hasPendingRequestedJump =
+		activeRequestedJumpKey != null && handledRequestedJumpRef.current !== activeRequestedJumpKey
+
+	const renderedPages = useMemo(() => {
+		if (hasPendingRequestedJump) {
+			return new Set(grouped.map(([page]) => page))
+		}
+		const centers = new Set<number>()
+		if (currentPage != null) centers.add(currentPage)
+		if (requestedPage != null) centers.add(requestedPage)
+		if (selectedBlockPage != null) centers.add(selectedBlockPage)
+		const next = new Set<number>()
+		for (const [page] of grouped) {
+			if (centers.size === 0 || Array.from(centers).some((center) => Math.abs(center - page) <= BLOCKS_WINDOW_RADIUS)) {
+				next.add(page)
+			}
+		}
+		return next
+	}, [currentPage, grouped, hasPendingRequestedJump, requestedPage, selectedBlockPage])
+
+	const averageMeasuredBodyHeight = useMemo(() => {
+		const values = Array.from(pageBodyHeights.values()).filter((value) => value > 0)
+		if (values.length === 0) return 0
+		return values.reduce((sum, value) => sum + value, 0) / values.length
+	}, [pageBodyHeights])
 
 	const scrollContainerToOffset = useCallback((offset: number) => {
 		const container = scrollRef.current
@@ -209,6 +251,19 @@ function BlocksPanelScrollBody({
 			return
 		}
 		container.scrollTop = top
+	}, [])
+
+	const registerCardRef = useCallback((blockId: string, el: HTMLDivElement | null) => {
+		const previous = cardRefs.current.get(blockId)
+		if (el) {
+			if (previous === el) return
+			cardRefs.current.set(blockId, el)
+			setCardRefsVersion((value) => value + 1)
+			return
+		}
+		if (!previous) return
+		cardRefs.current.delete(blockId)
+		setCardRefsVersion((value) => value + 1)
 	}, [])
 
 	// Selection-driven scroll wins: when a block is explicitly selected (click
@@ -245,6 +300,8 @@ function BlocksPanelScrollBody({
 	useEffect(() => {
 		void requestedPageNonce
 		if (!requestedPage) return
+		const requestKey = `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedAnchorYRatio ?? "none"}`
+		if (handledRequestedJumpRef.current === requestKey) return
 		lockUntilRef.current = Date.now() + 500
 		// A programmatic jump already positions the pane at the target block.
 		// Skip the next selection-driven recenter so we don't "correct" the
@@ -254,7 +311,12 @@ function BlocksPanelScrollBody({
 		const header = pageHeaderRefs.current.get(requestedPage)
 		if (!container || !header) return
 		const pageBlocks = grouped.find(([page]) => page === requestedPage)?.[1] ?? []
+		const exactSelectedBlock =
+			selectedBlockId != null
+				? pageBlocks.find((block) => block.blockId === selectedBlockId) ?? null
+				: null
 		const targetBlock =
+			exactSelectedBlock ??
 			typeof requestedAnchorYRatio === "number"
 				? pageBlocks.reduce<Block | null>((best, block) => {
 						if (!block.bbox) return best
@@ -264,12 +326,22 @@ function BlocksPanelScrollBody({
 						return nextDistance < bestDistance ? block : best
 					}, null)
 				: null
+		if (targetBlock && !cardRefs.current.get(targetBlock.blockId)) return
 		const targetEl = targetBlock ? (cardRefs.current.get(targetBlock.blockId) ?? header) : header
 		const targetRect = targetEl.getBoundingClientRect()
 		const containerRect = container.getBoundingClientRect()
 		const targetTopInContent = targetRect.top - containerRect.top + container.scrollTop
 		scrollContainerToOffset(targetTopInContent - 8)
-	}, [grouped, requestedAnchorYRatio, requestedPage, requestedPageNonce, scrollContainerToOffset])
+		handledRequestedJumpRef.current = requestKey
+	}, [
+		cardRefsVersion,
+		grouped,
+		requestedAnchorYRatio,
+		requestedPage,
+		requestedPageNonce,
+		selectedBlockId,
+		scrollContainerToOffset,
+	])
 
 	const measureViewport = useCallback(() => {
 		const container = scrollRef.current
@@ -390,6 +462,7 @@ function BlocksPanelScrollBody({
 
 	useEffect(() => {
 		void selectedBlockRequestNonce
+		if (requestedPage) return
 		// Lock the page-driven scroll regardless — we don't want the PDF's
 		// smooth-scroll to drag the pane through intermediate pages even if
 		// we're skipping our own selection scroll.
@@ -411,7 +484,7 @@ function BlocksPanelScrollBody({
 		const cardTopInContent = cardRect.top - containerRect.top + container.scrollTop
 		const target = cardTopInContent - container.clientHeight / 2 + cardRect.height / 2
 		scrollContainerToOffset(target)
-	}, [selectedBlockId, selectedBlockRequestNonce, scrollContainerToOffset])
+	}, [cardRefsVersion, requestedPage, selectedBlockId, selectedBlockRequestNonce, scrollContainerToOffset])
 
 	// Follow PDF scroll: when the PDF advances to a new page, snap the parsed
 	// pane to that page's section header. Skip during the post-selection lock
@@ -443,6 +516,17 @@ function BlocksPanelScrollBody({
 		},
 		[onInteract],
 	)
+
+	const rememberPageBodyHeight = useCallback((page: number, height: number) => {
+		if (!Number.isFinite(height) || height <= 0) return
+		setPageBodyHeights((current) => {
+			const previous = current.get(page)
+			if (previous != null && Math.abs(previous - height) < 2) return current
+			const next = new Map(current)
+			next.set(page, height)
+			return next
+		})
+	}, [])
 
 	return (
 		<div
@@ -480,29 +564,32 @@ function BlocksPanelScrollBody({
 					>
 						Page {page}
 					</div>
-					<div className="space-y-3">
-						{pageBlocks.map((block) => (
-							<BlockRow
-								block={block}
-								cardRefs={cardRefs}
-								citationCount={citationCounts?.get(block.blockId)}
-								highlightColor={colorByBlock?.get(block.blockId) ?? null}
-								isHovered={hoveredBlockId === block.blockId}
-								isSelected={selectedBlockId === block.blockId}
-								key={block.blockId}
-								onClearHighlight={onClearHighlight}
-								onDismissPopover={onDismissPopover}
-								onHoverBlock={onHoverBlock}
-								onSelect={handleBlockSelectFromPane}
-								onSetHighlight={onSetHighlight}
-								onTogglePopover={() => onTogglePopover(block.blockId)}
-								palette={palette}
-								paperId={paperId}
-								popoverOpen={openPopoverFor === block.blockId}
-								renderActions={renderActions}
-							/>
-						))}
-					</div>
+					{renderedPages.has(page) ? (
+						<PageBlockBody
+							citationCounts={citationCounts}
+							colorByBlock={colorByBlock}
+							hoveredBlockId={hoveredBlockId}
+							onClearHighlight={onClearHighlight}
+							onDismissPopover={onDismissPopover}
+							onHoverBlock={onHoverBlock}
+							onMeasureHeight={(height) => rememberPageBodyHeight(page, height)}
+							onRegisterCardRef={registerCardRef}
+							onSelect={handleBlockSelectFromPane}
+							onSetHighlight={onSetHighlight}
+							onTogglePopover={onTogglePopover}
+							openPopoverFor={openPopoverFor}
+							pageBlocks={pageBlocks}
+							palette={palette}
+							paperId={paperId}
+							renderActions={renderActions}
+							selectedBlockId={selectedBlockId}
+						/>
+					) : (
+						<PageBlockPlaceholder
+							blockCount={pageBlocks.length}
+							height={pageBodyHeights.get(page) ?? estimatePageBodyHeight(pageBlocks, averageMeasuredBodyHeight)}
+						/>
+					)}
 				</div>
 			))}
 		</div>
@@ -518,9 +605,134 @@ function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
 	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
 }
 
+function estimatePageBodyHeight(pageBlocks: Block[], averageMeasuredBodyHeight: number) {
+	if (averageMeasuredBodyHeight > 0) return averageMeasuredBodyHeight
+	const estimate = pageBlocks.reduce((sum, block) => {
+		switch (block.type) {
+			case "heading":
+				return sum + 64
+			case "figure":
+			case "table":
+				return sum + 320
+			case "equation":
+			case "code":
+				return sum + 120
+			case "list":
+				return sum + 140
+			case "other":
+				return sum + 56
+			default:
+				return sum + 96
+		}
+	}, 0)
+	return Math.max(estimate, 160)
+}
+
+function PageBlockPlaceholder({ blockCount, height }: { blockCount: number; height: number }) {
+	return (
+		<div
+			aria-hidden="true"
+			className="overflow-hidden rounded-md border border-border-subtle/40 bg-bg-secondary/20"
+			style={{ height }}
+		>
+			<div className="flex h-full flex-col gap-3 p-3 opacity-40">
+				{Array.from({ length: Math.min(Math.max(blockCount, 2), 5) }, (_, index) => (
+					<div
+						className="rounded-sm bg-bg-secondary/70"
+						key={index}
+						style={{
+							height: index === 0 ? 20 : 14,
+							width: `${92 - index * 9}%`,
+						}}
+					/>
+				))}
+			</div>
+		</div>
+	)
+}
+
+interface PageBlockBodyProps {
+	citationCounts?: Map<string, number>
+	colorByBlock?: Map<string, string>
+	hoveredBlockId?: string | null
+	onClearHighlight?: (blockId: string) => Promise<void> | void
+	onDismissPopover: () => void
+	onHoverBlock?: (blockId: string | null) => void
+	onMeasureHeight: (height: number) => void
+	onRegisterCardRef: (blockId: string, el: HTMLDivElement | null) => void
+	onSelect?: (block: Block) => void
+	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
+	onTogglePopover: (id: string) => void
+	openPopoverFor: string | null
+	pageBlocks: Block[]
+	palette?: PaletteEntry[]
+	paperId: string
+	renderActions?: (block: Block) => React.ReactNode
+	selectedBlockId?: string | null
+}
+
+const PageBlockBody = memo(function PageBlockBody({
+	citationCounts,
+	colorByBlock,
+	hoveredBlockId,
+	onClearHighlight,
+	onDismissPopover,
+	onHoverBlock,
+	onMeasureHeight,
+	onRegisterCardRef,
+	onSelect,
+	onSetHighlight,
+	onTogglePopover,
+	openPopoverFor,
+	pageBlocks,
+	palette,
+	paperId,
+	renderActions,
+	selectedBlockId,
+}: PageBlockBodyProps) {
+	const bodyRef = useRef<HTMLDivElement | null>(null)
+
+	useEffect(() => {
+		const el = bodyRef.current
+		if (!el) return
+		onMeasureHeight(el.offsetHeight)
+		if (typeof ResizeObserver === "undefined") return
+		const observer = new ResizeObserver(() => {
+			onMeasureHeight(el.offsetHeight)
+		})
+		observer.observe(el)
+		return () => observer.disconnect()
+	}, [onMeasureHeight, pageBlocks])
+
+	return (
+		<div className="space-y-3" ref={bodyRef}>
+			{pageBlocks.map((block) => (
+				<BlockRow
+					block={block}
+					citationCount={citationCounts?.get(block.blockId)}
+					highlightColor={colorByBlock?.get(block.blockId) ?? null}
+					isHovered={hoveredBlockId === block.blockId}
+					isSelected={selectedBlockId === block.blockId}
+					key={block.blockId}
+					onClearHighlight={onClearHighlight}
+					onDismissPopover={onDismissPopover}
+					onHoverBlock={onHoverBlock}
+					onRegisterCardRef={onRegisterCardRef}
+					onSelect={onSelect}
+					onSetHighlight={onSetHighlight}
+					onTogglePopover={() => onTogglePopover(block.blockId)}
+					palette={palette}
+					paperId={paperId}
+					popoverOpen={openPopoverFor === block.blockId}
+					renderActions={renderActions}
+				/>
+			))}
+		</div>
+	)
+})
+
 type BlockRowProps = {
 	block: Block
-	cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
 	citationCount?: number
 	highlightColor: string | null
 	isHovered: boolean
@@ -528,6 +740,7 @@ type BlockRowProps = {
 	onClearHighlight?: (blockId: string) => Promise<void> | void
 	onDismissPopover: () => void
 	onHoverBlock?: (blockId: string | null) => void
+	onRegisterCardRef: (blockId: string, el: HTMLDivElement | null) => void
 	onSelect?: (block: Block) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	onTogglePopover: () => void
@@ -542,7 +755,6 @@ type BlockRowProps = {
 // each contribute their own visual layer (toolbar, ring, fill).
 const BlockRow = memo(function BlockRow({
 	block,
-	cardRefs,
 	citationCount,
 	highlightColor,
 	isHovered,
@@ -550,6 +762,7 @@ const BlockRow = memo(function BlockRow({
 	onClearHighlight,
 	onDismissPopover,
 	onHoverBlock,
+	onRegisterCardRef,
 	onSelect,
 	onSetHighlight,
 	onTogglePopover,
@@ -559,8 +772,7 @@ const BlockRow = memo(function BlockRow({
 	renderActions,
 }: BlockRowProps) {
 	const setRef = (el: HTMLDivElement | null) => {
-		if (el) cardRefs.current.set(block.blockId, el)
-		else cardRefs.current.delete(block.blockId)
+		onRegisterCardRef(block.blockId, el)
 	}
 
 	const handleCopy = (e: React.MouseEvent) => {
