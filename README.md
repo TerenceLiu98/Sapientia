@@ -68,8 +68,6 @@ After signing in, configure your **MinerU token** and **LLM API key** in `/setti
 | External | MinerU (PDF parsing) · Anthropic or OpenAI (LLM) |
 | Tooling | pnpm workspaces · Biome · vitest · Playwright · testcontainers-node · Docker Compose · Kustomize |
 
-Stack choices for v0.1 are locked. See [`docs/DECISIONS.md`](docs/DECISIONS.md) for the rationale behind each call.
-
 ## Repository layout
 
 ```
