@@ -6,17 +6,10 @@
 
   <h1>Sapientia</h1>
 
-  <p><strong>Read papers deeply. Let AI help only when you ask.</strong></p>
+  <p><strong>Human do Marginalia, AIs do Zettelkasten</strong></p>
 
   <p>
     A web reader for researchers. PDFs are parsed into addressable blocks; notes cite blocks; accumulated notes grow into auto-built wiki pages and a knowledge graph. AI is summoned, not assumed.
-  </p>
-
-  <p>
-    <a href="docs/PRD_v0.1.md">Product&nbsp;PRD</a> ·
-    <a href="docs/DECISIONS.md">Architecture&nbsp;decisions</a> ·
-    <a href="docs/STATUS.md">Roadmap</a> ·
-    <a href="CLAUDE.md">Agent&nbsp;manual</a>
   </p>
 </div>
 
@@ -24,7 +17,7 @@
 
 ## Why
 
-Most "AI for papers" tools answer for you. Sapientia is built for the opposite habit: you read, and the assistant stays out of the way until you summon it. When you do summon it, every claim is grounded in addressable blocks of the paper you're reading, citations stay verifiable, and the notes you write become the knowledge base — not a chat log.
+Most "AI for papers" tools answer for you. Sapientia is built for the opposite habit: you read, and the assistant stays out of the way until you summon it. When you do summon it, every claim is grounded in addressable blocks of the paper you're reading, citations stay verifiable, and the notes you write become the knowledge base — not a chat log. A more detailed motivation is in [Human do Marginalia, AIs do Zettelkasten](https://blog.cklau.cc/post/sapientia-development/)
 
 ## Features
 
