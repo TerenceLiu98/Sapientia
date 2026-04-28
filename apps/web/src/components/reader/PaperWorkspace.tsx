@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import { useNotesForBlock, usePaperCitationCounts } from "@/api/hooks/citations"
 import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
@@ -21,19 +21,16 @@ import { PdfViewer } from "@/components/reader/PdfViewer"
 import { usePalette } from "@/lib/highlight-palette"
 import type { ReaderAnnotationBody, ReaderAnnotationKind } from "@/lib/reader-annotations"
 
-type ViewMode = "pdf-only" | "md-only" | "both"
+type ViewMode = "pdf-only" | "md-only"
 
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
 const NOTES_WIDTH_KEY = "paperWorkspace.notesWidthPct.v2"
 const NOTES_VISIBILITY_KEY = "paperWorkspace.notesVisible"
-const SPLIT_KEY = "paperWorkspace.leftPct"
 const AUTO_FOLLOW_LOCK_MS = 1400
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
 	const v = window.localStorage.getItem(VIEW_MODE_KEY)
-	// "both" is no longer user-selectable — coerce it to pdf-only so a
-	// user who previously persisted it isn't stuck without a toggle.
 	return v === "pdf-only" || v === "md-only" ? v : "pdf-only"
 }
 
@@ -57,7 +54,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [currentPage, setCurrentPage] = useState(1)
 	const [currentAnchorYRatio, setCurrentAnchorYRatio] = useState(0.5)
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
-	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
 	const [notesVisible, setNotesVisible] = useState<boolean>(() => loadNotesVisible())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
@@ -100,21 +96,36 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		[notesCitingSelectedBlock],
 	)
 
-	const handleSelectBlock = useCallback((block: Block) => {
-		setSelectedBlockId(block.blockId)
+	const selectedBlock = useMemo(
+		() =>
+			selectedBlockId ? (blocks ?? []).find((block) => block.blockId === selectedBlockId) ?? null : null,
+		[blocks, selectedBlockId],
+	)
+	const previousViewModeRef = useRef<ViewMode | null>(null)
+
+	const requestMainPaneFocus = useCallback((block: Block) => {
 		setRequestedPage(block.page)
 		setRequestedBlockY(block.bbox?.y)
 		setRequestNonce((n) => n + 1)
-		setSelectedBlockRequestNonce((n) => n + 1)
 	}, [])
 
-	const handleHoverBlock = useCallback((blockId: string | null) => {
-		setHoveredBlockId(blockId)
-	}, [])
+	const handleSelectBlock = useCallback((block: Block) => {
+		setSelectedBlockId(block.blockId)
+		requestMainPaneFocus(block)
+		setSelectedBlockRequestNonce((n) => n + 1)
+	}, [requestMainPaneFocus])
+
+	const handleSelectBlockFromPane = useCallback(
+		(block: Block) => {
+			setSelectedBlockId(block.blockId)
+			if (viewMode !== "pdf-only") return
+			requestMainPaneFocus(block)
+		},
+		[requestMainPaneFocus, viewMode],
+	)
 
 	const handleClearSelectedBlock = useCallback(() => {
 		setSelectedBlockId(null)
-		setHoveredBlockId(null)
 	}, [])
 
 	const handleOpenCitationBlock = useCallback(
@@ -123,7 +134,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			const block = blocks?.find((candidate) => candidate.blockId === blockId)
 			if (!block) return
 			setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
-			setHoveredBlockId(block.blockId)
 			handleSelectBlock(block)
 		},
 		[blocks, handleSelectBlock, paperId],
@@ -134,9 +144,26 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	}, [])
 
 	const handleViewportAnchorChange = useCallback((page: number, yRatio: number) => {
-		setCurrentPage(page)
-		setCurrentAnchorYRatio(yRatio)
+		startTransition(() => {
+			setCurrentPage((prev) => (prev === page ? prev : page))
+			setCurrentAnchorYRatio((prev) => (Math.abs(prev - yRatio) < 0.02 ? prev : yRatio))
+		})
 	}, [])
+
+	useEffect(() => {
+		if (previousViewModeRef.current == null) {
+			previousViewModeRef.current = viewMode
+			return
+		}
+		if (previousViewModeRef.current === viewMode) return
+		previousViewModeRef.current = viewMode
+		if (!selectedBlock) return
+		// Cross-view follow is a one-shot jump on mode switch, not a live
+		// coupling between panes. This preserves "same selected block" across
+		// PDF/Markdown without reintroducing the old scroll feedback loop.
+		setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
+		requestMainPaneFocus(selectedBlock)
+	}, [requestMainPaneFocus, selectedBlock, viewMode])
 
 	// Insert a `@[block N]` chip at the cursor of the currently focused note's
 	// editor. Returns false if the editor isn't ready (e.g. a card was just
@@ -321,11 +348,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			currentPage={currentPage}
 			handleClearBlockHighlight={handleClearBlockHighlight}
 			handleClearSelectedBlock={handleClearSelectedBlock}
-			handleHoverBlock={handleHoverBlock}
 			handleMainInteract={handleMainInteract}
 			handleSelectBlock={handleSelectBlock}
+			handleSelectBlockFromPane={handleSelectBlockFromPane}
 			handleSetBlockHighlight={handleSetBlockHighlight}
-			hoveredBlockId={hoveredBlockId}
 			onViewportAnchorChange={handleViewportAnchorChange}
 			palette={palette}
 			paperId={paperId}
@@ -629,9 +655,9 @@ interface MainViewProps {
 	currentPage: number
 	handleClearBlockHighlight: (blockId: string) => Promise<void> | void
 	handleClearSelectedBlock: () => void
-	handleHoverBlock: (blockId: string | null) => void
 	handleMainInteract: () => void
 	handleSelectBlock: (block: Block) => void
+	handleSelectBlockFromPane: (block: Block) => void
 	handleSetBlockHighlight: (blockId: string, color: string) => Promise<void> | void
 	handleCreateReaderAnnotation: (input: {
 		page: number
@@ -644,7 +670,6 @@ interface MainViewProps {
 		annotationId: string,
 		color: string,
 	) => Promise<unknown> | unknown
-	hoveredBlockId: string | null
 	onViewportAnchorChange: (page: number, yRatio: number) => void
 	palette: ReturnType<typeof usePalette>["palette"]
 	paperId: string
@@ -661,19 +686,17 @@ interface MainViewProps {
 const MainView = memo(function MainView(props: MainViewProps) {
 	const pdfNode = (
 		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-			<PdfViewer
-				blocks={props.blocks}
-				colorByBlock={props.colorByBlock}
-				hoveredBlockId={props.hoveredBlockId}
-				onClearHighlight={props.handleClearBlockHighlight}
-				onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
-				onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
-				onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
-				onClearSelectedBlock={props.handleClearSelectedBlock}
-				onHoverBlock={props.handleHoverBlock}
-				onInteract={props.handleMainInteract}
-				onViewportAnchorChange={props.onViewportAnchorChange}
-				onSelectBlock={props.handleSelectBlock}
+				<PdfViewer
+					blocks={props.blocks}
+					colorByBlock={props.colorByBlock}
+					onClearHighlight={props.handleClearBlockHighlight}
+					onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
+					onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
+					onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
+					onClearSelectedBlock={props.handleClearSelectedBlock}
+					onInteract={props.handleMainInteract}
+					onViewportAnchorChange={props.onViewportAnchorChange}
+					onSelectBlock={props.handleSelectBlock}
 				onSetHighlight={props.handleSetBlockHighlight}
 				palette={props.palette}
 				paperId={props.paperId}
@@ -688,22 +711,19 @@ const MainView = memo(function MainView(props: MainViewProps) {
 	)
 	const mdNode = (
 		<section className="h-full min-h-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-			<BlocksPanel
-				citationCounts={props.countsMap}
-				colorByBlock={props.colorByBlock}
-				currentPage={props.currentPage}
-				externalFollowLockUntil={props.autoFollowLockUntil}
-				hoveredBlockId={props.hoveredBlockId}
-				onClearHighlight={props.handleClearBlockHighlight}
-				onHoverBlock={props.handleHoverBlock}
-				onInteract={props.handleMainInteract}
-				onViewportAnchorChange={
-					props.viewMode === "md-only" ? props.onViewportAnchorChange : undefined
-				}
-				onSelectBlock={props.handleSelectBlock}
+				<BlocksPanel
+					citationCounts={props.countsMap}
+					colorByBlock={props.colorByBlock}
+					currentPage={props.currentPage}
+					externalFollowLockUntil={props.autoFollowLockUntil}
+					onClearHighlight={props.handleClearBlockHighlight}
+					onInteract={props.handleMainInteract}
+					onViewportAnchorChange={props.onViewportAnchorChange}
+					onSelectBlock={props.handleSelectBlockFromPane}
 				onSetHighlight={props.handleSetBlockHighlight}
 				paperId={props.paperId}
 				palette={props.palette}
+				followCurrentPage={props.viewMode === "pdf-only"}
 				requestedAnchorYRatio={props.requestedBlockY}
 				requestedPage={props.requestedPage}
 				requestedPageNonce={props.requestNonce}
@@ -715,8 +735,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 	)
 
 	if (props.viewMode === "pdf-only") return pdfNode
-	if (props.viewMode === "md-only") return mdNode
-	return <SplitMainBoth left={pdfNode} right={mdNode} />
+	return mdNode
 })
 
 MainView.displayName = "MainView"
@@ -850,84 +869,6 @@ function MainNotesSplit({
 					</div>
 				</>
 			) : null}
-		</div>
-	)
-}
-
-function SplitMainBoth({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
-	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const [leftPct, setLeftPct] = useState<number>(() => {
-		if (typeof window === "undefined") return 50
-		const stored = window.localStorage.getItem(SPLIT_KEY)
-		const n = stored ? Number(stored) : NaN
-		return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 50
-	})
-	const [dragging, setDragging] = useState(false)
-	const dragRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
-
-	const onPointerDown = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!wrapRef.current) return
-			e.preventDefault()
-			;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-			dragRef.current = {
-				startX: e.clientX,
-				startPct: leftPct,
-				wrapW: wrapRef.current.getBoundingClientRect().width,
-			}
-			setDragging(true)
-		},
-		[leftPct],
-	)
-	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-		const s = dragRef.current
-		if (!s) return
-		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
-		setLeftPct(Math.max(20, Math.min(80, s.startPct + deltaPct)))
-	}, [])
-	const onPointerUp = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!dragRef.current) return
-			;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-			dragRef.current = null
-			setDragging(false)
-			if (typeof window !== "undefined") {
-				window.localStorage.setItem(SPLIT_KEY, String(leftPct))
-			}
-		},
-		[leftPct],
-	)
-	useEffect(() => {
-		if (!dragging) return
-		const prev = document.body.style.cursor
-		document.body.style.cursor = "col-resize"
-		return () => {
-			document.body.style.cursor = prev
-		}
-	}, [dragging])
-
-	return (
-		<div
-			className="grid h-full min-h-0 min-w-0 grid-cols-[var(--left)_8px_minmax(0,1fr)] gap-0"
-			ref={wrapRef}
-			style={{ ["--left" as string]: `${leftPct}%` }}
-		>
-			<div className="min-h-0 min-w-0">{left}</div>
-			{/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer handlers; role="separator" is the correct ARIA */}
-			<div
-				aria-label="Resize PDF / parsed-blocks split"
-				aria-orientation="vertical"
-				aria-valuenow={leftPct}
-				className="group relative cursor-col-resize select-none"
-				onPointerDown={onPointerDown}
-				onPointerMove={onPointerMove}
-				onPointerUp={onPointerUp}
-				role="separator"
-				tabIndex={0}
-			>
-				<div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border-subtle transition-colors group-hover:bg-accent-600" />
-			</div>
-			<div className="min-h-0 min-w-0">{right}</div>
 		</div>
 	)
 }

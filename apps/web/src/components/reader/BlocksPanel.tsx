@@ -1,4 +1,6 @@
-import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import "katex/dist/katex.min.css"
+import { memo, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import katex from "katex"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
@@ -7,16 +9,15 @@ import { BlockHighlightPicker } from "./BlockHighlightPicker"
 interface Props {
 	paperId: string
 	currentPage?: number
+	followCurrentPage?: boolean
 	externalFollowLockUntil?: number
 	onInteract?: () => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
-	hoveredBlockId?: string | null
 	selectedBlockId?: string | null
 	selectedBlockRequestNonce?: number
 	requestedAnchorYRatio?: number
 	requestedPage?: number
 	requestedPageNonce?: number
-	onHoverBlock?: (blockId: string | null) => void
 	onSelectBlock?: (block: Block) => void
 	colorByBlock?: Map<string, string>
 	palette?: PaletteEntry[]
@@ -31,16 +32,15 @@ interface Props {
 export function BlocksPanel({
 	paperId,
 	currentPage,
+	followCurrentPage = true,
 	externalFollowLockUntil,
 	onInteract,
 	onViewportAnchorChange,
-	hoveredBlockId,
 	selectedBlockId,
 	selectedBlockRequestNonce,
 	requestedAnchorYRatio,
 	requestedPage,
 	requestedPageNonce,
-	onHoverBlock,
 	onSelectBlock,
 	colorByBlock,
 	palette,
@@ -51,6 +51,7 @@ export function BlocksPanel({
 }: Props) {
 	const { data: blocks, isLoading, error } = useBlocks(paperId)
 	const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null)
+	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 
 	const grouped = useMemo(() => {
 		if (!blocks) return [] as Array<[number, Block[]]>
@@ -62,6 +63,17 @@ export function BlocksPanel({
 		}
 		return [...m.entries()].sort(([a], [b]) => a - b)
 	}, [blocks])
+	const [visiblePage, setVisiblePage] = useState<number>(currentPage ?? 1)
+
+	useEffect(() => {
+		if (followCurrentPage && currentPage != null) {
+			setVisiblePage(currentPage)
+			return
+		}
+		if (grouped.length > 0 && !grouped.some(([page]) => page === visiblePage)) {
+			setVisiblePage(grouped[0][0])
+		}
+	}, [currentPage, followCurrentPage, grouped, visiblePage])
 
 	if (isLoading) {
 		return <div className="p-4 text-sm text-text-tertiary">Loading blocks…</div>
@@ -77,10 +89,6 @@ export function BlocksPanel({
 		)
 	}
 
-	const selectedBlock = selectedBlockId
-		? blocks.find((block) => block.blockId === selectedBlockId)
-		: null
-
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-[var(--color-reading-bg)]">
 			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/75 px-4 py-3">
@@ -88,26 +96,23 @@ export function BlocksPanel({
 					<div className="text-xs uppercase tracking-[0.16em] text-text-secondary">
 						Parsed blocks
 					</div>
-					<div className="mt-1 text-sm text-text-tertiary">
-						{selectedBlock
-							? `Selected block on page ${selectedBlock.page}`
-							: `${blocks.length} blocks parsed`}
-					</div>
 				</div>
 				<div className="rounded-md border border-border-default bg-bg-primary px-3 py-1 text-xs font-medium text-text-secondary">
-					Page {currentPage ?? 1}
+					{visiblePage}/{grouped.length}
 				</div>
 			</div>
 			<BlocksPanelScrollBody
 				citationCounts={citationCounts}
 				colorByBlock={colorByBlock}
-				currentPage={currentPage}
+				currentPage={visiblePage}
+				followCurrentPage={followCurrentPage}
 				externalFollowLockUntil={externalFollowLockUntil}
-				grouped={grouped}
-				hoveredBlockId={hoveredBlockId}
-				onClearHighlight={onClearHighlight}
-				onDismissPopover={() => setOpenPopoverFor(null)}
-				onHoverBlock={onHoverBlock}
+					grouped={grouped}
+					hoveredBlockId={hoveredBlockId}
+					onActivePageChange={setVisiblePage}
+					onClearHighlight={onClearHighlight}
+					onDismissPopover={() => setOpenPopoverFor(null)}
+					onHoverBlock={setHoveredBlockId}
 				onInteract={onInteract}
 				onViewportAnchorChange={onViewportAnchorChange}
 				onSelect={onSelectBlock}
@@ -136,9 +141,11 @@ function BlocksPanelScrollBody({
 	citationCounts,
 	colorByBlock,
 	currentPage,
+	followCurrentPage,
 	externalFollowLockUntil,
 	grouped,
 	hoveredBlockId,
+	onActivePageChange,
 	onClearHighlight,
 	onDismissPopover,
 	onHoverBlock,
@@ -160,9 +167,11 @@ function BlocksPanelScrollBody({
 	citationCounts?: Map<string, number>
 	colorByBlock?: Map<string, string>
 	currentPage?: number
+	followCurrentPage: boolean
 	externalFollowLockUntil?: number
 	grouped: Array<[number, Block[]]>
 	hoveredBlockId?: string | null
+	onActivePageChange?: (page: number) => void
 	onClearHighlight?: (blockId: string) => Promise<void> | void
 	onDismissPopover: () => void
 	onHoverBlock?: (blockId: string | null) => void
@@ -184,6 +193,11 @@ function BlocksPanelScrollBody({
 	const scrollRef = useRef<HTMLDivElement | null>(null)
 	const cardRefs = useRef(new Map<string, HTMLDivElement>())
 	const pageHeaderRefs = useRef(new Map<number, HTMLDivElement>())
+	const pageIntersectionRatiosRef = useRef(new Map<number, number>())
+	const activePageRef = useRef(currentPage ?? grouped[0]?.[0] ?? 1)
+	const pageObserverRef = useRef<IntersectionObserver | null>(null)
+	const scrollMeasureFrameRef = useRef<number | null>(null)
+	const lastReportedViewportRef = useRef<{ page: number; yRatio: number } | null>(null)
 
 	const scrollContainerToOffset = useCallback((offset: number) => {
 		const container = scrollRef.current
@@ -214,6 +228,11 @@ function BlocksPanelScrollBody({
 		if (!externalFollowLockUntil) return
 		lockUntilRef.current = Math.max(lockUntilRef.current, externalFollowLockUntil)
 	}, [externalFollowLockUntil])
+
+	useEffect(() => {
+		if (!followCurrentPage || !currentPage) return
+		activePageRef.current = currentPage
+	}, [currentPage, followCurrentPage])
 
 	const handleBlockSelectFromPane = useCallback(
 		(block: Block) => {
@@ -252,16 +271,15 @@ function BlocksPanelScrollBody({
 		scrollContainerToOffset(targetTopInContent - 8)
 	}, [grouped, requestedAnchorYRatio, requestedPage, requestedPageNonce, scrollContainerToOffset])
 
-	useEffect(() => {
+	const measureViewport = useCallback(() => {
 		const container = scrollRef.current
 		if (!container) return
 
-		const handleScroll = () => {
-			let activePage = grouped[0]?.[0]
-			let activeBlocks = grouped[0]?.[1] ?? []
+		const containerRect = container.getBoundingClientRect()
+		let activePage = activePageRef.current || grouped[0]?.[0]
+		let activeBlocks = grouped.find(([page]) => page === activePage)?.[1] ?? grouped[0]?.[1] ?? []
+		if (typeof IntersectionObserver === "undefined") {
 			let bestRatio = -1
-			const containerRect = container.getBoundingClientRect()
-
 			for (const [page, pageBlocks] of grouped) {
 				const section = pageHeaderRefs.current.get(page)
 				if (!section) continue
@@ -276,32 +294,99 @@ function BlocksPanelScrollBody({
 					activeBlocks = pageBlocks
 				}
 			}
-
-			if (activePage == null) return
-
-			const probeY = containerRect.top + container.clientHeight / 2
-			let anchorYRatio = 0.5
-			let bestDistance = Number.POSITIVE_INFINITY
-
-			for (const block of activeBlocks) {
-				if (!block.bbox) continue
-				const card = cardRefs.current.get(block.blockId)
-				if (!card) continue
-				const rect = card.getBoundingClientRect()
-				const distance = Math.abs(rect.top + rect.height / 2 - probeY)
-				if (distance < bestDistance) {
-					bestDistance = distance
-					anchorYRatio = clampUnit(block.bbox.y + block.bbox.h / 2)
-				}
+			if (activePage != null && activePage !== activePageRef.current) {
+				activePageRef.current = activePage
+				onActivePageChange?.(activePage)
 			}
-
-			onViewportAnchorChange?.(activePage, anchorYRatio)
 		}
 
-		handleScroll()
-		container.addEventListener("scroll", handleScroll, { passive: true })
-		return () => container.removeEventListener("scroll", handleScroll)
+		if (activePage == null) return
+
+		const probeY = containerRect.top + container.clientHeight / 2
+		let anchorYRatio = 0.5
+		let bestDistance = Number.POSITIVE_INFINITY
+
+		for (const block of activeBlocks) {
+			if (!block.bbox) continue
+			const card = cardRefs.current.get(block.blockId)
+			if (!card) continue
+			const rect = card.getBoundingClientRect()
+			const distance = Math.abs(rect.top + rect.height / 2 - probeY)
+			if (distance < bestDistance) {
+				bestDistance = distance
+				anchorYRatio = clampUnit(block.bbox.y + block.bbox.h / 2)
+			}
+		}
+
+		const last = lastReportedViewportRef.current
+		if (last && last.page === activePage && Math.abs(last.yRatio - anchorYRatio) < 0.04) return
+		lastReportedViewportRef.current = { page: activePage, yRatio: anchorYRatio }
+		onViewportAnchorChange?.(activePage, anchorYRatio)
 	}, [grouped, onViewportAnchorChange])
+
+	const scheduleViewportMeasure = useCallback(() => {
+		if (scrollMeasureFrameRef.current != null) return
+		scrollMeasureFrameRef.current = window.requestAnimationFrame(() => {
+			scrollMeasureFrameRef.current = null
+			measureViewport()
+		})
+	}, [measureViewport])
+
+	useEffect(() => {
+		const container = scrollRef.current
+		if (!container) return
+
+		scheduleViewportMeasure()
+		container.addEventListener("scroll", scheduleViewportMeasure, { passive: true })
+		return () => {
+			container.removeEventListener("scroll", scheduleViewportMeasure)
+			if (scrollMeasureFrameRef.current != null) {
+				window.cancelAnimationFrame(scrollMeasureFrameRef.current)
+				scrollMeasureFrameRef.current = null
+			}
+		}
+	}, [scheduleViewportMeasure])
+
+	useEffect(() => {
+		const container = scrollRef.current
+		if (!container) return
+		if (typeof IntersectionObserver === "undefined") return
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					const page = Number((entry.target as HTMLElement).dataset.pageNumber ?? "0")
+					if (!page) continue
+					pageIntersectionRatiosRef.current.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
+				}
+				let nextActivePage = activePageRef.current
+				let bestRatio = -1
+				for (const [page, ratio] of pageIntersectionRatiosRef.current.entries()) {
+					if (ratio > bestRatio) {
+						bestRatio = ratio
+						nextActivePage = page
+					}
+				}
+				if (nextActivePage !== activePageRef.current) {
+					activePageRef.current = nextActivePage
+					onActivePageChange?.(nextActivePage)
+				}
+				scheduleViewportMeasure()
+			},
+			{
+				root: container,
+				threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
+			},
+		)
+
+		pageObserverRef.current = observer
+		for (const el of pageHeaderRefs.current.values()) observer.observe(el)
+		scheduleViewportMeasure()
+		return () => {
+			pageObserverRef.current = null
+			observer.disconnect()
+		}
+	}, [onActivePageChange, scheduleViewportMeasure])
 
 	useEffect(() => {
 		void selectedBlockRequestNonce
@@ -333,7 +418,7 @@ function BlocksPanelScrollBody({
 	// window so a click → page jump doesn't drag this pane through every
 	// intermediate page on the way to the target.
 	useEffect(() => {
-		if (!currentPage) return
+		if (!followCurrentPage || !currentPage) return
 		if (Date.now() < lockUntilRef.current) return
 		const header = pageHeaderRefs.current.get(currentPage)
 		const container = scrollRef.current
@@ -345,7 +430,7 @@ function BlocksPanelScrollBody({
 		const containerRect = container.getBoundingClientRect()
 		const headerTopInContent = headerRect.top - containerRect.top + container.scrollTop
 		scrollContainerToOffset(headerTopInContent - 8)
-	}, [currentPage, scrollContainerToOffset])
+	}, [currentPage, followCurrentPage, scrollContainerToOffset])
 
 	const handleUserScrollIntent = useCallback(() => {
 		lockUntilRef.current = Date.now() + 500
@@ -370,10 +455,20 @@ function BlocksPanelScrollBody({
 			{grouped.map(([page, pageBlocks]) => (
 				<div
 					className="mb-5"
+					data-page-number={page}
 					key={page}
 					ref={(el) => {
-						if (el) pageHeaderRefs.current.set(page, el)
-						else pageHeaderRefs.current.delete(page)
+						const previous = pageHeaderRefs.current.get(page)
+						if (previous && previous !== el) {
+							pageObserverRef.current?.unobserve(previous)
+						}
+						if (el) {
+							pageHeaderRefs.current.set(page, el)
+							pageObserverRef.current?.observe(el)
+						} else {
+							pageHeaderRefs.current.delete(page)
+							pageIntersectionRatiosRef.current.delete(page)
+						}
 					}}
 				>
 					<div
@@ -423,27 +518,7 @@ function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
 	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
 }
 
-// A block in the parsed-blocks pane. Default state is invisible chrome so
-// the pane reads like an article; hover / selection / an applied highlight
-// each contribute their own visual layer (toolbar, ring, fill).
-function BlockRow({
-	block,
-	cardRefs,
-	citationCount,
-	highlightColor,
-	isHovered,
-	isSelected,
-	onClearHighlight,
-	onDismissPopover,
-	onHoverBlock,
-	onSelect,
-	onSetHighlight,
-	onTogglePopover,
-	palette,
-	paperId,
-	popoverOpen,
-	renderActions,
-}: {
+type BlockRowProps = {
 	block: Block
 	cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
 	citationCount?: number
@@ -460,7 +535,29 @@ function BlockRow({
 	paperId: string
 	popoverOpen: boolean
 	renderActions?: (block: Block) => React.ReactNode
-}) {
+}
+
+// A block in the parsed-blocks pane. Default state is invisible chrome so
+// the pane reads like an article; hover / selection / an applied highlight
+// each contribute their own visual layer (toolbar, ring, fill).
+const BlockRow = memo(function BlockRow({
+	block,
+	cardRefs,
+	citationCount,
+	highlightColor,
+	isHovered,
+	isSelected,
+	onClearHighlight,
+	onDismissPopover,
+	onHoverBlock,
+	onSelect,
+	onSetHighlight,
+	onTogglePopover,
+	palette,
+	paperId,
+	popoverOpen,
+	renderActions,
+}: BlockRowProps) {
 	const setRef = (el: HTMLDivElement | null) => {
 		if (el) cardRefs.current.set(block.blockId, el)
 		else cardRefs.current.delete(block.blockId)
@@ -566,7 +663,18 @@ function BlockRow({
 			</div>
 		</div>
 	)
-}
+},
+(prev, next) =>
+	prev.block === next.block &&
+	prev.citationCount === next.citationCount &&
+	prev.highlightColor === next.highlightColor &&
+	prev.isHovered === next.isHovered &&
+	prev.isSelected === next.isSelected &&
+	prev.paperId === next.paperId &&
+	prev.popoverOpen === next.popoverOpen &&
+	prev.palette === next.palette &&
+	prev.renderActions === next.renderActions,
+)
 
 function CopyIcon() {
 	return (
@@ -587,9 +695,145 @@ function CopyIcon() {
 	)
 }
 
+const katexHtmlCache = new Map<string, string>()
+const mathSegmentsCache = new Map<string, MathSegment[]>()
+
+function renderKatex(latex: string, displayMode: boolean) {
+	if (!latex.trim()) return ""
+	const cacheKey = `${displayMode ? "display" : "inline"}:${latex}`
+	const cached = katexHtmlCache.get(cacheKey)
+	if (cached != null) return cached
+	try {
+		const html = katex.renderToString(latex, {
+			displayMode,
+			throwOnError: false,
+			strict: "ignore",
+		})
+		katexHtmlCache.set(cacheKey, html)
+		return html
+	} catch {
+		return ""
+	}
+}
+
+function normalizeEquationLatex(source: string) {
+	const trimmed = source.trim()
+	if (!trimmed) return trimmed
+	if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length >= 4) {
+		return trimmed.slice(2, -2).trim()
+	}
+	if (trimmed.startsWith("\\[") && trimmed.endsWith("\\]") && trimmed.length >= 4) {
+		return trimmed.slice(2, -2).trim()
+	}
+	if (trimmed.startsWith("\\(") && trimmed.endsWith("\\)") && trimmed.length >= 4) {
+		return trimmed.slice(2, -2).trim()
+	}
+	return trimmed
+}
+
+type MathSegment =
+	| { type: "text"; value: string }
+	| { type: "math"; value: string; displayMode: boolean }
+
+function splitTextWithMath(source: string): MathSegment[] {
+	const cached = mathSegmentsCache.get(source)
+	if (cached) return cached
+	if (!source) {
+		const empty: MathSegment[] = [{ type: "text", value: "" }]
+		mathSegmentsCache.set(source, empty)
+		return empty
+	}
+	const segments: MathSegment[] = []
+	const pattern = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^\n$]+?)\$/g
+	let lastIndex = 0
+
+	for (const match of source.matchAll(pattern)) {
+		const full = match[0]
+		const index = match.index ?? 0
+		if (index > lastIndex) {
+			segments.push({ type: "text", value: source.slice(lastIndex, index) })
+		}
+		if (match[1] != null) {
+			segments.push({ type: "math", value: match[1], displayMode: true })
+		} else if (match[2] != null) {
+			segments.push({ type: "math", value: match[2], displayMode: true })
+		} else if (match[3] != null) {
+			segments.push({ type: "math", value: match[3], displayMode: false })
+		} else if (match[4] != null) {
+			segments.push({ type: "math", value: match[4], displayMode: false })
+		}
+		lastIndex = index + full.length
+	}
+
+	if (lastIndex < source.length) {
+		segments.push({ type: "text", value: source.slice(lastIndex) })
+	}
+
+	const result: MathSegment[] =
+		segments.length > 0 ? segments : [{ type: "text", value: source }]
+	mathSegmentsCache.set(source, result)
+	return result
+}
+
+const RichTextContent = memo(function RichTextContent({
+	text,
+	displayClassName,
+}: {
+	text: string
+	displayClassName?: string
+}) {
+	const segments = useMemo(() => splitTextWithMath(text), [text])
+
+	return (
+		<>
+			{segments.map((segment, index) => {
+				if (segment.type === "text") {
+					return <span key={`text-${index}`}>{segment.value}</span>
+				}
+				const html = renderKatex(segment.value, segment.displayMode)
+				if (!html) {
+					return (
+						<span
+							className={segment.displayMode ? "block whitespace-pre-wrap" : ""}
+							key={`math-fallback-${index}`}
+						>
+							{segment.displayMode ? `$$${segment.value}$$` : `$${segment.value}$`}
+						</span>
+					)
+				}
+				return (
+					<span
+						className={segment.displayMode ? displayClassName : ""}
+						dangerouslySetInnerHTML={{ __html: html }}
+						key={`math-${index}`}
+					/>
+				)
+			})}
+		</>
+	)
+})
+
+const EquationBlock = memo(function EquationBlock({ latex }: { latex: string }) {
+	const normalizedLatex = useMemo(() => normalizeEquationLatex(latex), [latex])
+	const html = useMemo(() => renderKatex(normalizedLatex, true), [normalizedLatex])
+	if (!html) {
+		return (
+			<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-bg-secondary/70 px-3 py-2 font-mono text-sm text-text-primary">
+				{latex || "[equation]"}
+			</pre>
+		)
+	}
+	return (
+		<div
+			className="my-2 overflow-x-auto rounded-sm bg-bg-secondary/40 px-3 py-3 text-text-primary"
+			dangerouslySetInnerHTML={{ __html: html }}
+		/>
+	)
+})
+
 // Flowing-markdown rendering of a block. Highlight visualization happens at
 // the row wrapper (block-level fill); BlockBody just renders the content.
-function BlockBody({ block }: { block: Block }) {
+const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 	switch (block.type) {
 		case "heading": {
 			const level = block.headingLevel ?? 2
@@ -600,9 +844,23 @@ function BlockBody({ block }: { block: Block }) {
 						? "mt-3 mb-2 font-serif text-xl font-semibold text-text-primary"
 						: "mt-2 mb-1.5 font-serif text-lg font-semibold text-text-primary"
 			const text = block.text || "[heading]"
-			if (level <= 1) return <h1 className={cls}>{text}</h1>
-			if (level === 2) return <h2 className={cls}>{text}</h2>
-			return <h3 className={cls}>{text}</h3>
+			if (level <= 1)
+				return (
+					<h1 className={cls}>
+						<RichTextContent text={text} />
+					</h1>
+				)
+			if (level === 2)
+				return (
+					<h2 className={cls}>
+						<RichTextContent text={text} />
+					</h2>
+				)
+			return (
+				<h3 className={cls}>
+					<RichTextContent text={text} />
+				</h3>
+			)
 		}
 		case "figure":
 		case "table": {
@@ -629,6 +887,7 @@ function BlockBody({ block }: { block: Block }) {
 			)
 		}
 		case "equation":
+			return <EquationBlock latex={block.text || ""} />
 		case "code":
 			return (
 				<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-bg-secondary/70 px-3 py-2 font-mono text-sm text-text-primary">
@@ -639,13 +898,17 @@ function BlockBody({ block }: { block: Block }) {
 			const items = (block.metadata?.listItems as unknown[] | undefined) ?? []
 			if (items.length === 0 && block.text) {
 				return (
-					<p className="my-1 font-serif text-[0.97rem] leading-7 text-text-primary">{block.text}</p>
+					<p className="my-1 whitespace-pre-wrap font-serif text-[0.97rem] leading-7 text-text-primary">
+						<RichTextContent text={block.text} displayClassName="my-2 block overflow-x-auto" />
+					</p>
 				)
 			}
 			return (
 				<ul className="my-2 list-disc pl-6 font-serif text-[0.97rem] leading-7 text-text-primary">
 					{items.map((item) => (
-						<li key={`${block.blockId}-${String(item)}`}>{String(item)}</li>
+						<li key={`${block.blockId}-${String(item)}`}>
+							<RichTextContent text={String(item)} displayClassName="my-2 block overflow-x-auto" />
+						</li>
 					))}
 				</ul>
 			)
@@ -657,8 +920,8 @@ function BlockBody({ block }: { block: Block }) {
 		default:
 			return (
 				<p className="my-1 whitespace-pre-wrap font-serif text-[0.97rem] leading-7 text-text-primary">
-					{block.text || "[empty]"}
+					<RichTextContent text={block.text || "[empty]"} displayClassName="my-2 block overflow-x-auto" />
 				</p>
 			)
 	}
-}
+})

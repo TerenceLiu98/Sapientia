@@ -41,6 +41,8 @@ const FIT_WIDTH_GUTTER_PX = 32
 const BBOX_EPSILON = 0.02
 const HIGHLIGHT_MIN_H = 0.018
 const HIGHLIGHT_MIN_W = 0.01
+const VIRTUAL_WINDOW_RADIUS = 2
+const DEFAULT_PAGE_ASPECT_RATIO = 11 / 8.5
 
 interface PdfViewerProps {
 	paperId: string
@@ -53,9 +55,7 @@ interface PdfViewerProps {
 	blocks?: Block[]
 	colorByBlock?: Map<string, string>
 	palette?: PaletteEntry[]
-	hoveredBlockId?: string | null
 	selectedBlockId?: string | null
-	onHoverBlock?: (blockId: string | null) => void
 	onSelectBlock?: (block: Block) => void
 	onClearSelectedBlock?: () => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
@@ -88,9 +88,7 @@ function PdfViewerInner({
 	blocks,
 	colorByBlock,
 	palette,
-	hoveredBlockId,
 	selectedBlockId,
-	onHoverBlock,
 	onSelectBlock,
 	onClearSelectedBlock,
 	onSetHighlight,
@@ -108,14 +106,22 @@ function PdfViewerInner({
 	const [scaleMode, setScaleMode] = useState<"fit" | "manual">("fit")
 	const [showLayoutBoxes, setShowLayoutBoxes] = useState(false)
 	const [basePageWidth, setBasePageWidth] = useState<number | null>(null)
+	const [pagePointDimsByPage, setPagePointDimsByPage] = useState<Map<number, { w: number; h: number }>>(
+		() => new Map(),
+	)
 	const [renderError, setRenderError] = useState<string | null>(null)
 	const [annotationMode, setAnnotationMode] = useState(false)
 	const [annotationTool, setAnnotationTool] = useState<ReaderAnnotationTool>("highlight")
 	const [annotationColor, setAnnotationColor] = useState(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 	const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
+	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 	const viewerRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+	const intersectionRatiosRef = useRef<Map<number, number>>(new Map())
+	const activePageRef = useRef(1)
+	const intersectionObserverRef = useRef<IntersectionObserver | null>(null)
+	const scrollRafRef = useRef<number | null>(null)
 
 	useEffect(() => {
 		void paperId
@@ -125,12 +131,16 @@ function PdfViewerInner({
 		setScaleMode("fit")
 		setShowLayoutBoxes(false)
 		setBasePageWidth(null)
+		setPagePointDimsByPage(new Map())
 		setRenderError(null)
 		setAnnotationMode(false)
 		setAnnotationTool("highlight")
 		setAnnotationColor(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 		setSelectedAnnotationId(null)
+		setHoveredBlockId(null)
 		pageRefs.current.clear()
+		intersectionRatiosRef.current.clear()
+		activePageRef.current = 1
 	}, [paperId])
 
 	const blocksByPage = useMemo(() => {
@@ -163,6 +173,50 @@ function PdfViewerInner({
 	}, [readerAnnotations])
 
 	const canAnnotate = Boolean(onCreateReaderAnnotation)
+
+	const averagePageAspectRatio = useMemo(() => {
+		const ratios = Array.from(pagePointDimsByPage.values())
+			.map((dims) => dims.h / dims.w)
+			.filter((ratio) => Number.isFinite(ratio) && ratio > 0)
+		if (ratios.length === 0) return DEFAULT_PAGE_ASPECT_RATIO
+		return ratios.reduce((sum, ratio) => sum + ratio, 0) / ratios.length
+	}, [pagePointDimsByPage])
+
+	const pageWidthEstimate = useMemo(() => {
+		if (basePageWidth) return basePageWidth * scale
+		const containerWidth = scrollContainerRef.current?.clientWidth
+		if (containerWidth && containerWidth > FIT_WIDTH_GUTTER_PX) {
+			return clamp((containerWidth - FIT_WIDTH_GUTTER_PX) / 600) * 600
+		}
+		return null
+	}, [basePageWidth, scale])
+
+	const renderCenterPages = useMemo(() => {
+		const centers = new Set<number>()
+		centers.add(currentPage)
+		if (requestedPage != null) centers.add(requestedPage)
+		if (selectedBlock?.page != null) centers.add(selectedBlock.page)
+		return Array.from(centers)
+	}, [currentPage, requestedPage, selectedBlock])
+
+	const renderedPages = useMemo(() => {
+		if (numPages == null) return new Set<number>()
+		const next = new Set<number>()
+		for (let page = 1; page <= numPages; page += 1) {
+			if (renderCenterPages.some((center) => Math.abs(center - page) <= VIRTUAL_WINDOW_RADIUS)) {
+				next.add(page)
+			}
+		}
+		return next
+	}, [numPages, renderCenterPages])
+
+	const pageAspectRatioFor = useCallback(
+		(page: number) => {
+			const dims = pagePointDimsByPage.get(page)
+			return dims ? dims.h / dims.w : averagePageAspectRatio
+		},
+		[averagePageAspectRatio, pagePointDimsByPage],
+	)
 
 	const scrollToPage = useCallback((page: number, blockYRatio?: number) => {
 		const el = pageRefs.current.get(page)
@@ -197,20 +251,71 @@ function PdfViewerInner({
 	}, [currentPage, onPageChange])
 
 	useEffect(() => {
+		activePageRef.current = currentPage
+	}, [currentPage])
+
+	useEffect(() => {
 		void requestedPageNonce
 		if (requestedPage == null) return
+		if (numPages == null) return
+		if (!renderedPages.has(requestedPage)) return
 		scrollToPage(requestedPage, requestedBlockY)
-	}, [requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
+	}, [numPages, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
 
 	useEffect(() => {
 		const container = scrollContainerRef.current
 		if (!container || numPages == null) return
+		const measureActivePageAnchor = () => {
+			const activePage = activePageRef.current
+			const el = pageRefs.current.get(activePage)
+			if (!el) return
+			const containerRect = container.getBoundingClientRect()
+			const rect = el.getBoundingClientRect()
+			if (rect.height <= 0) return
+			const viewportMidY = containerRect.top + container.clientHeight / 2
+			const yRatio = clampUnit((viewportMidY - rect.top) / rect.height)
+			onViewportAnchorChange?.(activePage, yRatio)
+		}
 
-		const handleScroll = () => {
-			let activePage = 1
+		if (typeof IntersectionObserver !== "undefined") {
+			const observer = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						const page = Number((entry.target as HTMLElement).dataset.pageNumber ?? "0")
+						if (!page) continue
+						intersectionRatiosRef.current.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
+					}
+					let bestPage = activePageRef.current
+					let bestRatio = -1
+					for (const [page, ratio] of intersectionRatiosRef.current.entries()) {
+						if (ratio > bestRatio) {
+							bestRatio = ratio
+							bestPage = page
+						}
+					}
+					if (bestPage !== activePageRef.current) {
+						activePageRef.current = bestPage
+						setCurrentPage(bestPage)
+					}
+					measureActivePageAnchor()
+				},
+				{
+					root: container,
+					threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
+				},
+			)
+			intersectionObserverRef.current = observer
+			for (const el of pageRefs.current.values()) observer.observe(el)
+			measureActivePageAnchor()
+			return () => {
+				intersectionObserverRef.current = null
+				observer.disconnect()
+			}
+		}
+
+		const fallbackHandleScroll = () => {
+			let bestPage = 1
 			let bestRatio = 0
-			let activePageTop = 0
-			let activePageHeight = 1
 			const containerRect = container.getBoundingClientRect()
 			for (const [page, el] of pageRefs.current.entries()) {
 				const rect = el.getBoundingClientRect()
@@ -220,23 +325,48 @@ function PdfViewerInner({
 				const ratio = visibleHeight / Math.max(rect.height, 1)
 				if (ratio > bestRatio) {
 					bestRatio = ratio
-					activePage = page
-					activePageTop = rect.top
-					activePageHeight = rect.height
+					bestPage = page
 				}
 			}
-			setCurrentPage(activePage)
-			if (activePageHeight > 0) {
-				const viewportMidY = containerRect.top + container.clientHeight / 2
-				const yRatio = clampUnit((viewportMidY - activePageTop) / activePageHeight)
-				onViewportAnchorChange?.(activePage, yRatio)
+			if (bestPage !== activePageRef.current) {
+				activePageRef.current = bestPage
+				setCurrentPage(bestPage)
 			}
+			measureActivePageAnchor()
 		}
 
-		handleScroll()
-		container.addEventListener("scroll", handleScroll, { passive: true })
-		return () => container.removeEventListener("scroll", handleScroll)
+		fallbackHandleScroll()
+		container.addEventListener("scroll", fallbackHandleScroll, { passive: true })
+		return () => container.removeEventListener("scroll", fallbackHandleScroll)
 	}, [numPages, onViewportAnchorChange])
+
+	useEffect(() => {
+		const container = scrollContainerRef.current
+		if (!container) return
+		const handleScroll = () => {
+			if (scrollRafRef.current != null) return
+			scrollRafRef.current = window.requestAnimationFrame(() => {
+				scrollRafRef.current = null
+				const activePage = activePageRef.current
+				const el = pageRefs.current.get(activePage)
+				if (!el) return
+				const containerRect = container.getBoundingClientRect()
+				const rect = el.getBoundingClientRect()
+				if (rect.height <= 0) return
+				const viewportMidY = containerRect.top + container.clientHeight / 2
+				const yRatio = clampUnit((viewportMidY - rect.top) / rect.height)
+				onViewportAnchorChange?.(activePage, yRatio)
+			})
+		}
+		container.addEventListener("scroll", handleScroll, { passive: true })
+		return () => {
+			container.removeEventListener("scroll", handleScroll)
+			if (scrollRafRef.current != null) {
+				window.cancelAnimationFrame(scrollRafRef.current)
+				scrollRafRef.current = null
+			}
+		}
+	}, [onViewportAnchorChange])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -291,6 +421,34 @@ function PdfViewerInner({
 			observer.disconnect()
 		}
 	}, [fitToWidth, scaleMode])
+
+	const registerPageRef = useCallback((page: number, el: HTMLDivElement | null) => {
+		const prev = pageRefs.current.get(page)
+		if (prev && prev !== el) {
+			intersectionObserverRef.current?.unobserve(prev)
+		}
+		if (el) {
+			pageRefs.current.set(page, el)
+			intersectionObserverRef.current?.observe(el)
+			return
+		}
+		if (prev) {
+			intersectionObserverRef.current?.unobserve(prev)
+		}
+		pageRefs.current.delete(page)
+		intersectionRatiosRef.current.delete(page)
+	}, [])
+
+	const handlePageDims = useCallback((page: number, dims: { w: number; h: number }) => {
+		setBasePageWidth((current) => current ?? dims.w)
+		setPagePointDimsByPage((current) => {
+			const previous = current.get(page)
+			if (previous && previous.w === dims.w && previous.h === dims.h) return current
+			const next = new Map(current)
+			next.set(page, dims)
+			return next
+		})
+	}, [])
 
 	const handleMainPointerDown = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
@@ -390,31 +548,35 @@ function PdfViewerInner({
 					}}
 					onLoadError={(err) => setRenderError(err.message)}
 				>
-					{numPages != null
-						? Array.from({ length: numPages }, (_, index) => index + 1).map((page) => (
-								<PdfPageWithOverlay
-									annotationColor={annotationColor}
-									annotationMode={annotationMode}
-									annotations={annotationsByPage.get(page)}
-									annotationTool={annotationTool}
-									blocks={blocksByPage.get(page)}
-									colorByBlock={colorByBlock}
-									hoveredBlockId={hoveredBlockId}
-									key={page}
-									onClearHighlight={onClearHighlight}
-									onCreateReaderAnnotation={onCreateReaderAnnotation}
-									onDeleteReaderAnnotation={onDeleteReaderAnnotation}
-									onHoverBlock={onHoverBlock}
-									onPointDims={(dims) => setBasePageWidth((current) => current ?? dims.w)}
-									onSelectAnnotation={setSelectedAnnotationId}
-									onSelectBlock={onSelectBlock}
-									onSetHighlight={onSetHighlight}
-									onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
-									page={page}
-									pageRefs={pageRefs}
-									palette={palette}
-									renderActions={renderActions}
-									scale={scale}
+						{numPages != null
+							? Array.from({ length: numPages }, (_, index) => index + 1).map((page) => (
+									<PdfPageWithOverlay
+										annotationColor={annotationColor}
+										annotationMode={annotationMode}
+										annotations={annotationsByPage.get(page)}
+										annotationTool={annotationTool}
+										blocks={blocksByPage.get(page)}
+										colorByBlock={colorByBlock}
+										estimatedAspectRatio={pageAspectRatioFor(page)}
+										estimatedWidth={pageWidthEstimate}
+										hoveredBlockId={hoveredBlockId}
+										isPageRendered={renderedPages.has(page)}
+										key={page}
+										onClearHighlight={onClearHighlight}
+										onClearSelectedBlock={onClearSelectedBlock}
+										onCreateReaderAnnotation={onCreateReaderAnnotation}
+										onDeleteReaderAnnotation={onDeleteReaderAnnotation}
+										onHoverBlock={setHoveredBlockId}
+										onPageDims={handlePageDims}
+										onPageRef={registerPageRef}
+										onSelectAnnotation={setSelectedAnnotationId}
+										onSelectBlock={onSelectBlock}
+										onSetHighlight={onSetHighlight}
+										onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
+										page={page}
+										palette={palette}
+										renderActions={renderActions}
+										scale={scale}
 									selectedAnnotationId={selectedAnnotationId}
 									selectedBlockId={selectedBlockId}
 									showLayoutBoxes={showLayoutBoxes}
@@ -770,18 +932,22 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	annotationTool,
 	blocks,
 	colorByBlock,
+	estimatedAspectRatio,
+	estimatedWidth,
 	hoveredBlockId,
+	isPageRendered,
 	onClearHighlight,
+	onClearSelectedBlock,
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
 	onHoverBlock,
-	onPointDims,
+	onPageDims,
+	onPageRef,
 	onSelectAnnotation,
 	onSelectBlock,
 	onSetHighlight,
 	onUpdateReaderAnnotationColor,
 	page,
-	pageRefs,
 	palette,
 	renderActions,
 	scale,
@@ -795,8 +961,12 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	annotationTool: ReaderAnnotationTool
 	blocks: Block[] | undefined
 	colorByBlock?: Map<string, string>
+	estimatedAspectRatio: number
+	estimatedWidth: number | null
 	hoveredBlockId?: string | null
+	isPageRendered: boolean
 	onClearHighlight?: (blockId: string) => Promise<void> | void
+	onClearSelectedBlock?: () => void
 	onCreateReaderAnnotation?: (input: {
 		page: number
 		kind: ReaderAnnotationTool
@@ -805,7 +975,8 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	}) => Promise<unknown> | unknown
 	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
-	onPointDims?: (dims: { w: number; h: number }) => void
+	onPageDims?: (page: number, dims: { w: number; h: number }) => void
+	onPageRef?: (page: number, el: HTMLDivElement | null) => void
 	onSelectAnnotation?: (annotationId: string | null) => void
 	onSelectBlock?: (block: Block) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
@@ -814,7 +985,6 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		color: string,
 	) => Promise<unknown> | unknown
 	page: number
-	pageRefs: React.MutableRefObject<Map<number, HTMLDivElement>>
 	palette?: PaletteEntry[]
 	renderActions?: (block: Block) => React.ReactNode
 	scale: number
@@ -971,6 +1141,9 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	// for the first frame before the ResizeObserver has reported.
 	const displayW = canvasSize?.w ?? (pointDims ? pointDims.w * scale : 0)
 	const displayH = canvasSize?.h ?? (pointDims ? pointDims.h * scale : 0)
+	const placeholderWidth = displayW > 0 ? displayW : estimatedWidth ?? 720
+	const placeholderHeight =
+		displayH > 0 ? displayH : Math.max(placeholderWidth * estimatedAspectRatio, 480)
 
 	// Persisted annotations and the parsed-blocks layer are independent of
 	// draftBody. Memoize so they don't re-render on every pointermove tick
@@ -1015,15 +1188,19 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				return (
 					// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
 					// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
-					<div
-						className="group absolute cursor-pointer"
-						data-block-id={block.blockId}
-						data-block-type={block.type}
-						key={block.blockId}
-						onClick={(e) => {
-							e.stopPropagation()
-							onSelectBlock?.(block)
-						}}
+						<div
+							className="group absolute cursor-pointer"
+							data-block-id={block.blockId}
+							data-block-type={block.type}
+							key={block.blockId}
+							onClick={(e) => {
+								e.stopPropagation()
+								if (selectedBlockId === block.blockId) {
+									onClearSelectedBlock?.()
+									return
+								}
+								onSelectBlock?.(block)
+							}}
 						onMouseEnter={() => onHoverBlock?.(block.blockId)}
 						onMouseLeave={() => onHoverBlock?.(null)}
 						style={{
@@ -1034,16 +1211,18 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						}}
 						title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
 					>
-						<div
-							className={`absolute inset-0 rounded-[2px] border transition-colors ${
-								!showBoxChrome
-									? "border-transparent bg-transparent"
-									: isSelected
-										? "border-accent-600 bg-accent-600/10 shadow-[0_0_0_1px_var(--color-accent-600)]"
-										: isHovered
-											? "border-accent-600/70 bg-accent-600/8"
-											: "border-accent-600/35 bg-accent-600/3"
-							}`}
+							<div
+								className={`absolute inset-0 rounded-[2px] border transition-colors ${
+									!showBoxChrome
+										? "border-transparent bg-transparent"
+										: isSelected
+											? "border-transparent bg-accent-600/12"
+											: isHovered
+												? "border-transparent bg-accent-600/7"
+												: showLayoutBoxes
+													? "border-accent-600/35 bg-accent-600/3"
+													: "border-transparent bg-transparent"
+								}`}
 							style={
 								fill
 									? {
@@ -1111,33 +1290,44 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 			className="relative bg-white shadow-md"
 			ref={(el) => {
 				wrapRef.current = el
-				if (el) pageRefs.current.set(page, el)
-				else pageRefs.current.delete(page)
+				onPageRef?.(page, el)
+			}}
+			data-page-number={page}
+			style={{
+				minHeight: `${placeholderHeight}px`,
+				width: `${placeholderWidth}px`,
 			}}
 		>
-			<Page
-				onLoadSuccess={(loadedPage) => {
-					const view = (loadedPage as { view?: number[] }).view
-					if (view && view.length === 4) {
-						const dims = { w: view[2] - view[0], h: view[3] - view[1] }
-						setPointDims(dims)
-						onPointDims?.(dims)
-					}
-				}}
-				onRenderSuccess={() => {
-					lastRenderedScaleRef.current = scale
-					setIsRendering(false)
-				}}
-				pageNumber={page}
-				renderAnnotationLayer={false}
-				// Keep this prop stable so toggling markup mode never tears
-				// down react-pdf's text layer (which would force the canvas
-				// to re-render). We disable text-selection separately via
-				// CSS pointer-events on the overlay.
-				renderTextLayer={false}
-				scale={scale}
-			/>
-			{pointDims && displayW > 0 && displayH > 0 && !isRendering ? (
+			{isPageRendered ? (
+				<Page
+					onLoadSuccess={(loadedPage) => {
+						const view = (loadedPage as { view?: number[] }).view
+						if (view && view.length === 4) {
+							const dims = { w: view[2] - view[0], h: view[3] - view[1] }
+							setPointDims(dims)
+							onPageDims?.(page, dims)
+						}
+					}}
+					onRenderSuccess={() => {
+						lastRenderedScaleRef.current = scale
+						setIsRendering(false)
+					}}
+					pageNumber={page}
+					renderAnnotationLayer={false}
+					// Keep this prop stable so toggling markup mode never tears
+					// down react-pdf's text layer (which would force the canvas
+					// to re-render). We disable text-selection separately via
+					// CSS pointer-events on the overlay.
+					renderTextLayer={false}
+					scale={scale}
+				/>
+			) : (
+				<div
+					aria-hidden="true"
+					className="h-full w-full rounded-[inherit] bg-white"
+				/>
+			)}
+			{isPageRendered && pointDims && displayW > 0 && displayH > 0 && !isRendering ? (
 				// Overlay sized to the real measured canvas dimensions
 				// (canvasSize) so the SVG always covers exactly the canvas
 				// — no underflow at the page bottom, no overflow.

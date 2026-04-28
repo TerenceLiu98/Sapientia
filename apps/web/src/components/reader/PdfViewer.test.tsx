@@ -219,6 +219,49 @@ describe("PdfViewer", () => {
 		expect(onInteract).toHaveBeenCalledTimes(1)
 	})
 
+	it("clicking the already-selected block clears the PDF overlay selection", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onClearSelectedBlock = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "selected",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Selected block",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					blocks={blocks}
+					onClearSelectedBlock={onClearSelectedBlock}
+					paperId="paper-1"
+					selectedBlockId="selected"
+				/>
+			</Wrapper>,
+		)
+
+		await user.click(await screen.findByTitle("Selected block"))
+		expect(onClearSelectedBlock).toHaveBeenCalledTimes(1)
+	})
+
 	it("shows a draggable media preview for a selected figure block", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },

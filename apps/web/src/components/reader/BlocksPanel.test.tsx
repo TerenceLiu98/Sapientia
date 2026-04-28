@@ -451,4 +451,47 @@ describe("BlocksPanel", () => {
 
 		expect(onInteract).toHaveBeenCalledTimes(1)
 	})
+
+	it("renders inline and display LaTeX in parsed blocks", async () => {
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				type: "text",
+				page: 1,
+				bbox: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 },
+				text: "The loss is $x^2 + 1$ today.",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+			{
+				paperId: "paper-1",
+				blockId: "block-2",
+				blockIndex: 1,
+				type: "equation",
+				page: 1,
+				bbox: { x: 0.1, y: 0.3, w: 0.4, h: 0.2 },
+				text: "$$\\frac{a}{b}=c$$",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+		]
+
+		useBlocksMock.mockReturnValue({ data: blocks, isLoading: false, error: null })
+
+		const BlocksPanel = await importBlocksPanel()
+		const { container } = render(<BlocksPanel currentPage={1} paperId="paper-1" />)
+
+		expect(container.querySelector(".katex")).toBeTruthy()
+		expect(screen.getByText(/the loss is/i)).toBeInTheDocument()
+		expect(screen.getByText(/today\./i)).toBeInTheDocument()
+		expect(container).not.toHaveTextContent("The loss is $x^2 + 1$ today.")
+	})
 })
