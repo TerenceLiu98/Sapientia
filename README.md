@@ -139,7 +139,7 @@ In dev, Vite proxies `/api/*` from `:5173` to `:3000`, so better-auth stays same
 
 ## Project status
 
-Phase 1 — **Reading Foundation**. Sign-up → upload PDF → parse via MinerU → block-addressable reader. See [`docs/STATUS.md`](docs/STATUS.md) for the live phase + task list.
+Phase 1 — **Reading Foundation**. Sign-up → upload PDF → parse via MinerU → block-addressable reader.
 
 ## Contributing
 
