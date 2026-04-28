@@ -1,102 +1,248 @@
-import "@blocknote/mantine/style.css"
-import { type Block, filterSuggestionItems } from "@blocknote/core"
-import { BlockNoteView } from "@blocknote/mantine"
+import Placeholder from "@tiptap/extension-placeholder"
+import type { Editor } from "@tiptap/react"
+import StarterKit from "@tiptap/starter-kit"
 import {
-	type DefaultReactSuggestionItem,
-	getDefaultReactSlashMenuItems,
-	SuggestionMenuController,
-	useCreateBlockNote,
-} from "@blocknote/react"
-import type { ReactNode } from "react"
-import { useEffect, useRef, useState } from "react"
+	Color,
+	Command as NovelCommand,
+	EditorBubble,
+	EditorBubbleItem,
+	EditorCommand,
+	EditorCommandEmpty,
+	EditorCommandItem,
+	EditorCommandList,
+	EditorContent,
+	EditorRoot,
+	HorizontalRule,
+	TaskItem,
+	TaskList,
+	TiptapLink,
+	TiptapUnderline,
+	TextStyle,
+	type SuggestionItem,
+	createSuggestionItems,
+	handleCommandNavigation,
+	renderItems,
+	useEditor,
+} from "novel"
+import {
+	ArrowUpRight,
+	Bold,
+	ChevronDown,
+	Code2,
+	Heading1,
+	Heading2,
+	Heading3,
+	Italic,
+	List,
+	ListOrdered,
+	ListTodo,
+	Minus,
+	Pilcrow,
+	Sigma,
+	Strikethrough,
+	TextQuote,
+	Underline,
+} from "lucide-react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { useNote, useUpdateNote } from "@/api/hooks/notes"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { usePalette } from "@/lib/highlight-palette"
-import { NoteCitationThemeProvider, noteSchema } from "./citation-schema"
+import { cn } from "@/lib/utils"
+import {
+	BlockCitationNode,
+	MathBlockNode,
+	MathInlineNode,
+	NoteCitationThemeProvider,
+} from "./citation-schema"
 
 type SaveStatus = "idle" | "saving" | "saved" | "failed"
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
 
-// Loose alias — BlockNote's editor type fully parametrized by our schema is
-// noisy and only the paper-side note route actually consumes it. We expose
-// the schema's BlockNoteEditor instead of trying to chase
-// useCreateBlockNote's generics.
-export type NoteEditorRef = typeof noteSchema.BlockNoteEditor
+// Loose alias — the editor type fully parametrized by our extensions is
+// noisy. Consumers (PaperWorkspace) only need a handle to insert citations
+// + jump cursor, both reachable via the standard `Editor` interface.
+export type NoteEditorRef = Editor
 
-// Markdown-shortcut: the user types "$$" in a paragraph block, and we
-// replace that paragraph with an empty math block (which auto-enters edit
-// mode because its latex is empty). Triggered from the editor's onChange so
-// it fires the moment the second `$` lands, not on Enter.
-//
-// We type the editor loosely (`unknown`) here because BlockNote's generics
-// don't flow through `useCreateBlockNote` cleanly with our custom schema.
-// The runtime contract — `replaceBlocks([Block], [PartialBlock])` — is
-// stable across BlockNote versions; the wrapper just narrows what we touch.
-function tryUpgradeMathShortcut(editor: unknown) {
-	const ed = editor as {
-		getTextCursorPosition: () => {
-			block: { type?: string; content?: unknown }
-		}
-		replaceBlocks: (existing: unknown[], next: unknown[]) => void
-	}
-	const block = ed.getTextCursorPosition().block
-	if (!block || block.type !== "paragraph") return
-	const content = Array.isArray(block.content)
-		? (block.content as Array<{ type?: string; text?: string }>)
-		: []
-	if (content.length !== 1) return
-	const item = content[0]
-	if (!item || item.type !== "text" || item.text !== "$$") return
-	ed.replaceBlocks([block], [{ type: "mathBlock", props: { latex: "" } }])
-}
-
-// Default slash items + our math additions. The `aliases` are what the user
-// can type after `/` to filter; e.g. /math, /equation, /latex all match.
-//
-// We defer the actual insert via queueMicrotask: BlockNote's
-// SuggestionMenuController is mid-transaction (deleting the "/query" trigger
-// text) when onItemClick fires synchronously. Mutating the editor at that
-// moment can race with the cleanup transaction and throw "Block doesn't have
-// id". One microtask later, the slash text is gone and the cursor position
-// is stable, so the insert lands cleanly.
-function getMathSlashItems(editor: NoteEditorRef): DefaultReactSuggestionItem[] {
-	const defaults = getDefaultReactSlashMenuItems(editor as never)
-	const ed = editor as {
-		getTextCursorPosition: () => { block: unknown }
-		insertBlocks: (
-			blocks: unknown[],
-			reference: unknown,
-			placement: "before" | "after" | "nested",
-		) => void
-		insertInlineContent: (content: unknown[]) => void
-	}
-
-	const insertMathBlock: DefaultReactSuggestionItem = {
-		title: "Math block",
-		subtext: "Display LaTeX equation",
-		aliases: ["math", "equation", "latex", "$$"],
-		group: "Other",
-		icon: <span className="font-serif text-sm">∑</span>,
-		onItemClick: () => {
-			queueMicrotask(() => {
-				const cursor = ed.getTextCursorPosition()
-				ed.insertBlocks([{ type: "mathBlock", props: { latex: "" } }], cursor.block, "after")
-			})
+const editorExtensions = [
+	StarterKit.configure({
+		// Keep dropcursor subtle — the default `#ddeeff` reads teal/green over
+		// our cream reading background.
+		dropcursor: { color: "rgba(15, 23, 42, 0.22)", width: 2 },
+	}),
+	Placeholder.configure({
+		placeholder: "Type '/' for commands…",
+	}),
+	TaskList,
+	TaskItem.configure({
+		nested: true,
+	}),
+	TextStyle,
+	Color,
+	TiptapUnderline,
+	TiptapLink.configure({
+		openOnClick: false,
+		HTMLAttributes: {
+			class: "text-accent-700 underline underline-offset-2",
 		},
-	}
-	const insertInlineMath: DefaultReactSuggestionItem = {
-		title: "Inline math",
-		subtext: "Inline LaTeX expression",
-		aliases: ["imath", "inline-math", "$"],
-		group: "Other",
-		icon: <span className="font-serif text-sm">∫</span>,
-		onItemClick: () => {
-			queueMicrotask(() => {
-				ed.insertInlineContent([{ type: "math", props: { latex: "" } }, " "])
-			})
+	}),
+	HorizontalRule,
+	BlockCitationNode,
+	MathInlineNode,
+	MathBlockNode,
+	NovelCommand.configure({
+		suggestion: {
+			items: ({ query }: { query: string }) => getSlashMenuItems(query),
+			render: () => renderItems(),
 		},
-	}
-	return [...defaults, insertMathBlock, insertInlineMath]
+	}),
+]
+
+const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] } as const
+
+const TEXT_COLORS = [
+	{ label: "Default", value: null },
+	{ label: "Slate", value: "#334155" },
+	{ label: "Amber", value: "#b45309" },
+	{ label: "Rose", value: "#be123c" },
+	{ label: "Emerald", value: "#047857" },
+	{ label: "Blue", value: "#1d4ed8" },
+	{ label: "Violet", value: "#6d28d9" },
+] as const
+
+const SLASH_MENU_ITEMS = createSuggestionItems([
+	{
+		title: "Text",
+		description: "Start writing with a plain paragraph.",
+		searchTerms: ["paragraph", "text", "body"],
+		icon: <Pilcrow className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).setParagraph().run()
+		},
+	},
+	{
+		title: "Heading 1",
+		description: "Large section heading.",
+		searchTerms: ["h1", "title", "heading"],
+		icon: <Heading1 className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run()
+		},
+	},
+	{
+		title: "Heading 2",
+		description: "Medium section heading.",
+		searchTerms: ["h2", "subtitle", "heading"],
+		icon: <Heading2 className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run()
+		},
+	},
+	{
+		title: "Heading 3",
+		description: "Small section heading.",
+		searchTerms: ["h3", "subheading", "heading"],
+		icon: <Heading3 className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run()
+		},
+	},
+	{
+		title: "Bullet List",
+		description: "Create a bulleted list.",
+		searchTerms: ["ul", "bullet", "list"],
+		icon: <List className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).toggleBulletList().run()
+		},
+	},
+	{
+		title: "Numbered List",
+		description: "Create an ordered list.",
+		searchTerms: ["ol", "ordered", "numbered", "list"],
+		icon: <ListOrdered className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).toggleOrderedList().run()
+		},
+	},
+	{
+		title: "To-do List",
+		description: "Track tasks with checkboxes.",
+		searchTerms: ["task", "todo", "checkbox", "list"],
+		icon: <ListTodo className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).toggleTaskList().run()
+		},
+	},
+	{
+		title: "Quote",
+		description: "Call out a quotation or excerpt.",
+		searchTerms: ["blockquote", "quote", "citation"],
+		icon: <TextQuote className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).toggleBlockquote().run()
+		},
+	},
+	{
+		title: "Code Block",
+		description: "Insert a fenced code block.",
+		searchTerms: ["code", "pre", "snippet"],
+		icon: <Code2 className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).toggleCodeBlock().run()
+		},
+	},
+	{
+		title: "Divider",
+		description: "Separate sections with a horizontal rule.",
+		searchTerms: ["divider", "horizontal rule", "line"],
+		icon: <Minus className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor.chain().focus().deleteRange(range).setHorizontalRule().run()
+		},
+	},
+	{
+		title: "Inline Math",
+		description: "Insert an inline LaTeX token.",
+		searchTerms: ["math", "latex", "equation", "inline"],
+		icon: <Sigma className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor
+				.chain()
+				.focus()
+				.deleteRange(range)
+				.insertContent([{ type: "math", attrs: { latex: "" } }, { type: "text", text: " " }])
+				.run()
+		},
+	},
+	{
+		title: "Math Block",
+		description: "Insert a display equation block.",
+		searchTerms: ["math", "latex", "equation", "block", "$$"],
+		icon: <Sigma className="h-4 w-4" />,
+		command: ({ editor, range }) => {
+			editor
+				.chain()
+				.focus()
+				.deleteRange(range)
+				.insertContent([{ type: "mathBlock", attrs: { latex: "" } }])
+				.run()
+		},
+	},
+] satisfies SuggestionItem[])
+
+function getSlashMenuItems(query: string) {
+	const normalizedQuery = query.trim().toLowerCase()
+	if (!normalizedQuery) return SLASH_MENU_ITEMS
+	return SLASH_MENU_ITEMS.filter((item) => {
+		const haystacks = [item.title, item.description, ...(item.searchTerms ?? [])]
+		return haystacks.some((value) => value.toLowerCase().includes(normalizedQuery))
+	})
 }
 
 interface Props {
@@ -110,7 +256,7 @@ export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerA
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
-	const [initialContent, setInitialContent] = useState<Block[] | null>(null)
+	const [initialContent, setInitialContent] = useState<unknown | null>(null)
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
 	const [titleDraft, setTitleDraft] = useState("")
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -120,20 +266,20 @@ export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerA
 		setTitleDraft(note.title)
 	}, [note?.id, note])
 
-	// Pull the JSON document from the presigned URL once we have it. We
-	// deliberately use a separate fetch (not the API JSON body) so the
-	// document doesn't pass through our backend twice.
+	// Pull the JSON document from the presigned URL once we have it. Keeps
+	// the editor body off the API response path — large notes never round-
+	// trip through Hono twice.
 	useEffect(() => {
 		if (!note?.jsonUrl) return
 		let cancelled = false
 		fetch(note.jsonUrl)
-			.then((r) => (r.ok ? r.json() : []))
+			.then((r) => (r.ok ? r.json() : null))
 			.then((data) => {
 				if (cancelled) return
-				setInitialContent(Array.isArray(data) && data.length > 0 ? (data as Block[]) : [])
+				setInitialContent(normalizeInitialContent(data))
 			})
 			.catch(() => {
-				if (!cancelled) setInitialContent([])
+				if (!cancelled) setInitialContent(EMPTY_DOC)
 			})
 		return () => {
 			cancelled = true
@@ -161,6 +307,251 @@ export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerA
 	)
 }
 
+// Tiptap rejects `[]` as an initial doc — it expects either undefined or a
+// well-formed `{ type: 'doc', content: [...] }`. Older notes (or the empty
+// initial state from `createNote({ blocknoteJson: [] })`) come in as `[]`
+// or `null`; both collapse to a single empty paragraph here.
+function normalizeInitialContent(raw: unknown): unknown {
+	if (raw == null) return EMPTY_DOC
+	if (Array.isArray(raw) && raw.length === 0) return EMPTY_DOC
+	if (typeof raw === "object" && raw && "type" in raw) return raw
+	return EMPTY_DOC
+}
+
+function NovelEditorHandle({ onEditorReady }: { onEditorReady?: (editor: NoteEditorRef) => void }) {
+	const { editor } = useEditor()
+
+	useEffect(() => {
+		if (editor && onEditorReady) onEditorReady(editor)
+	}, [editor, onEditorReady])
+
+	return null
+}
+
+function SlashMenu() {
+	return (
+		<EditorCommand className="note-editor__command rounded-xl border border-border-subtle bg-bg-primary p-2 shadow-[var(--shadow-popover)]">
+			<EditorCommandEmpty className="px-2 py-1.5 text-sm text-text-tertiary">
+				No matching commands
+			</EditorCommandEmpty>
+			<EditorCommandList className="flex max-h-80 min-w-[280px] flex-col gap-1 overflow-y-auto">
+				{SLASH_MENU_ITEMS.map((item) => (
+					<EditorCommandItem
+						className="flex items-start gap-3 rounded-lg px-2.5 py-2 text-left outline-none data-[selected=true]:bg-surface-hover"
+						key={item.title}
+						onCommand={({ editor, range }) => item.command?.({ editor, range })}
+						value={item.title}
+						keywords={item.searchTerms}
+					>
+						<div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-bg-secondary text-text-secondary">
+							{item.icon}
+						</div>
+						<div className="min-w-0">
+							<div className="font-medium text-sm text-text-primary">{item.title}</div>
+							<div className="text-xs text-text-tertiary">{item.description}</div>
+						</div>
+					</EditorCommandItem>
+				))}
+			</EditorCommandList>
+		</EditorCommand>
+	)
+}
+
+function BubbleButton({
+	active,
+	children,
+	className,
+	onSelect,
+	title,
+}: {
+	active?: boolean
+	children: ReactNode
+	className?: string
+	onSelect: (editor: Editor) => void
+	title: string
+}) {
+	return (
+		<EditorBubbleItem
+			className={cn(
+				"flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+				active && "bg-surface-selected text-text-accent",
+				className,
+			)}
+			onSelect={onSelect}
+			title={title}
+		>
+			{children}
+		</EditorBubbleItem>
+	)
+}
+
+function insertInlineMath(editor: Editor) {
+	const { from, to, empty } = editor.state.selection
+	const selectedText = editor.state.doc.textBetween(from, to, " ").trim()
+	editor
+		.chain()
+		.focus()
+		.insertContentAt(
+			{ from, to },
+			[
+				{
+					type: "math",
+					attrs: {
+						latex: empty ? "" : selectedText,
+					},
+				},
+			],
+		)
+		.run()
+}
+
+function ColorMenuButton({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
+	const { editor } = useEditor()
+	const currentColor = (editor?.getAttributes("textStyle").color as string | undefined) ?? null
+	const [open, setOpen] = useState(false)
+
+	return (
+		<DropdownMenu
+			modal={false}
+			onOpenChange={(nextOpen) => {
+				setOpen(nextOpen)
+				onOpenChange?.(nextOpen)
+			}}
+			open={open}
+		>
+			<DropdownMenuTrigger asChild>
+				<button
+					className={cn(
+						"flex h-8 items-center gap-1 rounded-md px-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+						currentColor && "bg-surface-selected text-text-accent",
+					)}
+						onMouseDown={(e) => e.preventDefault()}
+					onPointerDown={(e) => e.preventDefault()}
+					type="button"
+				>
+					<span
+						className="font-sans text-base font-semibold leading-none"
+						style={{ color: currentColor ?? undefined }}
+					>
+						A
+					</span>
+					<ChevronDown className="h-3.5 w-3.5" />
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent
+				align="end"
+				className="min-w-44"
+				onCloseAutoFocus={(e) => e.preventDefault()}
+			>
+				{TEXT_COLORS.map((entry) => (
+					<DropdownMenuItem
+						key={entry.label}
+						onSelect={() => {
+							if (!editor) return
+							if (entry.value === null) {
+								editor.chain().focus().unsetColor().run()
+								return
+							}
+							editor.chain().focus().setColor(entry.value).run()
+						}}
+					>
+						<div className="flex w-full items-center gap-2">
+							<span
+								className="h-3.5 w-3.5 rounded-full border border-border-subtle"
+								style={{ backgroundColor: entry.value ?? "transparent" }}
+							/>
+							<span>{entry.label}</span>
+						</div>
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	)
+}
+
+function SelectionBubbleMenu() {
+	const { editor } = useEditor()
+	const [colorMenuOpen, setColorMenuOpen] = useState(false)
+
+	return (
+		<EditorBubble
+			className="note-editor__bubble flex items-center gap-1 rounded-2xl border border-border-subtle bg-bg-primary p-1.5 shadow-[var(--shadow-popover)]"
+			shouldShow={({ editor: ed, state }) => {
+				const { empty } = state.selection
+				return colorMenuOpen || (ed.isEditable && !ed.isActive("image") && !empty)
+			}}
+			tippyOptions={{ duration: 150, placement: "top" }}
+		>
+			<EditorBubbleItem
+				className={cn(
+					"flex h-8 items-center gap-1.5 rounded-md px-3 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+					editor?.isActive("link") && "bg-surface-selected text-text-accent",
+				)}
+				onSelect={(ed) => {
+					const previousUrl = (ed.getAttributes("link").href as string | undefined) ?? ""
+					const nextUrl = window.prompt("Link URL", previousUrl)
+					if (nextUrl === null) return
+					if (nextUrl.trim().length === 0) {
+						ed.chain().focus().extendMarkRange("link").unsetLink().run()
+						return
+					}
+					ed.chain().focus().extendMarkRange("link").setLink({ href: nextUrl.trim() }).run()
+				}}
+				title="Link"
+			>
+				<ArrowUpRight className="h-4 w-4" />
+				<span className="underline underline-offset-2">Link</span>
+			</EditorBubbleItem>
+			<div className="mx-1 h-6 w-px bg-border-subtle" />
+			<BubbleButton
+				active={editor?.isActive("math")}
+				className="font-serif"
+				onSelect={(ed) => insertInlineMath(ed)}
+				title="Inline math"
+			>
+				<Sigma className="h-4 w-4" />
+			</BubbleButton>
+			<BubbleButton
+				active={editor?.isActive("bold")}
+				onSelect={(ed) => ed.chain().focus().toggleBold().run()}
+				title="Bold"
+			>
+				<Bold className="h-4 w-4" />
+			</BubbleButton>
+			<BubbleButton
+				active={editor?.isActive("italic")}
+				onSelect={(ed) => ed.chain().focus().toggleItalic().run()}
+				title="Italic"
+			>
+				<Italic className="h-4 w-4" />
+			</BubbleButton>
+			<BubbleButton
+				active={editor?.isActive("underline")}
+				onSelect={(ed) => ed.chain().focus().toggleUnderline().run()}
+				title="Underline"
+			>
+				<Underline className="h-4 w-4" />
+			</BubbleButton>
+			<BubbleButton
+				active={editor?.isActive("strike")}
+				onSelect={(ed) => ed.chain().focus().toggleStrike().run()}
+				title="Strikethrough"
+			>
+				<Strikethrough className="h-4 w-4" />
+			</BubbleButton>
+			<BubbleButton
+				active={editor?.isActive("code")}
+				onSelect={(ed) => ed.chain().focus().toggleCode().run()}
+				title="Inline code"
+			>
+				<Code2 className="h-4 w-4" />
+			</BubbleButton>
+			<div className="mx-1 h-6 w-px bg-border-subtle" />
+			<ColorMenuButton onOpenChange={setColorMenuOpen} />
+		</EditorBubble>
+	)
+}
+
 function NoteEditorInner({
 	note,
 	initialContent,
@@ -175,7 +566,7 @@ function NoteEditorInner({
 	headerActions,
 }: {
 	note: { id: string; title: string; workspaceId: string }
-	initialContent: Block[]
+	initialContent: unknown
 	saveStatus: SaveStatus
 	setSaveStatus: (s: SaveStatus) => void
 	titleDraft: string
@@ -187,56 +578,14 @@ function NoteEditorInner({
 	headerActions?: ReactNode
 }) {
 	const { palette } = usePalette()
-	// BlockNote's schema generics don't flow cleanly into useCreateBlockNote,
-	// so we keep the runtime call right and silence TS at the boundary.
-	const editor = useCreateBlockNote({
-		schema: noteSchema as never,
-		initialContent: initialContent.length > 0 ? (initialContent as never) : undefined,
-		// BlockNote's default drop cursor (`#ddeeff`, 5px) reads as teal/green
-		// over our cream reading background. Tone it down to a subtle gray
-		// pill that stays readable while dragging without screaming for
-		// attention when hovered.
-		dropCursor: { color: "rgba(15, 23, 42, 0.22)", width: 2 },
-	})
 
-	// Hand the editor up to whichever pane wants to insert citations.
 	useEffect(() => {
-		if (editor && onEditorReady) onEditorReady(editor as unknown as NoteEditorRef)
-	}, [editor, onEditorReady])
-
-	// We deliberately re-bind onChange only when editor identity or note id
-	// changes; callbacks (setSaveStatus, updateNote) are stable in practice
-	// and listing them here would trigger spurious re-binds during typing.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: stable callbacks intentionally omitted
-	useEffect(() => {
-		if (!editor) return
-		const handle = (e: { document: unknown }) => {
-			// Markdown shortcut: paragraph that is *just* "$$" gets replaced
-			// with an empty math block. We do this on every change so it
-			// triggers as soon as the user finishes typing the second `$`.
-			tryUpgradeMathShortcut(editor)
-
-			setSaveStatus("saving")
-			if (debounceRef.current) clearTimeout(debounceRef.current)
-			debounceRef.current = setTimeout(async () => {
-				try {
-					await updateNote.mutateAsync({
-						noteId: note.id,
-						blocknoteJson: e.document as unknown as Block[],
-					})
-					setSaveStatus("saved")
-				} catch {
-					setSaveStatus("failed")
-				}
-			}, AUTOSAVE_DEBOUNCE_MS)
-		}
-		editor.onChange(handle)
 		return () => {
 			if (debounceRef.current) clearTimeout(debounceRef.current)
 		}
-	}, [editor, note.id])
+	}, [debounceRef])
 
-	async function commitTitle() {
+	const commitTitle = useCallback(async () => {
 		if (titleDraft.trim().length === 0 || titleDraft === note.title) return
 		setSaveStatus("saving")
 		try {
@@ -245,7 +594,7 @@ function NoteEditorInner({
 		} catch {
 			setSaveStatus("failed")
 		}
-	}
+	}, [note.id, note.title, setSaveStatus, titleDraft, updateNote])
 
 	return (
 		<div className="note-editor flex h-full flex-col bg-[var(--color-reading-bg)]">
@@ -279,16 +628,74 @@ function NoteEditorInner({
 					palette={palette}
 					workspaceId={note.workspaceId}
 				>
-					<BlockNoteView className="note-editor__blocknote" editor={editor} slashMenu={false}>
-						<SuggestionMenuController
-							getItems={async (query) =>
-								filterSuggestionItems(getMathSlashItems(editor as never), query)
-							}
-							triggerCharacter="/"
-						/>
-					</BlockNoteView>
+					<EditorRoot>
+						<EditorContent
+							className="note-editor__novel"
+							editorProps={{
+								attributes: {
+									class: "prose prose-sm max-w-none focus:outline-none",
+								},
+								handleDOMEvents: {
+									keydown: (_view, event) => handleCommandNavigation(event) ?? false,
+								},
+							}}
+							extensions={editorExtensions}
+							initialContent={initialContent as never}
+							onUpdate={({ editor: ed }) => {
+								// Save on doc change (debounced) AND auto-upgrade
+								// `$$` paragraphs into math blocks.
+								tryUpgradeMathShortcut(ed)
+
+								setSaveStatus("saving")
+								if (debounceRef.current) clearTimeout(debounceRef.current)
+								debounceRef.current = setTimeout(async () => {
+									try {
+										await updateNote.mutateAsync({
+											noteId: note.id,
+											blocknoteJson: ed.getJSON(),
+										})
+										setSaveStatus("saved")
+									} catch {
+										setSaveStatus("failed")
+									}
+								}, AUTOSAVE_DEBOUNCE_MS)
+							}}
+						>
+							<NovelEditorHandle onEditorReady={onEditorReady} />
+							<SelectionBubbleMenu />
+							<SlashMenu />
+						</EditorContent>
+					</EditorRoot>
 				</NoteCitationThemeProvider>
 			</div>
 		</div>
 	)
+}
+
+// Markdown shortcut: a paragraph that's *just* "$$" gets replaced with an
+// empty math block. Mirrors what BlockNote did on `onChange`. We re-walk
+// the active paragraph node on every update because Tiptap's InputRules
+// fire before the dollars actually land in the doc.
+function tryUpgradeMathShortcut(editor: Editor) {
+	const { selection } = editor.state
+	const $from = selection.$from
+	const node = $from.parent
+	if (node.type.name !== "paragraph") return
+	if (node.childCount !== 1) return
+	const text = node.textContent
+	if (text !== "$$") return
+	const start = $from.before($from.depth)
+	const end = $from.after($from.depth)
+	editor
+		.chain()
+		.focus()
+		.command(({ tr }) => {
+			tr.replaceWith(
+				start,
+				end,
+				editor.schema.nodes.mathBlock.create({ latex: "" }),
+			)
+			return true
+		})
+		.run()
 }

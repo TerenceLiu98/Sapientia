@@ -248,6 +248,22 @@ function BlocksPanelScrollBody({
 		container.scrollTop = top
 	}, [])
 
+	const computeTopmostVisiblePage = useCallback(() => {
+		const container = scrollRef.current
+		if (!container) return activePageRef.current
+		const containerRect = container.getBoundingClientRect()
+		const pages = grouped.map(([page]) => page)
+		for (const page of pages) {
+			const section = pageHeaderRefs.current.get(page)
+			if (!section) continue
+			const rect = section.getBoundingClientRect()
+			if (rect.bottom <= containerRect.top) continue
+			if (rect.top >= containerRect.bottom) continue
+			return page
+		}
+		return activePageRef.current
+	}, [grouped])
+
 	const registerCardRef = useCallback((blockId: string, el: HTMLDivElement | null) => {
 		const previous = cardRefs.current.get(blockId)
 		if (el) {
@@ -347,28 +363,11 @@ function BlocksPanelScrollBody({
 		if (!container) return
 
 		const containerRect = container.getBoundingClientRect()
-		let activePage = activePageRef.current || grouped[0]?.[0]
+		let activePage = computeTopmostVisiblePage() || grouped[0]?.[0]
 		let activeBlocks = grouped.find(([page]) => page === activePage)?.[1] ?? grouped[0]?.[1] ?? []
-		if (typeof IntersectionObserver === "undefined") {
-			let bestRatio = -1
-			for (const [page, pageBlocks] of grouped) {
-				const section = pageHeaderRefs.current.get(page)
-				if (!section) continue
-				const rect = section.getBoundingClientRect()
-				const visibleTop = Math.max(rect.top, containerRect.top)
-				const visibleBottom = Math.min(rect.bottom, containerRect.bottom)
-				const visibleHeight = Math.max(0, visibleBottom - visibleTop)
-				const ratio = visibleHeight / Math.max(rect.height, 1)
-				if (ratio > bestRatio) {
-					bestRatio = ratio
-					activePage = page
-					activeBlocks = pageBlocks
-				}
-			}
-			if (activePage != null && activePage !== activePageRef.current) {
-				activePageRef.current = activePage
-				onActivePageChange?.(activePage)
-			}
+		if (activePage != null && activePage !== activePageRef.current) {
+			activePageRef.current = activePage
+			onActivePageChange?.(activePage)
 		}
 
 		if (activePage == null) return
@@ -393,7 +392,7 @@ function BlocksPanelScrollBody({
 		if (last && last.page === activePage && Math.abs(last.yRatio - anchorYRatio) < 0.04) return
 		lastReportedViewportRef.current = { page: activePage, yRatio: anchorYRatio }
 		onViewportAnchorChange?.(activePage, anchorYRatio)
-	}, [grouped, onViewportAnchorChange])
+	}, [computeTopmostVisiblePage, grouped, onActivePageChange, onViewportAnchorChange])
 
 	const scheduleViewportMeasure = useCallback(() => {
 		if (scrollMeasureFrameRef.current != null) return
@@ -424,24 +423,7 @@ function BlocksPanelScrollBody({
 		if (typeof IntersectionObserver === "undefined") return
 
 		const observer = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries) {
-					const page = Number((entry.target as HTMLElement).dataset.pageNumber ?? "0")
-					if (!page) continue
-					pageIntersectionRatiosRef.current.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
-				}
-				let nextActivePage = activePageRef.current
-				let bestRatio = -1
-				for (const [page, ratio] of pageIntersectionRatiosRef.current.entries()) {
-					if (ratio > bestRatio) {
-						bestRatio = ratio
-						nextActivePage = page
-					}
-				}
-				if (nextActivePage !== activePageRef.current) {
-					activePageRef.current = nextActivePage
-					onActivePageChange?.(nextActivePage)
-				}
+			(_entries) => {
 				scheduleViewportMeasure()
 			},
 			{
@@ -457,7 +439,7 @@ function BlocksPanelScrollBody({
 			pageObserverRef.current = null
 			observer.disconnect()
 		}
-	}, [onActivePageChange, scheduleViewportMeasure])
+	}, [scheduleViewportMeasure])
 
 	useEffect(() => {
 		void selectedBlockRequestNonce

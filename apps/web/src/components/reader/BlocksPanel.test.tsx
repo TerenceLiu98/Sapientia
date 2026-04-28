@@ -97,7 +97,7 @@ describe("BlocksPanel", () => {
 		expect(row.style.backgroundColor).toMatch(/var\(--note-important-bg\)/)
 	})
 
-	it("reports the active page and anchor ratio from parsed-view scrolling", async () => {
+	it("keeps the topmost visible page active while it is still in view", async () => {
 		const blocks: Block[] = [
 			{
 				paperId: "paper-1",
@@ -211,7 +211,7 @@ describe("BlocksPanel", () => {
 		await waitFor(() => {
 			expect(onViewportAnchorChange).toHaveBeenCalled()
 		})
-		expect(onViewportAnchorChange).toHaveBeenLastCalledWith(2, 0.4)
+		expect(onViewportAnchorChange).toHaveBeenLastCalledWith(1, 0.2)
 	})
 
 	it("scrolls to a requested page anchor in parsed-only mode", async () => {

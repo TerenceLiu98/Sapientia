@@ -39,6 +39,7 @@ export function NotesPanel({
 	const cardRefs = useRef(new Map<string, HTMLElement>())
 	const headerRefs = useRef(new Map<number | "unanchored", HTMLDivElement>())
 	const [cardRefsVersion, setCardRefsVersion] = useState(0)
+	const previousPageRef = useRef<number | null>(null)
 	// Soft-lock for the page-driven follow effect: if the user just scrolled
 	// inside the pane themselves, we skip auto-scroll for ~500ms so the two
 	// scroll sources don't fight. Same pattern as BlocksPanel.
@@ -47,18 +48,24 @@ export function NotesPanel({
 	const grouped = useGrouped(notes)
 
 	// Auto-expand the first note anchored to the current page; collapse
-	// when the page has none. The user can still expand/collapse manually
-	// — their choice survives until the page changes again.
+	// when the page has none. Critically, this should only fire when the
+	// *page changes* — not whenever the notes array mutates — otherwise a
+	// user-driven expand/create can get overwritten and the pane flickers.
 	const autoExpandTargetId = useMemo(
 		() => notes.find((note) => note.anchorPage === currentPage)?.id ?? null,
 		[currentPage, notes],
 	)
 	useEffect(() => {
+		if (previousPageRef.current === null) {
+			previousPageRef.current = currentPage
+			if (expandedNoteId !== autoExpandTargetId) onExpand(autoExpandTargetId)
+			return
+		}
+		if (previousPageRef.current === currentPage) return
+		previousPageRef.current = currentPage
 		if (expandedNoteId === autoExpandTargetId) return
 		onExpand(autoExpandTargetId)
-		// Intentionally only re-runs on page-derived target changes.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [autoExpandTargetId])
+	}, [autoExpandTargetId, currentPage, expandedNoteId, onExpand])
 
 	useEffect(() => {
 		if (!externalFollowLockUntil) return

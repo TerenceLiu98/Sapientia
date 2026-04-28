@@ -23,7 +23,7 @@ Most "AI for papers" tools answer for you. Sapientia is built for the opposite h
 
 - **Block-addressable PDFs.** Papers are parsed by [MinerU](https://mineru.net) into stable, content-hashed blocks. Every figure, equation, paragraph, and table has its own ID — `paperId#blockId` — that survives re-parse.
 - **Side-by-side reading.** PDF and parsed-Markdown views of the same paper, kept in sync. Click a block in either pane to focus it in the other; both views remember scroll on toggle.
-- **Citations as first-class data.** Notes are written in BlockNote and embed `@[block N]` chips that link to the source block. Click a chip to jump to the exact figure or paragraph it cites.
+- **Citations as first-class data.** Notes are written in a Tiptap-based editor (built on the [Novel](https://novel.sh) primitives) and embed `@[block N]` chips that link to the source block. Click a chip to jump to the exact figure or paragraph it cites.
 - **Highlights with semantics.** A built-in five-color palette (Questioning / Important / Original / Pending / Conclusion) plus user-defined palettes. Highlights persist per-block, render in both views, and tag the citation chip with the same color.
 - **Reader markup.** Highlight, underline, and freehand ink on the PDF itself — overlay-only, your original PDF is never modified.
 - **Restraint-first AI.** v0.1 ships a single-turn "ask about this paper" agent with explicit context layers. No tool-calling, no auto-summoning, no workspace-wide context bleed.
@@ -62,7 +62,7 @@ After signing in, configure your **MinerU token** and **LLM API key** in `/setti
 
 | Layer | Stack |
 | --- | --- |
-| Frontend | React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui · Zustand · TanStack Query/Router · BlockNote · PDF.js · sigma.js |
+| Frontend | React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui · Zustand · TanStack Query/Router · Tiptap (via [Novel](https://novel.sh)) · PDF.js · sigma.js |
 | Backend | Bun ≥ 1.2 · Hono · Drizzle ORM · Zod · BullMQ · better-auth · AWS SDK v3 |
 | Data | PostgreSQL 16 + pgvector · Redis 7 · MinIO |
 | External | MinerU (PDF parsing) · Anthropic or OpenAI (LLM) |

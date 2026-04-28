@@ -26,7 +26,7 @@ These choices are final for v0.1. **Do not propose alternatives unless explicitl
 - Tailwind CSS v4 (CSS-first config, `@theme` directive)
 - shadcn/ui for primitives
 - Zustand (client state) + TanStack Query (server state)
-- BlockNote (editor) + PDF.js via react-pdf
+- Tiptap (editor, with `novel` for the slash/bubble menu UI) + PDF.js via react-pdf
 - sigma.js + graphology (knowledge graph)
 - TanStack Table v8
 
@@ -176,7 +176,7 @@ If unsure where something goes, **stop and ask**.
 
 These rules exist because past mistakes (or anticipated ones) made them necessary.
 
-1. **Don't change the tech stack.** Even if you find a "better" library, write it to `docs/NOTES.md` instead.
+1. **Don't change the tech stack.** Even if you find a "better" library, write it to `docs/NOTES.md` instead. (Exception, sanctioned: the editor was migrated from BlockNote → Tiptap/Novel in late 2026; see `docs/DECISIONS.md`. Future swaps still need explicit user sign-off, not a unilateral call.)
 2. **Don't add web search, browser automation, or external API calls** that aren't in the PRD or task card.
 3. **Don't write tool calling for the agent.** v0.1 agent is single-turn. Tool calling is v0.2 (PRD §10).
 4. **Don't add workspace-wide context loading to the agent.** v0.1 agent only has Layer 1 + Layer 2. See PRD §3.
@@ -187,7 +187,7 @@ These rules exist because past mistakes (or anticipated ones) made them necessar
 9. **Don't bypass BullMQ for slow operations.** MinerU calls, LLM calls, wiki ingestion all go through the worker.
 10. **Don't store secrets in code.** Environment variables only, validated at boot via Zod.
 11. **Don't write business logic in route handlers.** Routes parse + validate + delegate to services. Services own logic.
-12. **Don't store BlockNote JSON in Postgres directly.** Notes/wiki pages: JSON in MinIO, metadata + markdown cache in Postgres.
+12. **Don't store editor JSON in Postgres directly.** Notes/wiki pages: JSON in MinIO, metadata + markdown cache in Postgres. (The DB column is named `blocknote_json` for legacy reasons; treat the contents as opaque Tiptap JSON.)
 13. **Don't auto-format the user's PDF or modify the binary.** Annotations are an overlay, stored separately.
 14. **Don't make assumptions about file structure.** Always `view` before `str_replace`.
 15. **Don't expand the scope of a refactor.**

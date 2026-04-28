@@ -1,11 +1,20 @@
 import "katex/dist/katex.min.css"
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@blocknote/core"
-import { createReactBlockSpec, createReactInlineContentSpec } from "@blocknote/react"
+import { mergeAttributes, Node } from "@tiptap/core"
+import {
+	type NodeViewProps,
+	NodeViewWrapper,
+	ReactNodeViewRenderer,
+} from "@tiptap/react"
 import katex from "katex"
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { useHighlights } from "@/api/hooks/highlights"
 import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 
+// Theming context: chip rendering needs the active palette + the workspace
+// id to look up highlight colors and the navigation handler to jump to the
+// cited block. The Tiptap extensions live above the React tree of the
+// editor, so we plumb these through context rather than threading via node
+// attributes (which would denormalize the chip's data).
 const NoteCitationThemeContext = createContext<{
 	onOpenBlock: ((paperId: string, blockId: string) => void) | null
 	workspaceId: string | null
@@ -36,41 +45,66 @@ export function NoteCitationThemeProvider({
 	)
 }
 
-// Custom BlockNote inline content for "this note cites paper X block Y".
-// The chip displays `@[block N]` where N is the block's 1-based index in
-// its paper — a precise pointer back to the source. The leading `@`
-// hints "this is a reference, click for context" without needing a
-// tutorial. Storing the number alongside the IDs keeps the chip stable
-// and resolvable even if the paper isn't loaded when the note re-renders.
-//
-// `snapshot` is kept on the prop schema for backwards compatibility with
-// notes saved before TASK-017's redesign — older chips will still carry
-// it, and the renderer falls back to it if `blockNumber` isn't present.
-export const blockCitationSpec = createReactInlineContentSpec(
-	{
-		type: "blockCitation",
-		propSchema: {
+// Block citation tag: an inline atom Tiptap node carrying the (paperId,
+// blockId, blockNumber, snapshot) tuple. `atom: true` keeps the cursor
+// from entering the chip; `selectable: false` prevents the rectangular
+// "block selection" outline; `inline: true` makes it eligible to live
+// inside a paragraph alongside text marks. Persisted in editor JSON via
+// `attrs`, parsed back from `<span data-block-citation>` for HTML paste.
+export const BlockCitationNode = Node.create({
+	name: "blockCitation",
+	group: "inline",
+	inline: true,
+	atom: true,
+	selectable: false,
+	draggable: false,
+
+	addAttributes() {
+		return {
 			paperId: { default: "" },
 			blockId: { default: "" },
 			blockNumber: { default: 0 },
 			snapshot: { default: "" },
-		},
-		content: "none",
+		}
 	},
-	{
-		render: ({ inlineContent }) => {
-			const { paperId, blockId, blockNumber, snapshot } = inlineContent.props
-			return (
-				<BlockCitationChip
-					blockId={blockId}
-					blockNumber={typeof blockNumber === "number" ? blockNumber : 0}
-					paperId={paperId}
-					snapshot={typeof snapshot === "string" ? snapshot : ""}
-				/>
-			)
-		},
+
+	parseHTML() {
+		return [{ tag: "span[data-block-citation]" }]
 	},
-)
+
+	renderHTML({ HTMLAttributes }) {
+		return [
+			"span",
+			mergeAttributes(HTMLAttributes, { "data-block-citation": "" }),
+			"",
+		]
+	},
+
+	addNodeView() {
+		return ReactNodeViewRenderer(BlockCitationView)
+	},
+})
+
+function BlockCitationView({ node }: NodeViewProps) {
+	const paperId = (node.attrs.paperId as string) ?? ""
+	const blockId = (node.attrs.blockId as string) ?? ""
+	const blockNumber = (node.attrs.blockNumber as number) ?? 0
+	const snapshot = (node.attrs.snapshot as string) ?? ""
+	return (
+		<NodeViewWrapper
+			as="span"
+			className="note-editor__citation-node"
+			contentEditable={false}
+		>
+			<BlockCitationChip
+				blockId={blockId}
+				blockNumber={blockNumber}
+				paperId={paperId}
+				snapshot={snapshot}
+			/>
+		</NodeViewWrapper>
+	)
+}
 
 export function BlockCitationChip({
 	paperId,
@@ -93,14 +127,14 @@ export function BlockCitationChip({
 	const chipColors = highlightColor ? paletteVisualTokens(palette, highlightColor) : null
 
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: chip behaves like a button but must be a span to live inside BlockNote inline content; keyboard activation handled below
+		// biome-ignore lint/a11y/noStaticElementInteractions: chip behaves like a button but lives inside Tiptap inline content; keyboard activation handled below
 		// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handler is wired alongside the click
-		// biome-ignore lint/a11y/useSemanticElements: BlockNote inline content cannot host a real <button>; role="button" on a span is the necessary escape hatch
+		// biome-ignore lint/a11y/useSemanticElements: Tiptap inline content cannot host a real <button>; role="button" on a span is the necessary escape hatch
 		<span
-			className={`relative mx-0.5 inline-flex cursor-pointer select-none items-center rounded-md px-1.5 py-0.5 align-baseline text-sm transition-colors ${
+			className={`note-editor__citation-tag mx-0.5 cursor-pointer select-none font-sans font-semibold tracking-[-0.015em] transition-colors ${
 				chipColors
-					? "ring-1 ring-inset ring-current/10 hover:brightness-[0.97]"
-					: "bg-accent-100 text-accent-700 hover:bg-accent-200"
+					? "shadow-sm ring-1 ring-inset ring-current/10 hover:brightness-[0.97]"
+					: "bg-accent-700 text-text-inverse hover:bg-accent-800"
 			}`}
 			contentEditable={false}
 			onClick={(e) => {
@@ -125,9 +159,7 @@ export function BlockCitationChip({
 			tabIndex={0}
 			title={`${paperId}#${blockId}`}
 		>
-			<span className={chipColors ? "opacity-70" : "text-accent-500"}>@[</span>
-			<span>{label}</span>
-			<span className={chipColors ? "opacity-70" : "text-accent-500"}>]</span>
+			<span className="whitespace-nowrap">{label}</span>
 		</span>
 	)
 }
@@ -146,47 +178,123 @@ function renderKatex(latex: string, displayMode: boolean): string {
 	}
 }
 
-// Inline math: LaTeX rendered with KaTeX inline mode. Click the chip to edit
-// the source in a popover-style input; blur saves. Empty source shows a
-// placeholder so the chip never collapses to zero width.
-export const mathInlineSpec = createReactInlineContentSpec(
-	{
-		type: "math",
-		propSchema: {
+// Inline math: KaTeX in inline mode. `atom: true` so the chip behaves as
+// a single token; the popover-style prompt edits the LaTeX source.
+export const MathInlineNode = Node.create({
+	name: "math",
+	group: "inline",
+	inline: true,
+	atom: true,
+	selectable: false,
+	draggable: false,
+
+	addAttributes() {
+		return {
 			latex: { default: "" },
-		},
-		content: "none",
+		}
 	},
-	{
-		render: ({ inlineContent, updateInlineContent }) => {
-			const latex = inlineContent.props.latex
-			return (
-				<MathInlineChip
-					latex={latex}
-					onChange={(next) => updateInlineContent({ props: { latex: next } } as never)}
-				/>
-			)
-		},
+
+	parseHTML() {
+		return [{ tag: "span[data-inline-math]" }]
 	},
-)
+
+	renderHTML({ HTMLAttributes }) {
+		return [
+			"span",
+			mergeAttributes(HTMLAttributes, { "data-inline-math": "" }),
+			"",
+		]
+	},
+
+	addNodeView() {
+		return ReactNodeViewRenderer(MathInlineView)
+	},
+})
+
+function MathInlineView({ node, updateAttributes }: NodeViewProps) {
+	const latex = (node.attrs.latex as string) ?? ""
+	return (
+		<NodeViewWrapper as="span" className="inline" contentEditable={false}>
+			<MathInlineChip
+				latex={latex}
+				onChange={(next) => updateAttributes({ latex: next })}
+			/>
+		</NodeViewWrapper>
+	)
+}
 
 function MathInlineChip({ latex, onChange }: { latex: string; onChange: (s: string) => void }) {
-	const openEditor = useCallback(() => {
-		const next = window.prompt("Inline math (LaTeX)", latex)
-		if (next === null || next === latex) return
-		queueMicrotask(() => onChange(next))
-	}, [latex, onChange])
+	const [editing, setEditing] = useState(latex.length === 0)
+	const [draft, setDraft] = useState(latex)
+	const inputRef = useRef<HTMLInputElement | null>(null)
+
+	useEffect(() => {
+		if (!editing) setDraft(latex)
+	}, [editing, latex])
+
+	useEffect(() => {
+		if (!editing) return
+		inputRef.current?.focus()
+		inputRef.current?.select()
+	}, [editing])
+
+	const commit = useCallback(
+		(next: string) => {
+			const normalized = next.trim()
+			queueMicrotask(() => onChange(normalized))
+			setEditing(false)
+		},
+		[onChange],
+	)
 
 	const html = renderKatex(latex, false)
+
+	if (editing) {
+		return (
+			<span
+				className="note-editor__inline-math-editor mx-0.5 inline-flex items-center rounded-md border border-border-subtle bg-bg-primary px-1 py-0.5 align-baseline"
+				contentEditable={false}
+				onMouseDown={(e) => {
+					e.preventDefault()
+					e.stopPropagation()
+				}}
+			>
+				<input
+					className="note-editor__inline-math-input min-w-[5ch] border-0 bg-transparent font-mono text-sm text-text-primary outline-none"
+					onBlur={() => commit(draft)}
+					onChange={(e) => setDraft(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
+							e.preventDefault()
+							e.stopPropagation()
+							commit(draft)
+							return
+						}
+						if (e.key === "Escape") {
+							e.preventDefault()
+							e.stopPropagation()
+							setDraft(latex)
+							setEditing(false)
+						}
+					}}
+					placeholder="LaTeX"
+					ref={inputRef}
+					size={Math.max(5, draft.length || 0)}
+					value={draft}
+				/>
+			</span>
+		)
+	}
+
 	return (
 		<button
-			className="mx-0.5 inline-flex cursor-pointer items-center rounded-md bg-accent-100 px-1 py-0.5 align-baseline text-sm text-accent-800 hover:bg-accent-200"
+			className="mx-0.5 inline-flex cursor-pointer items-center rounded-md border border-border-subtle/70 bg-transparent px-1 py-0.5 align-baseline text-sm text-text-primary hover:bg-surface-hover"
 			contentEditable={false}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault()
 					e.stopPropagation()
-					openEditor()
+					setEditing(true)
 				}
 			}}
 			onMouseDown={(e) => {
@@ -195,7 +303,7 @@ function MathInlineChip({ latex, onChange }: { latex: string; onChange: (s: stri
 			}}
 			onClick={(e) => {
 				e.stopPropagation()
-				openEditor()
+				setEditing(true)
 			}}
 			title={latex || "Empty inline math — click to edit"}
 			type="button"
@@ -212,25 +320,47 @@ function MathInlineChip({ latex, onChange }: { latex: string; onChange: (s: stri
 	)
 }
 
-// Block math: KaTeX displayed mode, with a textarea/preview split when
-// editing. Auto-enters edit mode if latex is empty (just inserted).
-export const mathBlockSpec = createReactBlockSpec(
-	{
-		type: "mathBlock",
-		propSchema: {
+// Block math: KaTeX display mode, with a textarea/preview split when
+// editing. Auto-enters edit mode if latex is empty (just inserted via
+// slash command or `$$` markdown shortcut).
+export const MathBlockNode = Node.create({
+	name: "mathBlock",
+	group: "block",
+	atom: true,
+	draggable: true,
+	selectable: true,
+
+	addAttributes() {
+		return {
 			latex: { default: "" },
-		},
-		content: "none",
+		}
 	},
-	{
-		render: ({ block, editor }) => {
-			const latex = (block.props as { latex?: string }).latex ?? ""
-			const setLatex = (next: string) =>
-				editor.updateBlock(block, { props: { latex: next } } as never)
-			return <MathBlockBody latex={latex} onChange={setLatex} />
-		},
+
+	parseHTML() {
+		return [{ tag: "div[data-math-block]" }]
 	},
-)
+
+	renderHTML({ HTMLAttributes }) {
+		return [
+			"div",
+			mergeAttributes(HTMLAttributes, { "data-math-block": "" }),
+			"",
+		]
+	},
+
+	addNodeView() {
+		return ReactNodeViewRenderer(MathBlockView)
+	},
+})
+
+function MathBlockView({ node, updateAttributes }: NodeViewProps) {
+	const latex = (node.attrs.latex as string) ?? ""
+	return (
+		<NodeViewWrapper className="block" contentEditable={false}>
+			<MathBlockBody latex={latex} onChange={(next) => updateAttributes({ latex: next })} />
+		</NodeViewWrapper>
+	)
+}
 
 function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: string) => void }) {
 	const [editing, setEditing] = useState(latex.length === 0)
@@ -252,8 +382,8 @@ function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: strin
 		(next: string) => {
 			if (committingRef.current) return
 			committingRef.current = true
-			// Same rationale as MathInlineChip — defer the BlockNote mutation past
-			// the current event-loop tick so we don't collide with ProseMirror.
+			// Defer Tiptap mutation to the next tick so we don't collide with
+			// any in-flight ProseMirror transaction.
 			queueMicrotask(() => onChange(next))
 			setEditing(false)
 			queueMicrotask(() => {
@@ -264,7 +394,7 @@ function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: strin
 	)
 
 	// Native capture-phase listener: blocks Cmd+Enter / Esc from reaching
-	// BlockNote, AND swallows plain Enter so it stays a textarea newline
+	// Tiptap, AND swallows plain Enter so it stays a textarea newline
 	// rather than splitting the surrounding block.
 	useEffect(() => {
 		if (!editing) return
@@ -284,7 +414,7 @@ function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: strin
 				return
 			}
 			// Plain Enter: don't preventDefault (let textarea insert \n),
-			// but stop propagation so BlockNote doesn't see it.
+			// but stop propagation so Tiptap doesn't see it.
 			if (e.key === "Enter") e.stopImmediatePropagation()
 		}
 		ta.addEventListener("keydown", handler, { capture: true })
@@ -294,10 +424,7 @@ function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: strin
 	const html = renderKatex(latex, true)
 
 	return (
-		<div
-			className="my-2 rounded-md border border-border-subtle bg-bg-overlay/60"
-			contentEditable={false}
-		>
+		<div className="my-2 rounded-md border border-border-subtle bg-bg-overlay/60">
 			{editing ? (
 				<div className="flex flex-col gap-2 p-3">
 					<textarea
@@ -336,18 +463,3 @@ function MathBlockBody({ latex, onChange }: { latex: string; onChange: (s: strin
 		</div>
 	)
 }
-
-// `createReactBlockSpec` returns a factory `(options?) => BlockSpec`; the
-// schema wants the spec itself, so we invoke it once here. (Inline content
-// helpers return the spec directly, no parens.)
-export const noteSchema = BlockNoteSchema.create({
-	inlineContentSpecs: {
-		...defaultInlineContentSpecs,
-		blockCitation: blockCitationSpec,
-		math: mathInlineSpec,
-	},
-	blockSpecs: {
-		...defaultBlockSpecs,
-		mathBlock: mathBlockSpec(),
-	},
-})

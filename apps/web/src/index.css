@@ -60,7 +60,7 @@
 	--font-sans: "Inter", system-ui, -apple-system, sans-serif;
 	--font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
 
-	--text-md: 1.125rem;
+	--text-md: 1rem;
 	--shadow-focus: 0 0 0 3px oklch(from var(--color-border-accent) l c h / 0.3);
 	--shadow-popover: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.05);
 
@@ -145,60 +145,101 @@ kbd {
 }
 
 .note-editor {
-	--bn-colors-editor-text: var(--color-text-primary);
-	--bn-colors-editor-background: transparent;
-	--bn-colors-menu-text: var(--color-text-primary);
-	--bn-colors-menu-background: var(--color-bg-primary);
-	--bn-colors-tooltip-text: var(--color-text-primary);
-	--bn-colors-tooltip-background: var(--color-bg-primary);
-	--bn-colors-hovered-text: var(--color-text-primary);
-	--bn-colors-hovered-background: var(--color-neutral-100);
-	--bn-colors-selected-text: var(--color-text-inverse);
-	--bn-colors-selected-background: var(--color-accent-600);
-	--bn-colors-disabled-text: var(--color-text-disabled);
-	--bn-colors-disabled-background: var(--color-neutral-100);
-	--bn-colors-shadow: oklch(0 0 0 / 0.08);
-	--bn-colors-border: var(--color-border-subtle);
-	--bn-colors-side-menu: var(--color-neutral-300);
-	--bn-font-family: var(--font-serif);
+	color: var(--color-text-primary);
+	font-family: var(--font-serif);
 }
 
 .note-editor__body {
 	background: var(--color-reading-bg);
 }
 
-.note-editor__blocknote.bn-mantine,
-.note-editor__blocknote .bn-root,
-.note-editor__blocknote .bn-editor {
+.note-editor__novel {
 	background: transparent;
 }
 
-.note-editor__blocknote .bn-editor {
-	border-radius: 0;
+.note-editor__novel {
 	min-height: 100%;
 	padding: 0 0 24px;
 }
 
-.note-editor__blocknote .bn-block-content {
+.note-editor__novel .ProseMirror {
 	font-size: var(--text-md);
 	line-height: 1.72;
-}
-
-.note-editor__blocknote .ProseMirror {
 	min-height: 100%;
 	padding: 8px 24px 28px;
 }
 
-.note-editor__blocknote .bn-side-menu {
-	background: color-mix(in oklch, var(--color-reading-bg) 84%, white 16%);
-	border: 1px solid var(--color-border-subtle);
-	border-radius: 10px;
+.note-editor__novel .ProseMirror h1,
+.note-editor__novel .ProseMirror h2,
+.note-editor__novel .ProseMirror h3 {
+	color: var(--color-text-primary);
+	font-family: var(--font-serif);
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: -0.03em;
+	margin: 0.9em 0 0.35em;
 }
 
-.note-editor__blocknote .bn-mantine .bn-toolbar {
-	background: color-mix(in oklch, var(--color-bg-primary) 96%, var(--color-reading-bg) 4%);
-	border-color: var(--color-border-subtle);
-	box-shadow: var(--shadow-popover);
+.note-editor__novel .ProseMirror h1 {
+	font-size: 1.7em;
+}
+
+.note-editor__novel .ProseMirror h2 {
+	font-size: 1.4em;
+}
+
+.note-editor__novel .ProseMirror h3 {
+	font-size: 1.18em;
+}
+
+.note-editor__novel .ProseMirror p {
+	margin: 0.2em 0 0.55em;
+}
+
+.note-editor__novel .ProseMirror .is-editor-empty:first-child::before,
+.note-editor__novel .ProseMirror .is-empty::before {
+	color: var(--color-text-tertiary);
+	content: attr(data-placeholder);
+	float: left;
+	height: 0;
+	pointer-events: none;
+}
+
+.note-editor__novel .ProseMirror:focus {
+	outline: none;
+}
+
+.note-editor__novel .ProseMirror:focus-visible {
+	box-shadow: none;
+}
+
+.note-editor__citation-node {
+	display: inline-flex;
+	line-height: 0;
+	vertical-align: middle;
+}
+
+.note-editor__citation-tag {
+	position: relative;
+	top: -0.09em;
+	display: inline-grid;
+	min-height: 1.42em;
+	place-items: center;
+	border-radius: 999px;
+	padding: 0.16em 0.58em 0.12em;
+	font-size: 0.82em;
+	line-height: 1;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.note-editor__inline-math-editor:focus-within {
+	border-color: var(--color-border-default);
+	box-shadow: none;
+}
+
+.note-editor__inline-math-input:focus-visible {
+	box-shadow: none;
 }
 
 /* Hide native scrollbars on the reader's PDF + parsed-blocks panes while

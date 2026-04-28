@@ -248,6 +248,20 @@ function PdfViewerInner({
 		return true
 	}, [])
 
+	const computeTopmostVisiblePage = useCallback(() => {
+		const container = scrollContainerRef.current
+		if (!container) return activePageRef.current
+		const containerRect = container.getBoundingClientRect()
+		const pages = Array.from(pageRefs.current.entries()).sort(([a], [b]) => a - b)
+		for (const [page, el] of pages) {
+			const rect = el.getBoundingClientRect()
+			if (rect.bottom <= containerRect.top) continue
+			if (rect.top >= containerRect.bottom) continue
+			return page
+		}
+		return activePageRef.current
+	}, [])
+
 	const fitToWidth = useCallback(() => {
 		if (!scrollContainerRef.current || !basePageWidth) return
 		const availableWidth = scrollContainerRef.current.clientWidth - FIT_WIDTH_GUTTER_PX
@@ -281,6 +295,11 @@ function PdfViewerInner({
 		const container = scrollContainerRef.current
 		if (!container || numPages == null) return
 		const measureActivePageAnchor = () => {
+			const nextActivePage = computeTopmostVisiblePage()
+			if (nextActivePage !== activePageRef.current) {
+				activePageRef.current = nextActivePage
+				setCurrentPage(nextActivePage)
+			}
 			const activePage = activePageRef.current
 			const el = pageRefs.current.get(activePage)
 			if (!el) return
@@ -300,18 +319,6 @@ function PdfViewerInner({
 						if (!page) continue
 						intersectionRatiosRef.current.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
 					}
-					let bestPage = activePageRef.current
-					let bestRatio = -1
-					for (const [page, ratio] of intersectionRatiosRef.current.entries()) {
-						if (ratio > bestRatio) {
-							bestRatio = ratio
-							bestPage = page
-						}
-					}
-					if (bestPage !== activePageRef.current) {
-						activePageRef.current = bestPage
-						setCurrentPage(bestPage)
-					}
 					measureActivePageAnchor()
 				},
 				{
@@ -329,31 +336,13 @@ function PdfViewerInner({
 		}
 
 		const fallbackHandleScroll = () => {
-			let bestPage = 1
-			let bestRatio = 0
-			const containerRect = container.getBoundingClientRect()
-			for (const [page, el] of pageRefs.current.entries()) {
-				const rect = el.getBoundingClientRect()
-				const visibleTop = Math.max(rect.top, containerRect.top)
-				const visibleBottom = Math.min(rect.bottom, containerRect.bottom)
-				const visibleHeight = Math.max(0, visibleBottom - visibleTop)
-				const ratio = visibleHeight / Math.max(rect.height, 1)
-				if (ratio > bestRatio) {
-					bestRatio = ratio
-					bestPage = page
-				}
-			}
-			if (bestPage !== activePageRef.current) {
-				activePageRef.current = bestPage
-				setCurrentPage(bestPage)
-			}
 			measureActivePageAnchor()
 		}
 
 		fallbackHandleScroll()
 		container.addEventListener("scroll", fallbackHandleScroll, { passive: true })
 		return () => container.removeEventListener("scroll", fallbackHandleScroll)
-	}, [numPages, onViewportAnchorChange])
+	}, [computeTopmostVisiblePage, numPages, onViewportAnchorChange])
 
 	useEffect(() => {
 		const container = scrollContainerRef.current
@@ -362,6 +351,11 @@ function PdfViewerInner({
 			if (scrollRafRef.current != null) return
 			scrollRafRef.current = window.requestAnimationFrame(() => {
 				scrollRafRef.current = null
+				const nextActivePage = computeTopmostVisiblePage()
+				if (nextActivePage !== activePageRef.current) {
+					activePageRef.current = nextActivePage
+					setCurrentPage(nextActivePage)
+				}
 				const activePage = activePageRef.current
 				const el = pageRefs.current.get(activePage)
 				if (!el) return
@@ -381,7 +375,7 @@ function PdfViewerInner({
 				scrollRafRef.current = null
 			}
 		}
-	}, [onViewportAnchorChange])
+	}, [computeTopmostVisiblePage, onViewportAnchorChange])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {

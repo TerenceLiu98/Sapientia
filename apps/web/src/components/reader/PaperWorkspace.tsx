@@ -191,29 +191,30 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		(block: Block) => {
 			if (!editor || !expandedNoteId) return false
 			const blockNumber = block.blockIndex + 1
-			const ed = editor as unknown as {
-				focus: () => void
-				document: Array<{ id: string }>
-				getTextCursorPosition: () => { block?: { id?: string } }
-				setTextCursorPosition: (
-					target: string | { id: string },
-					placement?: "start" | "end",
-				) => void
-				insertInlineContent: (content: unknown[]) => void
+			// Tiptap's selection always has a position even before first focus.
+			// Force-focus to end of doc only if the editor was never focused —
+			// otherwise we'd yank the cursor away from where the user is mid-
+			// edit.
+			if (!editor.isFocused) {
+				editor.chain().focus("end").run()
+			} else {
+				editor.chain().focus().run()
 			}
-			ed.focus()
-			const cursor = ed.getTextCursorPosition()
-			if (!cursor?.block?.id) {
-				const last = ed.document?.[ed.document.length - 1]
-				if (last) ed.setTextCursorPosition(last, "end")
-			}
-			ed.insertInlineContent([
-				{
-					type: "blockCitation",
-					props: { paperId, blockId: block.blockId, blockNumber },
-				},
-				" ",
-			])
+			editor
+				.chain()
+				.insertContent([
+					{
+						type: "blockCitation",
+						attrs: {
+							paperId,
+							blockId: block.blockId,
+							blockNumber,
+							snapshot: "",
+						},
+					},
+					{ type: "text", text: " " },
+				])
+				.run()
 			return true
 		},
 		[editor, expandedNoteId, paperId],

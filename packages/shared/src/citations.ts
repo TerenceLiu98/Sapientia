@@ -1,11 +1,16 @@
 /**
- * Citation extraction from BlockNote document JSON.
+ * Citation extraction from Tiptap document JSON.
  *
- * BlockNote stores documents as a tree of blocks; each block has a flat
- * `content` array of inline nodes. Our custom inline node `blockCitation`
- * carries the (paperId, blockId) tuple plus a snapshot string. This
- * module walks a document and aggregates those tuples — the API uses
- * the result to rebuild `note_block_refs` on every save.
+ * Tiptap stores documents as a tree rooted at `{ type: 'doc', content: [...] }`.
+ * Every node has an optional `content` array of children. Our custom
+ * `blockCitation` node lives inline (inside a paragraph's content array)
+ * and carries the `(paperId, blockId)` tuple plus a snapshot string in
+ * `attrs`. This module walks the tree and aggregates those tuples — the
+ * API uses the result to rebuild `note_block_refs` on every save.
+ *
+ * Legacy empty BlockNote payloads (`[]`) and unknown shapes return `[]`
+ * gracefully, so a freshly-created note that hasn't been edited yet
+ * doesn't throw on the first save.
  */
 
 export interface CitationRef {
@@ -14,9 +19,21 @@ export interface CitationRef {
 	count: number
 }
 
-interface InlineNodeShape {
+interface Node {
 	type?: string
 	content?: unknown
+	// Legacy BlockNote nested-list shape — children of a list-item live in
+	// `children` rather than `content`. Walk both so notes saved before the
+	// migration still extract correctly.
+	children?: unknown
+	attrs?: {
+		paperId?: string
+		blockId?: string
+		blockNumber?: number
+		snapshot?: string
+	} & Record<string, unknown>
+	// Legacy BlockNote shape — kept so the extractor doesn't false-negative
+	// on rows still in the BlockNote format. New notes never write `props`.
 	props?: {
 		paperId?: string
 		blockId?: string
@@ -25,22 +42,17 @@ interface InlineNodeShape {
 	} & Record<string, unknown>
 }
 
-interface BlockShape {
-	type?: string
-	content?: unknown
-	children?: unknown
-}
-
 export function extractCitations(doc: unknown): CitationRef[] {
-	if (!Array.isArray(doc)) return []
 	const counts = new Map<string, CitationRef>()
 
-	const visitInline = (node: unknown): void => {
+	const visit = (node: unknown): void => {
 		if (typeof node !== "object" || node === null) return
-		const n = node as InlineNodeShape
+		const n = node as Node
 
-		if (n.type === "blockCitation" && n.props) {
-			const { paperId, blockId } = n.props
+		if (n.type === "blockCitation") {
+			const data = n.attrs ?? n.props
+			const paperId = data?.paperId
+			const blockId = data?.blockId
 			if (typeof paperId === "string" && typeof blockId === "string" && paperId && blockId) {
 				const key = `${paperId}#${blockId}`
 				const existing = counts.get(key)
@@ -50,22 +62,21 @@ export function extractCitations(doc: unknown): CitationRef[] {
 		}
 
 		if (Array.isArray(n.content)) {
-			for (const child of n.content) visitInline(child)
+			for (const child of n.content) visit(child)
+		}
+		if (Array.isArray(n.children)) {
+			for (const child of n.children) visit(child)
 		}
 	}
 
-	const visitBlock = (block: unknown): void => {
-		if (typeof block !== "object" || block === null) return
-		const b = block as BlockShape
-		if (Array.isArray(b.content)) {
-			for (const inline of b.content) visitInline(inline)
-		}
-		if (Array.isArray(b.children)) {
-			for (const child of b.children) visitBlock(child)
-		}
+	if (Array.isArray(doc)) {
+		// Legacy BlockNote shape: doc is the top-level blocks array.
+		for (const block of doc) visit(block)
+	} else if (typeof doc === "object" && doc !== null) {
+		// Tiptap shape: doc is `{ type: 'doc', content: [...] }`.
+		visit(doc)
 	}
 
-	for (const block of doc) visitBlock(block)
 	return [...counts.values()]
 }
 

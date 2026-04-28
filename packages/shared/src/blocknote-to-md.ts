@@ -1,5 +1,5 @@
 /**
- * Lossy BlockNote document → markdown serializer.
+ * Lossy editor JSON → markdown serializer.
  *
  * Used for:
  *   - md_object_key in MinIO (alongside the JSON, lossless+lossy pair)
@@ -9,56 +9,116 @@
  * NOT used for export — that uses a richer pipeline (v0.2). The goal here
  * is "good enough for LLM context and search," not "round-trip lossless."
  *
- * The schema is intentionally permissive (`unknown`) because BlockNote's
- * Block type is involved + customisable; we don't want this serializer to
- * reach into @blocknote/core types and force every consumer to do so too.
+ * Handles both the modern Tiptap shape (`{ type: 'doc', content: [...] }`)
+ * and the legacy BlockNote top-level array shape, so freshly-created notes
+ * (which still write `[]`) don't break the pipeline.
+ *
+ * The function name is kept as `blocknoteJsonToMarkdown` for compatibility
+ * with existing call sites and the matching DB column name; the input it
+ * accepts is now opaque editor JSON.
  */
 import { formatCitationToken } from "./citations"
 
-export type BlockNoteDoc = unknown[]
+export type BlockNoteDoc = unknown
 
-export function blocknoteJsonToMarkdown(blocks: BlockNoteDoc): string {
-	if (!Array.isArray(blocks)) return ""
-	return blocks
-		.map((block) => blockToMd(block, 0))
-		.filter((line) => line.length > 0)
-		.join("\n\n")
+interface AnyNode {
+	type?: string
+	text?: string
+	content?: unknown
+	attrs?: Record<string, unknown>
+	// Legacy BlockNote shape: properties used to live on `props`/`children`
+	// instead of Tiptap's `attrs`/`content`. Read both so notes saved before
+	// the migration still serialize.
+	props?: Record<string, unknown>
+	children?: unknown
+	marks?: Array<{ type?: string; attrs?: Record<string, unknown> }>
+	styles?: { bold?: boolean; italic?: boolean; code?: boolean }
+	// Some legacy node types (notably BlockNote's `link`) carry their own
+	// fields directly on the node instead of in `attrs`/`props`.
+	href?: string
+}
+
+export function blocknoteJsonToMarkdown(doc: BlockNoteDoc): string {
+	if (Array.isArray(doc)) {
+		// Legacy BlockNote shape — top-level blocks array.
+		return doc
+			.map((block) => blockToMd(block, 0))
+			.filter((line) => line.length > 0)
+			.join("\n\n")
+	}
+	if (typeof doc === "object" && doc !== null) {
+		const root = doc as AnyNode
+		if (root.type === "doc" && Array.isArray(root.content)) {
+			return root.content
+				.map((block) => blockToMd(block, 0))
+				.filter((line) => line.length > 0)
+				.join("\n\n")
+		}
+	}
+	return ""
 }
 
 function blockToMd(block: unknown, indent: number): string {
 	if (typeof block !== "object" || block === null) return ""
-	const node = block as {
-		type?: string
-		content?: unknown
-		props?: Record<string, unknown>
-		children?: unknown[]
-	}
+	const node = block as AnyNode
 
 	const text = inlinesToMd(node.content)
 	const prefix = "  ".repeat(indent)
 	const child = childrenMd(node.children, indent + 1)
+	const attrs = node.attrs ?? node.props ?? {}
 
 	switch (node.type) {
 		case "paragraph":
 			return prefix + text + child
 		case "heading": {
-			const level = clampHeadingLevel(node.props?.level)
+			const level = clampHeadingLevel(attrs.level)
 			return `${"#".repeat(level)} ${text}${child ? `\n${child}` : ""}`
+		}
+		// Tiptap StarterKit lists wrap their items in `bulletList`/`orderedList`
+		// with each item a `listItem`. BlockNote used flat `bulletListItem`/
+		// `numberedListItem` blocks. Handle both.
+		case "bulletList":
+			return mapListChildren(node.content, indent, "- ")
+		case "orderedList":
+			return mapListChildren(node.content, indent, "1. ")
+		case "listItem": {
+			const inner = listItemMd(node.content, indent)
+			return inner
 		}
 		case "bulletListItem":
 			return `${prefix}- ${text}${child ? `\n${child}` : ""}`
 		case "numberedListItem":
 			return `${prefix}1. ${text}${child ? `\n${child}` : ""}`
 		case "checkListItem": {
-			const checked = node.props?.checked === true
+			const checked = attrs.checked === true
 			return `${prefix}- [${checked ? "x" : " "}] ${text}`
 		}
-		case "codeBlock": {
-			const lang = typeof node.props?.language === "string" ? (node.props.language as string) : ""
-			return `\`\`\`${lang}\n${text}\n\`\`\``
+		case "taskList":
+			return mapListChildren(node.content, indent, "- [ ] ")
+		case "taskItem": {
+			const checked = attrs.checked === true
+			const inner = listItemMd(node.content, indent)
+			return inner.replace(/^- \[ \]/, `- [${checked ? "x" : " "}]`)
 		}
-		case "quote":
-			return `${prefix}> ${text}`
+		case "codeBlock": {
+			const lang = typeof attrs.language === "string" ? (attrs.language as string) : ""
+			return `\`\`\`${lang}\n${text || node.text || ""}\n\`\`\``
+		}
+		case "blockquote":
+		case "quote": {
+			const inner = Array.isArray(node.content)
+				? node.content
+						.map((c) => blockToMd(c, 0))
+						.filter((l) => l.length > 0)
+						.join("\n")
+				: text
+			return inner
+				.split("\n")
+				.map((line) => `${prefix}> ${line}`)
+				.join("\n")
+		}
+		case "horizontalRule":
+			return `${prefix}---`
 		case "table":
 			// Tables don't round-trip well lossy; emit raw text.
 			return prefix + text
@@ -66,7 +126,7 @@ function blockToMd(block: unknown, indent: number): string {
 			// Display math: serialize as $$ ... $$ on its own block. Empty
 			// latex collapses to a single placeholder so re-parsing later
 			// doesn't leave a stray block in the markdown.
-			const latex = typeof node.props?.latex === "string" ? (node.props.latex as string) : ""
+			const latex = typeof attrs.latex === "string" ? (attrs.latex as string) : ""
 			if (latex.length === 0) return ""
 			return `$$\n${latex}\n$$`
 		}
@@ -76,71 +136,103 @@ function blockToMd(block: unknown, indent: number): string {
 	}
 }
 
+function listItemMd(content: unknown, indent: number): string {
+	if (!Array.isArray(content)) return ""
+	const prefix = "  ".repeat(indent)
+	const lines: string[] = []
+	for (const child of content) {
+		if (typeof child !== "object" || child === null) continue
+		const c = child as AnyNode
+		if (c.type === "paragraph") {
+			lines.push(`${prefix}- ${inlinesToMd(c.content)}`)
+		} else if (c.type === "bulletList" || c.type === "orderedList" || c.type === "taskList") {
+			lines.push(blockToMd(c, indent + 1))
+		} else {
+			lines.push(blockToMd(c, indent))
+		}
+	}
+	return lines.filter((l) => l.length > 0).join("\n")
+}
+
+function mapListChildren(content: unknown, indent: number, _bullet: string): string {
+	if (!Array.isArray(content)) return ""
+	return content
+		.map((c) => blockToMd(c, indent))
+		.filter((line) => line.length > 0)
+		.join("\n")
+}
+
 function inlinesToMd(content: unknown): string {
 	if (!Array.isArray(content)) return ""
 	return content
 		.map((item) => {
 			if (typeof item !== "object" || item === null) return ""
-			const node = item as {
-				type?: string
-				text?: string
-				href?: string
-				content?: unknown
-				styles?: { bold?: boolean; italic?: boolean; code?: boolean }
-				props?: Record<string, unknown>
-			}
+			const node = item as AnyNode
 
 			if (node.type === "text") {
-				return applyStyles(node.text ?? "", node.styles)
+				return applyMarks(node.text ?? "", node)
 			}
+			// BlockNote stored links as a node type; Tiptap stores them as
+			// marks on text nodes. Both shapes are handled in the text branch
+			// above (via marks) and the legacy node branch here.
 			if (node.type === "link") {
 				const inner = inlinesToMd(node.content ?? [])
-				return `[${inner}](${node.href ?? ""})`
+				const href = (node.attrs?.href as string) ?? (node.props?.href as string) ?? ""
+				return `[${inner}](${href})`
 			}
 			// Inline math: emit as $latex$ so the LLM and search index see
-			// the actual expression. Round-trips with markdown shortcut on
-			// re-parse if/when we add one.
+			// the actual expression.
 			if (node.type === "math") {
-				const latex = typeof node.props?.latex === "string" ? (node.props.latex as string) : ""
+				const latex =
+					(node.attrs?.latex as string) ?? (node.props?.latex as string) ?? ""
 				return latex.length > 0 ? `$${latex}$` : ""
 			}
 			// Block citations get the canonical token form so the markdown
 			// surface stays grep-able and round-trippable.
 			if (node.type === "blockCitation") {
-				const props = node.props as
-					| {
-							paperId?: string
-							blockId?: string
-							blockNumber?: number
-							snapshot?: string
-					  }
-					| undefined
-				if (props?.paperId && props?.blockId) {
+				const data = (node.attrs ?? node.props ?? {}) as {
+					paperId?: string
+					blockId?: string
+					blockNumber?: number
+					snapshot?: string
+				}
+				if (data.paperId && data.blockId) {
 					return formatCitationToken({
-						paperId: props.paperId,
-						blockId: props.blockId,
-						blockNumber: props.blockNumber,
-						snapshot: props.snapshot,
+						paperId: data.paperId,
+						blockId: data.blockId,
+						blockNumber: data.blockNumber,
+						snapshot: data.snapshot,
 					})
 				}
-				return props?.snapshot ?? ""
+				return data.snapshot ?? ""
 			}
 			// Other custom inline nodes — fall back to any snapshot/text they
 			// carry so the markdown isn't blank for them.
-			if (typeof node.props === "object" && node.props && typeof node.props.snapshot === "string") {
-				return node.props.snapshot
-			}
+			const snapshot =
+				(node.attrs?.snapshot as string | undefined) ??
+				(node.props?.snapshot as string | undefined)
+			if (typeof snapshot === "string") return snapshot
 			return node.text ?? ""
 		})
 		.join("")
 }
 
-function applyStyles(
-	text: string,
-	styles: { bold?: boolean; italic?: boolean; code?: boolean } | undefined,
-): string {
-	if (!styles || !text) return text
+function applyMarks(text: string, node: AnyNode): string {
+	if (!text) return text
 	let out = text
+	// Tiptap marks
+	if (Array.isArray(node.marks)) {
+		const types = new Set(node.marks.map((m) => m.type))
+		const link = node.marks.find((m) => m.type === "link")
+		if (types.has("code")) out = `\`${out}\``
+		if (types.has("bold")) out = `**${out}**`
+		if (types.has("italic")) out = `_${out}_`
+		if (link?.attrs?.href) out = `[${out}](${link.attrs.href as string})`
+		return out
+	}
+	// Legacy BlockNote styles
+	const styles = node.styles
+	if (!styles) return out
 	if (styles.code) out = `\`${out}\``
 	if (styles.bold) out = `**${out}**`
 	if (styles.italic) out = `_${out}_`
