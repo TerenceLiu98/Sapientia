@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { useExportWorkspaceBibtex, usePapers } from "@/api/hooks/papers"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 import { LibraryTable } from "./LibraryTable"
@@ -7,7 +6,6 @@ import { UploadDropzone } from "./UploadDropzone"
 export function LibraryView() {
 	const { data: workspace, isLoading: workspaceLoading } = useCurrentWorkspace()
 	const { data: papers, isLoading: papersLoading } = usePapers(workspace?.id ?? "")
-	const [uploadOpen, setUploadOpen] = useState(false)
 	const exportBibtex = useExportWorkspaceBibtex(workspace?.id ?? "")
 
 	if (workspaceLoading || (workspace && papersLoading)) {
@@ -46,13 +44,6 @@ export function LibraryView() {
 						>
 							{exportBibtex.isPending ? "Exporting..." : "Export BibTeX"}
 						</button>
-						<button
-							className="h-9 rounded-md bg-accent-600 px-4 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-700"
-							onClick={() => setUploadOpen((open) => !open)}
-							type="button"
-						>
-							{uploadOpen ? "Close" : "Upload PDF"}
-						</button>
 					</div>
 				</div>
 
@@ -60,11 +51,9 @@ export function LibraryView() {
 					<p className="mb-4 text-sm text-text-error">{exportBibtex.error.message}</p>
 				) : null}
 
-				{uploadOpen ? (
-					<div className="mb-6">
-						<UploadDropzone workspaceId={workspace.id} onComplete={() => setUploadOpen(false)} />
-					</div>
-				) : null}
+				<div className="mb-6">
+					<UploadDropzone workspaceId={workspace.id} />
+				</div>
 
 				<LibraryTable papers={papers} workspaceId={workspace.id} />
 			</div>

@@ -325,6 +325,10 @@ function BlocksPanelScrollBody({
 		const targetEl = targetBlock ? (cardRefs.current.get(targetBlock.blockId) ?? header) : header
 		const targetRect = targetEl.getBoundingClientRect()
 		const containerRect = container.getBoundingClientRect()
+		// Always scroll on a focus request. Self-pane card clicks no longer
+		// emit one (the block is visible by definition), so the only callers
+		// here are cross-view toggles and citation chip jumps — both want
+		// to re-center the target even if it's currently in viewport.
 		const targetTopInContent = targetRect.top - containerRect.top + container.scrollTop
 		scrollContainerToOffset(targetTopInContent - 8)
 		handledRequestedJumpRef.current = requestKey

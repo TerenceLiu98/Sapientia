@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import type { Database, Paper } from "@sapientia/db"
 import { memberships, papers, workspacePapers } from "@sapientia/db"
-import { and, eq, isNull } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { enqueuePaperEnrich } from "../queues/paper-enrich"
 import { enqueuePaperParse } from "../queues/paper-parse"
 import { buildDisplayFilename } from "./filename"
@@ -57,19 +57,29 @@ export async function uploadPaper(args: {
 
 	const contentHash = createHash("sha256").update(fileBytes).digest("hex")
 
+	// Dedup against ALL of the owner's rows, not just live ones. The
+	// `(owner_user_id, content_hash)` unique constraint covers soft-deleted
+	// rows too, so filtering them out here lets a re-upload sneak past the
+	// SELECT and crash on INSERT. Re-uploading content the user had
+	// previously trashed should restore that paper (clear `deletedAt`) and
+	// re-link it to the current workspace — same MinIO object, same blocks,
+	// same metadata they'd curated.
 	const [existing] = await db
 		.select()
 		.from(papers)
-		.where(
-			and(
-				eq(papers.ownerUserId, userId),
-				eq(papers.contentHash, contentHash),
-				isNull(papers.deletedAt),
-			),
-		)
+		.where(and(eq(papers.ownerUserId, userId), eq(papers.contentHash, contentHash)))
 		.limit(1)
 
 	if (existing) {
+		if (existing.deletedAt) {
+			const [restored] = await db
+				.update(papers)
+				.set({ deletedAt: null, updatedAt: new Date() })
+				.where(eq(papers.id, existing.id))
+				.returning()
+			await linkPaperToWorkspace(restored.id, workspaceId, userId, db)
+			return restored
+		}
 		await linkPaperToWorkspace(existing.id, workspaceId, userId, db)
 		return existing
 	}

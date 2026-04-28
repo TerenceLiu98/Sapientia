@@ -273,6 +273,10 @@ function PdfViewerInner({
 		if (!renderedPages.has(requestedPage)) return
 		const requestKey = `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedBlockY ?? "none"}`
 		if (handledJumpRequestRef.current === requestKey) return
+		// Always scroll on a focus request. Self-pane bbox clicks no longer
+		// emit one (the block is visible by definition), so the only callers
+		// here are cross-view toggles and citation chip jumps — both want to
+		// re-center the target even if it's currently in viewport.
 		if (!scrollToPage(requestedPage, requestedBlockY)) return
 		handledJumpRequestRef.current = requestKey
 	}, [numPages, pageCanvasVersion, pageRefsVersion, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])

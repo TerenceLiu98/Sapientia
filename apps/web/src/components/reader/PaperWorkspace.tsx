@@ -109,11 +109,15 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		setRequestNonce((n) => n + 1)
 	}, [])
 
+	// Bbox/card clicks in the active pane just record the selection — the
+	// block is by definition visible (the user clicked it), so we don't
+	// fire a scroll request. Cross-view follow on PDF↔Markdown toggle is
+	// handled by the `viewMode` change effect below; citation chip jumps
+	// route through `handleJumpToBlock` which explicitly re-centers.
 	const handleSelectBlock = useCallback((block: Block) => {
 		setSelectedBlockId(block.blockId)
-		requestMainPaneFocus(block)
 		setSelectedBlockRequestNonce((n) => n + 1)
-	}, [requestMainPaneFocus])
+	}, [])
 
 	const handleSelectBlockFromPane = useCallback(
 		(block: Block) => {
@@ -122,10 +126,20 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				return
 			}
 			setSelectedBlockId(block.blockId)
-			if (viewMode !== "pdf-only") return
+		},
+		[selectedBlockId],
+	)
+
+	// Used for navigation actions where the target may be off-screen
+	// (citation chip click): records selection AND scrolls the active pane
+	// to the block.
+	const handleJumpToBlock = useCallback(
+		(block: Block) => {
+			setSelectedBlockId(block.blockId)
+			setSelectedBlockRequestNonce((n) => n + 1)
 			requestMainPaneFocus(block)
 		},
-		[selectedBlockId, requestMainPaneFocus, viewMode],
+		[requestMainPaneFocus],
 	)
 
 	const handleClearSelectedBlock = useCallback(() => {
@@ -138,9 +152,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			const block = blocks?.find((candidate) => candidate.blockId === blockId)
 			if (!block) return
 			setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
-			handleSelectBlock(block)
+			handleJumpToBlock(block)
 		},
-		[blocks, handleSelectBlock, paperId],
+		[blocks, handleJumpToBlock, paperId],
 	)
 
 	const handleMainInteract = useCallback(() => {
@@ -796,10 +810,10 @@ function MainNotesSplit({
 }: MainNotesSplitProps) {
 	const wrapRef = useRef<HTMLDivElement | null>(null)
 	const [leftPct, setLeftPct] = useState<number>(() => {
-		if (typeof window === "undefined") return 75
+		if (typeof window === "undefined") return 83
 		const stored = window.localStorage.getItem(NOTES_WIDTH_KEY)
 		const n = stored ? Number(stored) : NaN
-		return Number.isFinite(n) && n >= 55 && n <= 85 ? n : 75
+		return Number.isFinite(n) && n >= 55 && n <= 90 ? n : 83
 	})
 	const [dragging, setDragging] = useState(false)
 	const dragRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
@@ -822,7 +836,7 @@ function MainNotesSplit({
 		const s = dragRef.current
 		if (!s) return
 		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
-		setLeftPct(Math.max(55, Math.min(85, s.startPct + deltaPct)))
+		setLeftPct(Math.max(55, Math.min(90, s.startPct + deltaPct)))
 	}, [])
 	const onPointerUp = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
