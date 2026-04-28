@@ -6,6 +6,7 @@ import {
 	S3Client,
 } from "@aws-sdk/client-s3"
 import {
+	blocks,
 	createDbClient,
 	memberships,
 	papers,
@@ -417,6 +418,63 @@ describe("papers", () => {
 		expect(listResponse.status).toBe(200)
 		const listed = (await listResponse.json()) as Array<{ id: string; title: string }>
 		expect(listed.map((item) => item.id)).toEqual([secondPaper.id, firstPaper.id])
+	})
+
+	it("refreshes the /blocks etag when presigned image URLs roll into a new TTL bucket", async () => {
+		await signUp("blocks@example.com", "Blocks User")
+		const createdUser = await getUserByEmail("blocks@example.com")
+		const workspaceId = await getPersonalWorkspaceId(createdUser.id)
+		const cookieHeader = await signIn("blocks@example.com")
+
+		const upload = await uploadToWorkspace(
+			cookieHeader,
+			workspaceId,
+			new File([createPdfBytes("blocks-paper")], "blocks-paper.pdf", {
+				type: "application/pdf",
+			}),
+		)
+		expect(upload.status).toBe(200)
+		const paper = (await upload.json()) as { id: string }
+
+		await dbClient.db.insert(blocks).values({
+			paperId: paper.id,
+			blockId: "figure-1",
+			blockIndex: 0,
+			type: "figure",
+			page: 1,
+			text: "Figure 1",
+			caption: "Figure 1",
+			imageObjectKey: `papers/${createdUser.id}/${paper.id}/images/figure-1.png`,
+		})
+
+		const nowSpy = vi.spyOn(Date, "now")
+		try {
+			nowSpy.mockReturnValue(301_000)
+			const firstResponse = await app.request(
+				`http://localhost/api/v1/papers/${paper.id}/blocks`,
+				{
+					headers: { cookie: cookieHeader },
+				},
+			)
+			expect(firstResponse.status).toBe(200)
+			const firstEtag = firstResponse.headers.get("etag")
+			expect(firstEtag).toBeTruthy()
+
+			nowSpy.mockReturnValue(602_000)
+			const secondResponse = await app.request(
+				`http://localhost/api/v1/papers/${paper.id}/blocks`,
+				{
+					headers: {
+						cookie: cookieHeader,
+						"if-none-match": firstEtag ?? "",
+					},
+				},
+			)
+			expect(secondResponse.status).toBe(200)
+			expect(secondResponse.headers.get("etag")).not.toBe(firstEtag)
+		} finally {
+			nowSpy.mockRestore()
+		}
 	})
 
 	it("forbids cross-user metadata and pdf-url access", async () => {

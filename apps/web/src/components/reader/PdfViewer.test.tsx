@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -222,5 +222,165 @@ describe("PdfViewer", () => {
 		await user.click(await screen.findByTestId("pdf-page-1"))
 
 		expect(onInteract).toHaveBeenCalledTimes(1)
+	})
+
+	it("shows a draggable media preview for a selected figure block", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "figure-1",
+				blockIndex: 0,
+				page: 2,
+				type: "figure",
+				text: "",
+				headingLevel: null,
+				caption: "A magnified chart",
+				imageObjectKey: "figures/1",
+				imageUrl: "http://test/image.png",
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer blocks={blocks} paperId="paper-1" selectedBlockId="figure-1" />
+			</Wrapper>,
+		)
+
+		expect(await screen.findByAltText("A magnified chart")).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: /rotate preview/i })).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: /^resize focused preview$/i })).toBeInTheDocument()
+		expect(screen.queryByText(/focused figure/i)).not.toBeInTheDocument()
+	})
+
+	it("does not show the floating preview for selected text blocks", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "text-1",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Some paragraph",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer blocks={blocks} paperId="paper-1" selectedBlockId="text-1" />
+			</Wrapper>,
+		)
+
+		await screen.findByTestId("pdf-document")
+		expect(screen.queryByText(/focused block/i)).not.toBeInTheDocument()
+	})
+
+	it("dismisses the focused preview via backdrop click", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onClearSelectedBlock = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "figure-1",
+				blockIndex: 0,
+				page: 2,
+				type: "figure",
+				text: "",
+				headingLevel: null,
+				caption: "A magnified chart",
+				imageObjectKey: "figures/1",
+				imageUrl: "http://test/image.png",
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+		const user = userEvent.setup()
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					blocks={blocks}
+					onClearSelectedBlock={onClearSelectedBlock}
+					paperId="paper-1"
+					selectedBlockId="figure-1"
+				/>
+			</Wrapper>,
+		)
+
+		await user.click(await screen.findByRole("button", { name: /close focused preview/i }))
+		expect(onClearSelectedBlock).toHaveBeenCalledTimes(1)
+	})
+
+	it("dismisses the focused preview via Escape", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onClearSelectedBlock = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "figure-1",
+				blockIndex: 0,
+				page: 2,
+				type: "figure",
+				text: "",
+				headingLevel: null,
+				caption: "A magnified chart",
+				imageObjectKey: "figures/1",
+				imageUrl: "http://test/image.png",
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					blocks={blocks}
+					onClearSelectedBlock={onClearSelectedBlock}
+					paperId="paper-1"
+					selectedBlockId="figure-1"
+				/>
+			</Wrapper>,
+		)
+
+		await screen.findByAltText("A magnified chart")
+		fireEvent.keyDown(window, { key: "Escape" })
+		expect(onClearSelectedBlock).toHaveBeenCalledTimes(1)
 	})
 })

@@ -11,8 +11,11 @@ describe("EditMetadataModal", () => {
 		render(
 			<EditMetadataModal
 				errorMessage={null}
+				fetchErrorMessage={null}
+				isFetchingMetadata={false}
 				isSaving={false}
 				onClose={vi.fn()}
+				onFetchMetadata={vi.fn()}
 				onSubmit={onSubmit}
 				open
 				paper={{

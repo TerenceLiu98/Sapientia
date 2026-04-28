@@ -1,10 +1,7 @@
 import { logger } from "../../logger"
-import * as arxiv from "./arxiv-client"
-import * as crossref from "./crossref-client"
 import type { ExtractedIdentifiers } from "./identifier-extractor"
-import * as openreview from "./openreview-client"
-import * as semanticScholar from "./semantic-scholar-client"
-import type { EnrichedMetadata } from "./types"
+import { metadataScrapers } from "./scraper-registry"
+import type { EnrichedMetadata, EnrichmentQuery, EnrichmentSource } from "./types"
 
 export interface EnrichmentResult {
 	metadata: Partial<EnrichedMetadata> | null
@@ -16,56 +13,32 @@ export async function enrich(ids: ExtractedIdentifiers): Promise<EnrichmentResul
 	const log = logger.child({ component: "enrichment" })
 	const results: EnrichedMetadata[] = []
 
-	if (ids.doi) {
-		try {
-			results.push(await crossref.lookupByDoi(ids.doi))
-			log.info({ doi: ids.doi }, "crossref_hit")
-		} catch (error) {
-			log.warn({ doi: ids.doi, err: error instanceof Error ? error.message : String(error) }, "crossref_miss")
-		}
-	}
-
-	if (ids.arxivId) {
-		try {
-			results.push(await arxiv.lookupByArxivId(ids.arxivId))
-			log.info({ arxivId: ids.arxivId }, "arxiv_hit")
-		} catch (error) {
-			log.warn(
-				{ arxivId: ids.arxivId, err: error instanceof Error ? error.message : String(error) },
-				"arxiv_miss",
-			)
-		}
-	}
-
-	if (ids.doi || ids.arxivId) {
-		try {
-			results.push(await semanticScholar.lookupById({ doi: ids.doi, arxivId: ids.arxivId }))
-			log.info("semantic_scholar_id_hit")
-		} catch (error) {
-			log.warn({ err: error instanceof Error ? error.message : String(error) }, "semantic_scholar_id_miss")
-		}
-	} else if (ids.candidateTitle) {
-		try {
-			const result = await semanticScholar.searchByTitle(ids.candidateTitle)
-			if (result) {
+	for (const scraper of metadataScrapers) {
+		const queries = dedupeQueries(scraper.buildQueries(ids, { results }))
+		for (const query of queries) {
+			try {
+				const result = await scraper.fetch(query)
+				if (!result) {
+					log.warn({ source: scraper.source, queryKind: query.kind }, "scraper_miss")
+					continue
+				}
 				results.push(result)
-				log.info({ title: ids.candidateTitle }, "semantic_scholar_title_hit")
+				log.info(
+					{ source: scraper.source, queryKind: query.kind, queryValue: summarizeQueryValue(query) },
+					"scraper_hit",
+				)
+				break
+			} catch (error) {
+				log.warn(
+					{
+						source: scraper.source,
+						queryKind: query.kind,
+						queryValue: summarizeQueryValue(query),
+						err: error instanceof Error ? error.message : String(error),
+					},
+					"scraper_error",
+				)
 			}
-		} catch (error) {
-			log.warn({ err: error instanceof Error ? error.message : String(error) }, "semantic_scholar_title_miss")
-		}
-	}
-
-	const hasVenue = results.some((result) => result.venue)
-	if (!hasVenue && ids.candidateTitle) {
-		try {
-			const result = await openreview.searchByTitle(ids.candidateTitle)
-			if (result) {
-				results.push(result)
-				log.info({ title: ids.candidateTitle }, "openreview_hit")
-			}
-		} catch (error) {
-			log.warn({ err: error instanceof Error ? error.message : String(error) }, "openreview_miss")
 		}
 	}
 
@@ -73,6 +46,16 @@ export async function enrich(ids: ExtractedIdentifiers): Promise<EnrichmentResul
 		return { metadata: null, sources: [], status: "failed" }
 	}
 
+	const merged = mergeResults(results)
+	const isFull = Boolean(merged.title && merged.authors?.length && merged.year)
+	return {
+		metadata: merged,
+		sources: uniqueSources(results),
+		status: isFull ? "enriched" : "partial",
+	}
+}
+
+function mergeResults(results: EnrichedMetadata[]): Partial<EnrichedMetadata> {
 	const merged: Partial<EnrichedMetadata> = {}
 	for (const result of results) {
 		if (!merged.title && result.title) merged.title = result.title
@@ -86,11 +69,28 @@ export async function enrich(ids: ExtractedIdentifiers): Promise<EnrichmentResul
 			merged.citationCount = result.citationCount
 		}
 	}
+	return merged
+}
 
-	const isFull = Boolean(merged.title && merged.authors?.length && merged.year)
-	return {
-		metadata: merged,
-		sources: results.map((result) => result.source),
-		status: isFull ? "enriched" : "partial",
+function uniqueSources(results: EnrichedMetadata[]): EnrichmentSource[] {
+	return [...new Set(results.map((result) => result.source))]
+}
+
+function dedupeQueries(queries: EnrichmentQuery[]): EnrichmentQuery[] {
+	const seen = new Set<string>()
+	const unique: EnrichmentQuery[] = []
+	for (const query of queries) {
+		const key = `${query.kind}:${query.value}`
+		if (seen.has(key)) continue
+		seen.add(key)
+		unique.push(query)
 	}
+	return unique
+}
+
+function summarizeQueryValue(query: EnrichmentQuery): string {
+	if (query.kind === "title") {
+		return query.value.slice(0, 80)
+	}
+	return query.value
 }

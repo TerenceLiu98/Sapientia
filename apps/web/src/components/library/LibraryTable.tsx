@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-table"
 import { useState } from "react"
 import {
+	useFetchPaperMetadata,
 	type Paper,
 	type PaperEnrichmentStatus,
 	useDeletePaper,
@@ -80,14 +81,19 @@ function ActionError({ message }: { message: string | null }) {
 
 function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: string }) {
 	const updatePaper = useUpdatePaper(workspaceId, paper.id)
+	const fetchMetadata = useFetchPaperMetadata(workspaceId, paper.id)
 	const exportBibtex = useExportPaperBibtex(paper)
 	const downloadPdf = useDownloadPaperPdf(paper.id)
 	const deletePaper = useDeletePaper(workspaceId)
 	const [editing, setEditing] = useState(false)
 	const [actionError, setActionError] = useState<string | null>(null)
 
-	const isBusy =
-		updatePaper.isPending || exportBibtex.isPending || downloadPdf.isPending || deletePaper.isPending
+		const isBusy =
+			updatePaper.isPending ||
+			fetchMetadata.isPending ||
+			exportBibtex.isPending ||
+			downloadPdf.isPending ||
+			deletePaper.isPending
 
 	return (
 		<div className="min-w-0">
@@ -151,13 +157,21 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 
 			<ActionError message={actionError} />
 
-			<EditMetadataModal
-				errorMessage={updatePaper.error instanceof Error ? updatePaper.error.message : null}
-				isSaving={updatePaper.isPending}
-				onClose={() => setEditing(false)}
-				onSubmit={(patch) => {
-					setActionError(null)
-					updatePaper.mutate(patch, {
+				<EditMetadataModal
+					errorMessage={updatePaper.error instanceof Error ? updatePaper.error.message : null}
+					fetchErrorMessage={
+						fetchMetadata.error instanceof Error ? fetchMetadata.error.message : null
+					}
+					isFetchingMetadata={fetchMetadata.isPending}
+					isSaving={updatePaper.isPending}
+					onClose={() => setEditing(false)}
+					onFetchMetadata={(input) => {
+						setActionError(null)
+						fetchMetadata.mutate(input)
+					}}
+					onSubmit={(patch) => {
+						setActionError(null)
+						updatePaper.mutate(patch, {
 						onSuccess: () => setEditing(false),
 					})
 				}}
@@ -186,12 +200,11 @@ function makeColumns(workspaceId: string) {
 							</Link>
 							<EnrichmentBadge status={paper.enrichmentStatus} />
 						</div>
-						<div className="mt-1 flex flex-wrap gap-x-2 text-xs text-text-tertiary">
-							{paper.venue ? <span>{paper.venue}</span> : null}
-							<span>{paper.displayFilename}</span>
+							<div className="mt-1 flex flex-wrap gap-x-2 text-xs text-text-tertiary">
+								{paper.venue ? <span>{paper.venue}</span> : null}
+							</div>
 						</div>
-					</div>
-				)
+					)
 			},
 		}),
 		columnHelper.accessor("authors", {

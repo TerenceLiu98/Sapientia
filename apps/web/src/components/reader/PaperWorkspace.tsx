@@ -98,6 +98,11 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		setHoveredBlockId(blockId)
 	}, [])
 
+	const handleClearSelectedBlock = useCallback(() => {
+		setSelectedBlockId(null)
+		setHoveredBlockId(null)
+	}, [])
+
 	const handleOpenCitationBlock = useCallback(
 		(targetPaperId: string, blockId: string) => {
 			if (targetPaperId !== paperId) return
@@ -274,6 +279,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			countsMap={countsMap}
 			currentPage={currentPage}
 			handleClearBlockHighlight={handleClearBlockHighlight}
+			handleClearSelectedBlock={handleClearSelectedBlock}
 			handleHoverBlock={handleHoverBlock}
 			handleMainInteract={handleMainInteract}
 			handleSelectBlock={handleSelectBlock}
@@ -519,6 +525,7 @@ interface MainViewProps {
 	countsMap: Map<string, number>
 	currentPage: number
 	handleClearBlockHighlight: (blockId: string) => Promise<void> | void
+	handleClearSelectedBlock: () => void
 	handleHoverBlock: (blockId: string | null) => void
 	handleMainInteract: () => void
 	handleSelectBlock: (block: Block) => void
@@ -544,6 +551,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 				colorByBlock={props.colorByBlock}
 				hoveredBlockId={props.hoveredBlockId}
 				onClearHighlight={props.handleClearBlockHighlight}
+				onClearSelectedBlock={props.handleClearSelectedBlock}
 				onHoverBlock={props.handleHoverBlock}
 				onInteract={props.handleMainInteract}
 				onViewportAnchorChange={props.onViewportAnchorChange}

@@ -4,6 +4,7 @@ const lookupByDoi = vi.fn()
 const lookupByArxivId = vi.fn()
 const lookupById = vi.fn()
 const searchByTitle = vi.fn()
+const dblpSearchByTitle = vi.fn()
 const openreviewSearchByTitle = vi.fn()
 
 vi.mock("./crossref-client", () => ({ lookupByDoi }))
@@ -11,6 +12,9 @@ vi.mock("./arxiv-client", () => ({ lookupByArxivId }))
 vi.mock("./semantic-scholar-client", () => ({
 	lookupById,
 	searchByTitle,
+}))
+vi.mock("./dblp-client", () => ({
+	searchByTitle: dblpSearchByTitle,
 }))
 vi.mock("./openreview-client", () => ({
 	searchByTitle: openreviewSearchByTitle,
@@ -41,6 +45,7 @@ describe("orchestrator", () => {
 			source: "arxiv",
 		})
 		lookupById.mockRejectedValue(new Error("miss"))
+		dblpSearchByTitle.mockResolvedValue(null)
 		openreviewSearchByTitle.mockResolvedValue(null)
 
 		const { enrich } = await import("./orchestrator")

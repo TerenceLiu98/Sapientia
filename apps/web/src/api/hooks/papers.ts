@@ -46,6 +46,12 @@ export interface UpdatePaperInput {
 	venue?: string | null
 }
 
+export interface FetchPaperMetadataInput {
+	title?: string | null
+	doi?: string | null
+	arxivId?: string | null
+}
+
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
 	return status === "pending" || status === "parsing"
 }
@@ -197,6 +203,21 @@ export function useUpdatePaper(workspaceId: string, paperId: string) {
 		mutationFn: (input: UpdatePaperInput) =>
 			apiFetch<Paper>(`/api/v1/papers/${paperId}`, {
 				method: "PATCH",
+				body: JSON.stringify(input),
+			}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper", paperId] })
+		},
+	})
+}
+
+export function useFetchPaperMetadata(workspaceId: string, paperId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (input: FetchPaperMetadataInput) =>
+			apiFetch<Paper>(`/api/v1/papers/${paperId}/fetch-metadata`, {
+				method: "POST",
 				body: JSON.stringify(input),
 			}),
 		onSuccess: () => {

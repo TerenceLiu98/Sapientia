@@ -7,7 +7,8 @@ import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
 import { paperToBibtex, papersToBibtex } from "../services/bibtex"
 import { buildDisplayFilename } from "../services/filename"
-import { mergeMetadataEditedFlags } from "../services/paper-metadata"
+import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
+import { applyEnrichedMetadataToPaper, mergeMetadataEditedFlags } from "../services/paper-metadata"
 import {
 	InvalidPaperContentError,
 	PaperTooLargeError,
@@ -25,6 +26,12 @@ const PatchPaperSchema = z.object({
 	doi: z.string().trim().max(200).nullable().optional(),
 	arxivId: z.string().trim().max(50).nullable().optional(),
 	venue: z.string().trim().max(200).nullable().optional(),
+})
+
+const RefetchMetadataSchema = z.object({
+	title: z.string().trim().max(500).nullable().optional(),
+	doi: z.string().trim().max(200).nullable().optional(),
+	arxivId: z.string().trim().max(50).nullable().optional(),
 })
 
 paperRoutes.post(
@@ -165,9 +172,10 @@ paperRoutes.patch("/papers/:id", requireAuth, async (c) => {
 	return c.json(updated)
 })
 
-paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
+paperRoutes.post("/papers/:id/fetch-metadata", requireAuth, async (c) => {
 	const id = c.req.param("id")
 	const user = c.get("user")
+	const body = RefetchMetadataSchema.parse(await c.req.json())
 
 	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
 	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
@@ -175,11 +183,41 @@ paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
 		return c.json({ error: "forbidden" }, 403)
 	}
 
-	// Blocks rarely change after parse; ETag against paper.updatedAt lets the
-	// browser skip the body on hot navigation.
-	const etag = `"${paper.updatedAt.getTime()}"`
-	if (c.req.header("if-none-match") === etag) {
-		return new Response(null, { status: 304 })
+	await db
+		.update(papers)
+		.set({
+			enrichmentStatus: "enriching",
+			enrichmentSource: null,
+			enrichedAt: null,
+			updatedAt: new Date(),
+		})
+		.where(eq(papers.id, id))
+
+	const result = await enrichPaperFromIdentifiers({
+		paper,
+		overrideTitle: body.title,
+		overrideDoi: body.doi,
+		overrideArxivId: body.arxivId,
+	})
+
+	const [updated] = await db
+		.update(papers)
+		.set(applyEnrichedMetadataToPaper(paper, result))
+		.where(eq(papers.id, id))
+		.returning()
+
+	return c.json(updated)
+})
+
+paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+	const imageTtl = 60 * 5
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
 	}
 
 	const rows = await db
@@ -188,11 +226,24 @@ paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
 		.where(eq(blocks.paperId, id))
 		.orderBy(asc(blocks.blockIndex))
 
+	// Blocks rarely change after parse, but figure/table image URLs are
+	// presigned and expire independently of `paper.updatedAt`. When any row
+	// carries an image, fold a TTL-sized time bucket into the ETag so the
+	// browser refreshes the JSON and gets fresh presigned URLs before MinIO
+	// starts returning 403 on stale signatures.
+	const hasPresignedImages = rows.some((row) => Boolean(row.imageObjectKey))
+	const freshnessBucket = hasPresignedImages
+		? Math.floor(Date.now() / (imageTtl * 1000))
+		: "static"
+	const etag = `"${paper.updatedAt.getTime()}:${freshnessBucket}"`
+	if (c.req.header("if-none-match") === etag) {
+		return new Response(null, { status: 304 })
+	}
+
 	// Inline a presigned image URL on figure/table rows so the frontend can
 	// render thumbnails directly. Presigning is local HMAC, so doing this
 	// per-row is cheap. TTL matches the Cache-Control on this response so the
 	// browser doesn't try to render an already-expired URL.
-	const imageTtl = 60 * 5
 	const enriched = await Promise.all(
 		rows.map(async (row) => {
 			if (!row.imageObjectKey) return { ...row, imageUrl: null }

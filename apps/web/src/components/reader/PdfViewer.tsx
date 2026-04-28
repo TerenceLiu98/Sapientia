@@ -1,4 +1,14 @@
-import { memo, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+	memo,
+	type MouseEvent,
+	type PointerEvent as ReactPointerEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react"
+import { RotateCw } from "lucide-react"
 import { Document, Page } from "react-pdf"
 import type { Block } from "@/api/hooks/blocks"
 import { usePaperPdfUrl } from "@/api/hooks/papers"
@@ -7,6 +17,12 @@ import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
+const PREVIEW_MIN_SCALE = 0.75
+const PREVIEW_MAX_SCALE = 3.5
+const PREVIEW_MIN_WIDTH_PX = 320
+const PREVIEW_MAX_WIDTH_PX = 1280
+const PREVIEW_VIEWPORT_MARGIN_PX = 48
+const PREVIEW_SUMMARY_ALLOWANCE_PX = 132
 const FIT_WIDTH_GUTTER_PX = 32
 const BBOX_EPSILON = 0.02
 
@@ -25,6 +41,7 @@ interface PdfViewerProps {
 	selectedBlockId?: string | null
 	onHoverBlock?: (blockId: string | null) => void
 	onSelectBlock?: (block: Block) => void
+	onClearSelectedBlock?: () => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	onClearHighlight?: (blockId: string) => Promise<void> | void
 	// Mirrors BlocksPanel's renderActions slot — caller emits the
@@ -47,6 +64,7 @@ function PdfViewerInner({
 	selectedBlockId,
 	onHoverBlock,
 	onSelectBlock,
+	onClearSelectedBlock,
 	onSetHighlight,
 	onClearHighlight,
 	renderActions,
@@ -85,6 +103,14 @@ function PdfViewerInner({
 		}
 		return map
 	}, [blocks])
+
+	const selectedBlock = useMemo(
+		() =>
+			selectedBlockId
+				? (blocks ?? []).find((block) => block.blockId === selectedBlockId) ?? null
+				: null,
+		[blocks, selectedBlockId],
+	)
 
 	const scrollToPage = useCallback((page: number, blockYRatio?: number) => {
 		const el = pageRefs.current.get(page)
@@ -343,6 +369,13 @@ function PdfViewerInner({
 						: null}
 				</Document>
 			</div>
+			{selectedBlock && isPreviewableBlock(selectedBlock) ? (
+				<SelectedBlockPreview
+					block={selectedBlock}
+					key={selectedBlock.blockId}
+					onDismiss={onClearSelectedBlock}
+				/>
+			) : null}
 		</div>
 	)
 }
@@ -350,8 +383,257 @@ function PdfViewerInner({
 export const PdfViewer = memo(PdfViewerInner)
 PdfViewer.displayName = "PdfViewer"
 
+function SelectedBlockPreview({
+	block,
+	onDismiss,
+}: {
+	block: Block
+	onDismiss?: () => void
+}) {
+	const [popupScale, setPopupScale] = useState(1)
+	const [rotation, setRotation] = useState(0)
+	const [offset, setOffset] = useState({ x: 0, y: 0 })
+	const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
+	const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null)
+	const interactionRef = useRef<
+		| {
+				mode: "drag"
+				originX: number
+				originY: number
+				startX: number
+				startY: number
+		  }
+		| {
+				mode: "resize"
+				originScale: number
+				startX: number
+				startY: number
+				axis: "x" | "y" | "xy"
+		  }
+		| null
+	>(null)
+	const summary = (block.caption ?? block.text ?? "").trim()
+	const isQuarterTurn = Math.abs(rotation % 180) === 90
+	const previewBaseSize = useMemo(() => {
+		const fallbackWidth = 896
+		const fallbackHeight = 560
+		if (!naturalSize || !viewportSize) {
+			return { width: fallbackWidth, imageHeight: fallbackHeight }
+		}
+		const effectiveWidth = isQuarterTurn ? naturalSize.height : naturalSize.width
+		const effectiveHeight = isQuarterTurn ? naturalSize.width : naturalSize.height
+
+		const availableWidth = Math.max(
+			PREVIEW_MIN_WIDTH_PX,
+			viewportSize.width - PREVIEW_VIEWPORT_MARGIN_PX * 2,
+		)
+		const availableHeight = Math.max(
+			240,
+			viewportSize.height -
+				PREVIEW_VIEWPORT_MARGIN_PX * 2 -
+				(summary ? PREVIEW_SUMMARY_ALLOWANCE_PX : 0),
+		)
+		const widthByHeight = (availableHeight * effectiveWidth) / effectiveHeight
+		const fittedWidth = Math.min(
+			effectiveWidth,
+			PREVIEW_MAX_WIDTH_PX,
+			availableWidth,
+			widthByHeight,
+		)
+		const width = Math.max(PREVIEW_MIN_WIDTH_PX, Math.round(fittedWidth))
+		const imageHeight = Math.round((width * effectiveHeight) / effectiveWidth)
+		return { width, imageHeight }
+	}, [isQuarterTurn, naturalSize, summary, viewportSize])
+
+	const endDrag = useCallback(() => {
+		interactionRef.current = null
+	}, [])
+
+	const handlePointerMove = useCallback((event: PointerEvent) => {
+		const interaction = interactionRef.current
+		if (!interaction) return
+		if (interaction.mode === "drag") {
+			setOffset({
+				x: interaction.originX + (event.clientX - interaction.startX),
+				y: interaction.originY + (event.clientY - interaction.startY),
+			})
+			return
+		}
+		const deltaX = event.clientX - interaction.startX
+		const deltaY = event.clientY - interaction.startY
+		const delta =
+			interaction.axis === "x"
+				? deltaX
+				: interaction.axis === "y"
+					? deltaY
+					: Math.max(deltaX, deltaY)
+		setPopupScale(clampPreviewScale(interaction.originScale + delta / 420))
+	}, [])
+
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		window.addEventListener("pointermove", handlePointerMove)
+		window.addEventListener("pointerup", endDrag)
+		window.addEventListener("pointercancel", endDrag)
+		return () => {
+			window.removeEventListener("pointermove", handlePointerMove)
+			window.removeEventListener("pointerup", endDrag)
+			window.removeEventListener("pointercancel", endDrag)
+		}
+	}, [endDrag, handlePointerMove])
+
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		const syncViewport = () => {
+			setViewportSize({ width: window.innerWidth, height: window.innerHeight })
+		}
+		syncViewport()
+		window.addEventListener("resize", syncViewport)
+		return () => window.removeEventListener("resize", syncViewport)
+	}, [])
+
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				event.preventDefault()
+				onDismiss?.()
+			}
+		}
+		window.addEventListener("keydown", handleKeyDown)
+		return () => window.removeEventListener("keydown", handleKeyDown)
+	}, [onDismiss])
+
+	const handlePointerDown = useCallback(
+		(event: ReactPointerEvent<HTMLDivElement>) => {
+			event.preventDefault()
+			interactionRef.current = {
+				mode: "drag",
+				originX: offset.x,
+				originY: offset.y,
+				startX: event.clientX,
+				startY: event.clientY,
+			}
+		},
+		[offset.x, offset.y],
+	)
+
+	const handleResizePointerDown = useCallback(
+		(axis: "x" | "y" | "xy") => (event: ReactPointerEvent<HTMLButtonElement>) => {
+			event.preventDefault()
+			event.stopPropagation()
+			interactionRef.current = {
+				mode: "resize",
+				originScale: popupScale,
+				startX: event.clientX,
+				startY: event.clientY,
+				axis,
+			}
+		},
+		[popupScale],
+	)
+
+	return (
+		<div
+			className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center p-6"
+		>
+			<button
+				aria-label="Close focused preview"
+				className="pointer-events-auto absolute inset-0 bg-black/18 backdrop-blur-[1px]"
+				onClick={() => onDismiss?.()}
+				type="button"
+			/>
+			<div
+				className="pointer-events-auto relative overflow-hidden rounded-2xl border border-border-default bg-bg-overlay/97 shadow-[var(--shadow-popover)] backdrop-blur"
+				style={{
+					width: `${previewBaseSize.width}px`,
+					transform: `translate(${offset.x}px, ${offset.y}px) scale(${popupScale})`,
+				}}
+			>
+				<div
+					className="absolute inset-x-0 top-0 z-[1] h-14 cursor-grab active:cursor-grabbing"
+					onPointerDown={handlePointerDown}
+				/>
+				<div className="relative">
+					<div
+						className="group relative flex min-h-56 items-center justify-center overflow-hidden bg-bg-secondary"
+						style={{ height: `${previewBaseSize.imageHeight}px` }}
+					>
+						<div
+							className="shrink-0 flex items-center justify-center"
+							style={{
+								width: isQuarterTurn
+									? `${previewBaseSize.imageHeight}px`
+									: `${previewBaseSize.width}px`,
+								height: isQuarterTurn
+									? `${previewBaseSize.width}px`
+									: `${previewBaseSize.imageHeight}px`,
+							}}
+						>
+							<img
+								alt={block.caption ?? `${block.type} preview`}
+								className="h-full w-full object-contain transition-transform"
+								onLoad={(event) => {
+									const image = event.currentTarget
+									setNaturalSize({
+										width: image.naturalWidth,
+										height: image.naturalHeight,
+									})
+								}}
+								src={block.imageUrl ?? undefined}
+								style={{ transform: `rotate(${rotation}deg)` }}
+							/>
+						</div>
+						<button
+							aria-label="Rotate preview"
+							className="absolute right-4 top-4 z-[2] flex h-12 w-12 items-center justify-center rounded-full border border-transparent bg-white/0 text-slate-900/0 opacity-0 shadow-[0_8px_18px_rgba(15,23,42,0.12)] transition-all group-hover:border-slate-200/70 group-hover:bg-white/96 group-hover:text-slate-900 group-hover:opacity-100 focus-visible:border-slate-200/80 focus-visible:bg-white/96 focus-visible:text-slate-900 focus-visible:opacity-100"
+							onClick={() => setRotation((value) => (value + 90) % 360)}
+							style={{
+								transform: `scale(${Number((1 / popupScale).toFixed(4))})`,
+								transformOrigin: "top right",
+							}}
+							type="button"
+						>
+							<RotateCw aria-hidden="true" size={22} strokeWidth={2.4} />
+						</button>
+					</div>
+					{summary ? (
+						<div className="border-t border-border-subtle px-5 py-4">
+							<p className="text-sm leading-6 text-text-primary">{summary}</p>
+						</div>
+					) : null}
+				</div>
+				<button
+					aria-label="Resize focused preview horizontally"
+					className="absolute right-0 top-12 hidden h-[calc(100%-3rem)] w-3 cursor-ew-resize bg-transparent md:block"
+					onPointerDown={handleResizePointerDown("x")}
+					type="button"
+				/>
+				<button
+					aria-label="Resize focused preview vertically"
+					className="absolute bottom-0 left-0 hidden h-3 w-[calc(100%-3rem)] cursor-ns-resize bg-transparent md:block"
+					onPointerDown={handleResizePointerDown("y")}
+					type="button"
+				/>
+				<button
+					aria-label="Resize focused preview"
+					className="absolute bottom-0 right-0 h-6 w-6 cursor-nwse-resize bg-transparent"
+					onPointerDown={handleResizePointerDown("xy")}
+					type="button"
+				>
+					<span className="absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-border-default/80" />
+				</button>
+			</div>
+		</div>
+	)
+}
+
 function clamp(scale: number) {
 	return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale))
+}
+
+function clampPreviewScale(scale: number) {
+	return Math.max(PREVIEW_MIN_SCALE, Math.min(PREVIEW_MAX_SCALE, Number(scale.toFixed(2))))
 }
 
 function clampUnit(value: number) {
@@ -361,6 +643,10 @@ function clampUnit(value: number) {
 function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
 	if (!(target instanceof HTMLElement)) return false
 	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
+}
+
+function isPreviewableBlock(block: Block) {
+	return (block.type === "figure" || block.type === "table") && Boolean(block.imageUrl)
 }
 
 function isRenderableBbox(

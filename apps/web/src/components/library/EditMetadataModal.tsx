@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { Paper, UpdatePaperInput } from "@/api/hooks/papers"
+import type { FetchPaperMetadataInput, Paper, UpdatePaperInput } from "@/api/hooks/papers"
 
 function parseAuthors(value: string) {
 	return value
@@ -15,15 +15,21 @@ function arraysEqual(left: string[], right: string[]) {
 
 export function EditMetadataModal({
 	errorMessage,
+	fetchErrorMessage,
 	isSaving,
+	isFetchingMetadata,
 	onClose,
+	onFetchMetadata,
 	onSubmit,
 	open,
 	paper,
 }: {
 	errorMessage?: string | null
+	fetchErrorMessage?: string | null
+	isFetchingMetadata: boolean
 	isSaving: boolean
 	onClose: () => void
+	onFetchMetadata: (input: FetchPaperMetadataInput) => void
 	onSubmit: (patch: UpdatePaperInput) => void
 	open: boolean
 	paper: Paper | null
@@ -91,6 +97,14 @@ export function EditMetadataModal({
 		}
 
 		onSubmit(patch)
+	}
+
+	const handleFetchMetadata = () => {
+		onFetchMetadata({
+			title: title.trim().length > 0 ? title.trim() : null,
+			doi: doi.trim().length > 0 ? doi.trim() : null,
+			arxivId: arxivId.trim().length > 0 ? arxivId.trim() : null,
+		})
 	}
 
 	return (
@@ -181,7 +195,17 @@ export function EditMetadataModal({
 
 				<div className="border-t border-border-subtle px-6 py-4">
 					{errorMessage ? <p className="mb-3 text-sm text-text-error">{errorMessage}</p> : null}
-					<div className="flex flex-wrap justify-end gap-3">
+					{fetchErrorMessage ? <p className="mb-3 text-sm text-text-error">{fetchErrorMessage}</p> : null}
+					<div className="flex flex-wrap justify-between gap-3">
+						<button
+							className="rounded-lg border border-border-default px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={isFetchingMetadata || isSaving}
+							onClick={handleFetchMetadata}
+							type="button"
+						>
+							{isFetchingMetadata ? "Fetching..." : "Fetch metadata"}
+						</button>
+						<div className="flex flex-wrap justify-end gap-3">
 						<button
 							className="rounded-lg border border-border-default px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
 							onClick={onClose}
@@ -191,12 +215,13 @@ export function EditMetadataModal({
 						</button>
 						<button
 							className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
-							disabled={isSaving}
+							disabled={isSaving || isFetchingMetadata}
 							onClick={handleSave}
 							type="button"
 						>
 							{isSaving ? "Saving..." : "Save metadata"}
 						</button>
+						</div>
 					</div>
 				</div>
 			</div>

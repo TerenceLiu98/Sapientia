@@ -9,8 +9,8 @@ import {
 	type PaperEnrichJobData,
 	type PaperEnrichJobResult,
 } from "../queues/paper-enrich"
-import { enrich } from "../services/enrichment/orchestrator"
 import { extractIdentifiers } from "../services/enrichment/identifier-extractor"
+import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
 import { applyEnrichedMetadataToPaper } from "../services/paper-metadata"
 import { downloadFromS3 } from "../services/s3-client"
 
@@ -58,15 +58,10 @@ async function processPaperEnrich(
 		"enrichment_identifiers_extracted",
 	)
 
-	if (!ids.doi && !ids.arxivId && !ids.candidateTitle) {
-		await db
-			.update(papers)
-			.set({ enrichmentStatus: "skipped", updatedAt: new Date() })
-			.where(eq(papers.id, paperId))
-		return { paperId, status: "skipped", sources: [] }
-	}
-
-	const result = await enrich(ids)
+	const result = await enrichPaperFromIdentifiers({
+		paper,
+		identifiers: ids,
+	})
 
 	await db
 		.update(papers)
