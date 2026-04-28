@@ -1,6 +1,6 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="demo/logo-dark.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="demo/logit-dark.svg">
     <img alt="Sapientia" src="demo/logo-light.svg" width="120" height="120">
   </picture>
 

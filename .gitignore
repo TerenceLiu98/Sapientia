@@ -34,5 +34,4 @@ logs/
 .claude/
 
 # Local-only sandbox content
-demo/
 .tanstack/

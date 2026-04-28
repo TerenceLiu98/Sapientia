@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="220" fill="oklch(0.165 0.008 65)"/>
+  
+  <rect x="308" y="238" width="64" height="548" rx="32" fill="oklch(0.92 0.005 75)"/>
+  
+  <circle cx="518" cy="370" r="58" fill="oklch(0.92 0.005 75)"/>
+  
+  <rect x="462" y="506" width="238" height="56" rx="28" fill="oklch(0.92 0.005 75)"/>
+</svg>
