@@ -126,7 +126,7 @@ describe("PdfViewer", () => {
 		expect(refetchMock).toHaveBeenCalledTimes(1)
 	})
 
-	it("renders document + zoom controls when URL is available", async () => {
+	it("renders the document when URL is available", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
 			isLoading: false,
@@ -135,7 +135,6 @@ describe("PdfViewer", () => {
 		})
 		const PdfViewer = await importPdfViewer()
 		const Wrapper = makeWrapper()
-		const user = userEvent.setup()
 
 		render(
 			<Wrapper>
@@ -144,21 +143,6 @@ describe("PdfViewer", () => {
 		)
 
 		expect(screen.getByTestId("pdf-document")).toBeInTheDocument()
-		expect(screen.getByRole("button", { name: /zoom in/i })).toBeInTheDocument()
-		expect(screen.getByRole("button", { name: /zoom out/i })).toBeInTheDocument()
-		expect(screen.getByRole("button", { name: /fit width/i })).toBeInTheDocument()
-
-		// Default mode is fit-width; with the mocked container and page size
-		// that computes to 140%.
-		expect(await screen.findByText("140%")).toBeInTheDocument()
-
-		// 140% → 150% on click of "+"
-		await user.click(screen.getByRole("button", { name: /zoom in/i }))
-		expect(screen.getByText("150%")).toBeInTheDocument()
-
-		// "Fit" returns to the computed fit-width scale.
-		await user.click(screen.getByRole("button", { name: /fit width/i }))
-		expect(screen.getByText("140%")).toBeInTheDocument()
 	})
 
 	it("skips malformed bbox overlays instead of rendering page-covering hit targets", async () => {

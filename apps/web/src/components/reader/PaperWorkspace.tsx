@@ -30,9 +30,11 @@ const SPLIT_KEY = "paperWorkspace.leftPct"
 const AUTO_FOLLOW_LOCK_MS = 1400
 
 function loadViewMode(): ViewMode {
-	if (typeof window === "undefined") return "both"
+	if (typeof window === "undefined") return "pdf-only"
 	const v = window.localStorage.getItem(VIEW_MODE_KEY)
-	return v === "pdf-only" || v === "md-only" || v === "both" ? v : "both"
+	// "both" is no longer user-selectable — coerce it to pdf-only so a
+	// user who previously persisted it isn't stuck without a toggle.
+	return v === "pdf-only" || v === "md-only" ? v : "pdf-only"
 }
 
 function loadNotesVisible() {
@@ -469,17 +471,21 @@ function ViewModeToggle({
 	current: ViewMode
 	onChange: (mode: ViewMode) => void
 }) {
-	const buttons: Array<{ key: ViewMode; label: string }> = [
-		{ key: "pdf-only", label: "PDF" },
-		{ key: "both", label: "Both" },
-		{ key: "md-only", label: "Parsed" },
+	const buttons: Array<{
+		key: ViewMode
+		ariaLabel: string
+		content: React.ReactNode
+	}> = [
+		{ key: "pdf-only", ariaLabel: "Show PDF", content: <PdfIcon /> },
+		{ key: "md-only", ariaLabel: "Show Markdown", content: <MarkdownIcon /> },
 	]
 	return (
 		<div className="inline-flex overflow-hidden rounded-md border border-border-default text-xs">
 			{buttons.map((b) => (
 				<button
+					aria-label={b.ariaLabel}
 					aria-pressed={current === b.key}
-					className={`px-3 py-1 transition-colors ${
+					className={`flex h-7 min-w-[40px] items-center justify-center px-3 transition-colors ${
 						current === b.key
 							? "bg-accent-600 text-text-inverse"
 							: "bg-transparent text-text-secondary hover:bg-surface-hover"
@@ -488,10 +494,64 @@ function ViewModeToggle({
 					onClick={() => onChange(b.key)}
 					type="button"
 				>
-					{b.label}
+					{b.content}
 				</button>
 			))}
 		</div>
+	)
+}
+
+function PdfIcon() {
+	// Document with a folded corner + "PDF" label — matches the
+	// rounded-rect aesthetic of the Markdown mark.
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.6"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+			<path d="M14 2v6h6" />
+			<text
+				fill="currentColor"
+				fontFamily="ui-sans-serif, system-ui"
+				fontSize="6"
+				fontWeight="700"
+				stroke="none"
+				textAnchor="middle"
+				x="12"
+				y="17.4"
+			>
+				PDF
+			</text>
+		</svg>
+	)
+}
+
+function MarkdownIcon() {
+	// Official Markdown mark (CommonMark) — rounded rect + "M↓".
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="13"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.6"
+			viewBox="0 0 208 128"
+			width="20"
+		>
+			<rect height="120" rx="16" ry="16" width="200" x="4" y="4" />
+			<path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39H30Z" fill="currentColor" stroke="none" />
+			<path d="M150 98V30h20v40h20l-30 33-30-33h20" fill="currentColor" stroke="none" />
+		</svg>
 	)
 }
 

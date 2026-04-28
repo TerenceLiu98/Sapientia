@@ -30,9 +30,13 @@ const MAX_SCALE = 3
 const PREVIEW_MIN_SCALE = 0.75
 const PREVIEW_MAX_SCALE = 3.5
 const PREVIEW_MIN_WIDTH_PX = 320
-const PREVIEW_MAX_WIDTH_PX = 1280
+const PREVIEW_MAX_WIDTH_PX = 1480
 const PREVIEW_VIEWPORT_MARGIN_PX = 48
-const PREVIEW_SUMMARY_ALLOWANCE_PX = 132
+// Popup outer width targets at least this fraction of the viewport so
+// (a) small natural images still open at a readable size, and (b) the
+// caption gets enough horizontal room to wrap into few lines instead
+// of a tall paragraph.
+const PREVIEW_TARGET_VIEWPORT_FRACTION = 0.78
 const FIT_WIDTH_GUTTER_PX = 32
 const BBOX_EPSILON = 0.02
 const HIGHLIGHT_MIN_H = 0.018
@@ -272,9 +276,20 @@ function PdfViewerInner({
 	useEffect(() => {
 		if (scaleMode !== "fit" || !scrollContainerRef.current) return
 		if (typeof ResizeObserver === "undefined") return
-		const observer = new ResizeObserver(() => fitToWidth())
+		// Debounce: sidebars animate over ~200–300ms, firing the observer
+		// every frame. Each call sets `scale`, which forces react-pdf to
+		// repaint the canvas — without debounce that's a flicker storm.
+		// Wait for the resize to settle, then refit once.
+		let timeoutId: ReturnType<typeof setTimeout> | null = null
+		const observer = new ResizeObserver(() => {
+			if (timeoutId) clearTimeout(timeoutId)
+			timeoutId = setTimeout(() => fitToWidth(), 120)
+		})
 		observer.observe(scrollContainerRef.current)
-		return () => observer.disconnect()
+		return () => {
+			if (timeoutId) clearTimeout(timeoutId)
+			observer.disconnect()
+		}
 	}, [fitToWidth, scaleMode])
 
 	const handleMainPointerDown = useCallback(
@@ -322,14 +337,14 @@ function PdfViewerInner({
 					/>{" "}
 					of {numPages ?? "—"}
 				</div>
-				<div className="flex items-center gap-1">
+				<div className="-mr-1 flex items-center gap-0.5">
 					{canAnnotate ? (
 						<button
 							aria-pressed={annotationMode}
-							className={`mr-2 flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+							className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
 								annotationMode
-									? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
-									: "border-border-default text-text-secondary hover:bg-surface-hover"
+									? "bg-accent-600 text-text-inverse hover:bg-accent-700"
+									: "text-text-secondary hover:bg-surface-hover"
 							}`}
 							onClick={() => {
 								setAnnotationMode((value) => !value)
@@ -343,52 +358,16 @@ function PdfViewerInner({
 					) : null}
 					<button
 						aria-pressed={showLayoutBoxes}
-						className={`mr-2 flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
+						className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
 							showLayoutBoxes
-								? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
-								: "border-border-default text-text-secondary hover:bg-surface-hover"
+								? "bg-accent-600 text-text-inverse hover:bg-accent-700"
+								: "text-text-secondary hover:bg-surface-hover"
 						}`}
 						onClick={() => setShowLayoutBoxes((value) => !value)}
 						title={showLayoutBoxes ? "Hide layout boxes" : "Show layout boxes"}
 						type="button"
 					>
 						<LayoutBoxesIcon />
-					</button>
-					<button
-						aria-label="Zoom out"
-						className="h-7 w-7 rounded-md text-sm hover:bg-surface-hover"
-						onClick={() => {
-							setScaleMode("manual")
-							setScale((value) => clamp(value - 0.1))
-						}}
-						type="button"
-					>
-						−
-					</button>
-					<span className="w-12 text-center text-sm text-text-secondary">
-						{Math.round(scale * 100)}%
-					</span>
-					<button
-						aria-label="Zoom in"
-						className="h-7 w-7 rounded-md text-sm hover:bg-surface-hover"
-						onClick={() => {
-							setScaleMode("manual")
-							setScale((value) => clamp(value + 0.1))
-						}}
-						type="button"
-					>
-						+
-					</button>
-					<button
-						aria-label="Fit width"
-						className="ml-2 h-7 rounded-md px-2 text-xs hover:bg-surface-hover"
-						onClick={() => {
-							setScaleMode("fit")
-							fitToWidth()
-						}}
-						type="button"
-					>
-						Fit
 					</button>
 				</div>
 			</div>
@@ -502,13 +481,16 @@ function SelectedBlockPreview({
 	const summary = (block.caption ?? block.text ?? "").trim()
 	const isQuarterTurn = Math.abs(rotation % 180) === 90
 	const previewBaseSize = useMemo(() => {
-		const fallbackWidth = 896
-		const fallbackHeight = 560
+		const fallbackCaption = 1024
+		const fallbackImage = { width: 1024, height: 560 }
 		if (!naturalSize || !viewportSize) {
-			return { width: fallbackWidth, imageHeight: fallbackHeight }
+			return {
+				captionWidth: fallbackCaption,
+				imageWidth: fallbackImage.width,
+				imageHeight: fallbackImage.height,
+			}
 		}
-		const effectiveWidth = isQuarterTurn ? naturalSize.height : naturalSize.width
-		const effectiveHeight = isQuarterTurn ? naturalSize.width : naturalSize.height
+		const { width: nw, height: nh } = naturalSize
 
 		const availableWidth = Math.max(
 			PREVIEW_MIN_WIDTH_PX,
@@ -516,20 +498,38 @@ function SelectedBlockPreview({
 		)
 		const availableHeight = Math.max(
 			240,
-			viewportSize.height -
-				PREVIEW_VIEWPORT_MARGIN_PX * 2 -
-				(summary ? PREVIEW_SUMMARY_ALLOWANCE_PX : 0),
+			viewportSize.height - PREVIEW_VIEWPORT_MARGIN_PX * 2,
 		)
-		const widthByHeight = (availableHeight * effectiveWidth) / effectiveHeight
-		const fittedWidth = Math.min(
-			effectiveWidth,
-			PREVIEW_MAX_WIDTH_PX,
-			availableWidth,
-			widthByHeight,
+
+		// Caption dock width: rotation-invariant. Driven by the un-rotated
+		// natural width plus a viewport floor, so rotating never reflows
+		// the caption.
+		const targetWidth = Math.max(nw, viewportSize.width * PREVIEW_TARGET_VIEWPORT_FRACTION)
+		const captionWidth = Math.max(
+			PREVIEW_MIN_WIDTH_PX,
+			Math.round(Math.min(targetWidth, availableWidth, PREVIEW_MAX_WIDTH_PX)),
 		)
-		const width = Math.max(PREVIEW_MIN_WIDTH_PX, Math.round(fittedWidth))
-		const imageHeight = Math.round((width * effectiveHeight) / effectiveWidth)
-		return { width, imageHeight }
+
+		// Image visual dimensions (post-rotation). Card hugs these so
+		// there's no leftover gutter making the chrome perceptible.
+		const visualAspect = isQuarterTurn ? nw / nh : nh / nw // visualH / visualW
+		const captionAllowance = summary ? Math.min(240, availableHeight * 0.4) : 0
+		const maxImageHeight = Math.max(160, availableHeight - captionAllowance)
+		// Cap image's visual width at the caption width too, so wide
+		// figures don't make the image card visually broader than the
+		// caption dock — keeps the pair feeling aligned.
+		const maxImageWidth = Math.min(captionWidth, availableWidth)
+		let imageWidth = maxImageWidth
+		let imageHeight = imageWidth * visualAspect
+		if (imageHeight > maxImageHeight) {
+			imageHeight = maxImageHeight
+			imageWidth = imageHeight / visualAspect
+		}
+		return {
+			captionWidth,
+			imageWidth: Math.round(imageWidth),
+			imageHeight: Math.round(imageHeight),
+		}
 	}, [isQuarterTurn, naturalSize, summary, viewportSize])
 
 	const endDrag = useCallback(() => {
@@ -621,40 +621,44 @@ function SelectedBlockPreview({
 	)
 
 	return (
-		<div
-			className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center p-6"
-		>
+		<div className="pointer-events-none absolute inset-0 z-[5] p-6">
 			<button
 				aria-label="Close focused preview"
 				className="pointer-events-auto absolute inset-0 bg-black/18 backdrop-blur-[1px]"
 				onClick={() => onDismiss?.()}
 				type="button"
 			/>
+			{/* Image card: absolutely centered, draggable. Caption dock
+			    (rendered as a sibling further down) is pinned to the
+			    viewport bottom independently — rotating or zooming the
+			    image leaves the caption put. */}
 			<div
-				className="pointer-events-auto relative overflow-hidden rounded-2xl border border-border-default bg-bg-overlay/97 shadow-[var(--shadow-popover)] backdrop-blur"
+				className="pointer-events-auto absolute left-1/2 top-1/2"
 				style={{
-					width: `${previewBaseSize.width}px`,
-					transform: `translate(${offset.x}px, ${offset.y}px) scale(${popupScale})`,
+					transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))`,
 				}}
 			>
 				<div
-					className="absolute inset-x-0 top-0 z-[1] h-14 cursor-grab active:cursor-grabbing"
-					onPointerDown={handlePointerDown}
-				/>
-				<div className="relative">
+					className="relative overflow-hidden rounded-2xl border border-border-default bg-bg-overlay/97 shadow-[var(--shadow-popover)] backdrop-blur"
+					style={{ width: `${previewBaseSize.imageWidth * popupScale}px` }}
+				>
 					<div
-						className="group relative flex min-h-56 items-center justify-center overflow-hidden bg-bg-secondary"
-						style={{ height: `${previewBaseSize.imageHeight}px` }}
+						className="absolute inset-x-0 top-0 z-[1] h-14 cursor-grab active:cursor-grabbing"
+						onPointerDown={handlePointerDown}
+					/>
+					<div
+						className="group relative flex items-center justify-center overflow-hidden bg-bg-secondary"
+						style={{ height: `${previewBaseSize.imageHeight * popupScale}px` }}
 					>
 						<div
 							className="shrink-0 flex items-center justify-center"
 							style={{
 								width: isQuarterTurn
-									? `${previewBaseSize.imageHeight}px`
-									: `${previewBaseSize.width}px`,
+									? `${previewBaseSize.imageHeight * popupScale}px`
+									: `${previewBaseSize.imageWidth * popupScale}px`,
 								height: isQuarterTurn
-									? `${previewBaseSize.width}px`
-									: `${previewBaseSize.imageHeight}px`,
+									? `${previewBaseSize.imageWidth * popupScale}px`
+									: `${previewBaseSize.imageHeight * popupScale}px`,
 							}}
 						>
 							<img
@@ -671,44 +675,54 @@ function SelectedBlockPreview({
 								style={{ transform: `rotate(${rotation}deg)` }}
 							/>
 						</div>
-						<button
-							aria-label="Rotate preview"
-							className="absolute right-4 top-4 z-[2] flex h-12 w-12 items-center justify-center rounded-full border border-transparent bg-white/0 text-slate-900/0 opacity-0 shadow-[0_8px_18px_rgba(15,23,42,0.12)] transition-all group-hover:border-slate-200/70 group-hover:bg-white/96 group-hover:text-slate-900 group-hover:opacity-100 focus-visible:border-slate-200/80 focus-visible:bg-white/96 focus-visible:text-slate-900 focus-visible:opacity-100"
-							onClick={() => setRotation((value) => (value + 90) % 360)}
-							style={{
-								transform: `scale(${Number((1 / popupScale).toFixed(4))})`,
-								transformOrigin: "top right",
-							}}
-							type="button"
-						>
-							<RotateCw aria-hidden="true" size={22} strokeWidth={2.4} />
-						</button>
 					</div>
-					{summary ? (
-						<div className="border-t border-border-subtle px-5 py-4">
-							<p className="text-sm leading-6 text-text-primary">{summary}</p>
-						</div>
-					) : null}
+					<button
+						aria-label="Resize focused preview horizontally"
+						className="absolute right-0 top-12 hidden h-[calc(100%-3rem)] w-3 cursor-ew-resize bg-transparent md:block"
+						onPointerDown={handleResizePointerDown("x")}
+						type="button"
+					/>
+					<button
+						aria-label="Resize focused preview vertically"
+						className="absolute bottom-0 left-0 hidden h-3 w-[calc(100%-3rem)] cursor-ns-resize bg-transparent md:block"
+						onPointerDown={handleResizePointerDown("y")}
+						type="button"
+					/>
+					<button
+						aria-label="Resize focused preview"
+						className="absolute bottom-0 right-0 h-6 w-6 cursor-nwse-resize bg-transparent"
+						onPointerDown={handleResizePointerDown("xy")}
+						type="button"
+					>
+						<span className="absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-border-default/80" />
+					</button>
 				</div>
+			</div>
+			{/* Caption dock: pinned to the bottom of the popup overlay,
+			    centered horizontally. Independent of the image card —
+			    rotating or dragging the image never moves it. */}
+			<div
+				className="pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-border-subtle/70 bg-bg-overlay/70 px-5 py-3 shadow-[var(--shadow-popover)] backdrop-blur-md"
+				style={{
+					width: `${previewBaseSize.captionWidth}px`,
+					maxWidth: "calc(100vw - 96px)",
+				}}
+			>
+				{summary ? (
+					<p className="flex-1 text-sm leading-6 text-text-primary/90">{summary}</p>
+				) : (
+					<span className="flex-1" />
+				)}
 				<button
-					aria-label="Resize focused preview horizontally"
-					className="absolute right-0 top-12 hidden h-[calc(100%-3rem)] w-3 cursor-ew-resize bg-transparent md:block"
-					onPointerDown={handleResizePointerDown("x")}
-					type="button"
-				/>
-				<button
-					aria-label="Resize focused preview vertically"
-					className="absolute bottom-0 left-0 hidden h-3 w-[calc(100%-3rem)] cursor-ns-resize bg-transparent md:block"
-					onPointerDown={handleResizePointerDown("y")}
-					type="button"
-				/>
-				<button
-					aria-label="Resize focused preview"
-					className="absolute bottom-0 right-0 h-6 w-6 cursor-nwse-resize bg-transparent"
-					onPointerDown={handleResizePointerDown("xy")}
+					aria-label="Rotate preview"
+					className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-white/96 text-slate-900 shadow-[0_4px_10px_rgba(15,23,42,0.12)] transition-transform hover:scale-110"
+					onClick={(e) => {
+						e.stopPropagation()
+						setRotation((value) => (value + 90) % 360)
+					}}
 					type="button"
 				>
-					<span className="absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-border-default/80" />
+					<RotateCw aria-hidden="true" size={18} strokeWidth={2.4} />
 				</button>
 			</div>
 		</div>
@@ -816,6 +830,11 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	// strokes don't get distorted by viewBox stretching.
 	const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null)
 	const [draftBody, setDraftBody] = useState<ReaderAnnotationBody | null>(null)
+	// Tracks whether react-pdf is in the middle of an async canvas render
+	// for the current scale. While true the overlay is hidden so the user
+	// doesn't see SVG/blocks floating over a blanked canvas.
+	const [isRendering, setIsRendering] = useState(false)
+	const lastRenderedScaleRef = useRef<number | null>(null)
 	const draftSessionRef = useRef<
 		| {
 				pointerId: number
@@ -913,6 +932,14 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		draftSessionRef.current = null
 		setDraftBody(null)
 	}, [annotationMode])
+
+	// Mark the page as actively re-rendering when the scale changes;
+	// onRenderSuccess clears it. Skips the very first mount.
+	useEffect(() => {
+		if (lastRenderedScaleRef.current === null) return
+		if (lastRenderedScaleRef.current === scale) return
+		setIsRendering(true)
+	}, [scale])
 
 	// Track the real rendered canvas dimensions. ResizeObserver picks up
 	// zoom changes and react-pdf swapping the canvas element. We feed
@@ -1097,16 +1124,20 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						onPointDims?.(dims)
 					}
 				}}
+				onRenderSuccess={() => {
+					lastRenderedScaleRef.current = scale
+					setIsRendering(false)
+				}}
 				pageNumber={page}
 				renderAnnotationLayer={false}
-				// pdf.js's text layer sits above the canvas with pointer-events
-				// enabled so users can select text. In markup mode it would
-				// swallow pointerdowns over text — disable it so the SVG below
-				// receives the drag everywhere on the page.
-				renderTextLayer={!annotationMode}
+				// Keep this prop stable so toggling markup mode never tears
+				// down react-pdf's text layer (which would force the canvas
+				// to re-render). We disable text-selection separately via
+				// CSS pointer-events on the overlay.
+				renderTextLayer={false}
 				scale={scale}
 			/>
-			{pointDims && displayW > 0 && displayH > 0 ? (
+			{pointDims && displayW > 0 && displayH > 0 && !isRendering ? (
 				// Overlay sized to the real measured canvas dimensions
 				// (canvasSize) so the SVG always covers exactly the canvas
 				// — no underflow at the page bottom, no overflow.
