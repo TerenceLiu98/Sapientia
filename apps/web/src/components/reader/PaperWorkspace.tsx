@@ -5,6 +5,12 @@ import { useNotesForBlock, usePaperCitationCounts } from "@/api/hooks/citations"
 import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
 import { useCreateNote, useDeleteNote, useNotes } from "@/api/hooks/notes"
 import { type Paper, usePaper } from "@/api/hooks/papers"
+import {
+	type ReaderAnnotation,
+	useCreateReaderAnnotation,
+	useDeleteReaderAnnotation,
+	useReaderAnnotations,
+} from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
@@ -12,6 +18,7 @@ import { BlocksPanel } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer } from "@/components/reader/PdfViewer"
 import { usePalette } from "@/lib/highlight-palette"
+import type { ReaderAnnotationBody, ReaderAnnotationKind } from "@/lib/reader-annotations"
 
 type ViewMode = "pdf-only" | "md-only" | "both"
 
@@ -59,8 +66,11 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const { data: counts } = usePaperCitationCounts(paperId)
 	const { data: notesCitingSelectedBlock = [] } = useNotesForBlock(paperId, selectedBlockId)
 	const { data: highlights = [] } = useHighlights(paperId, workspace?.id)
+	const { data: readerAnnotations = [] } = useReaderAnnotations(paperId, workspace?.id)
 	const setBlockHighlight = useSetBlockHighlight(paperId)
 	const clearBlockHighlight = useClearBlockHighlight(paperId)
+	const createReaderAnnotation = useCreateReaderAnnotation(paperId)
+	const deleteReaderAnnotation = useDeleteReaderAnnotation(paperId, workspace?.id)
 	const { palette } = usePalette()
 
 	useEffect(() => {
@@ -223,6 +233,26 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		[clearBlockHighlight, workspace],
 	)
 
+	const handleCreateReaderAnnotation = useCallback(
+		async (input: {
+			page: number
+			kind: ReaderAnnotationKind
+			color: string
+			body: ReaderAnnotationBody
+		}) => {
+			if (!workspace) return
+			await createReaderAnnotation.mutateAsync({ workspaceId: workspace.id, ...input })
+		},
+		[createReaderAnnotation, workspace],
+	)
+
+	const handleDeleteReaderAnnotation = useCallback(
+		async (annotationId: string) => {
+			await deleteReaderAnnotation.mutateAsync(annotationId)
+		},
+		[deleteReaderAnnotation],
+	)
+
 	const colorByBlock = useMemo(() => {
 		const map = new Map<string, string>()
 		for (const highlight of highlights) map.set(highlight.blockId, highlight.color)
@@ -288,12 +318,15 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			onViewportAnchorChange={handleViewportAnchorChange}
 			palette={palette}
 			paperId={paperId}
+			readerAnnotations={readerAnnotations}
 			renderActions={renderActions}
 			requestedBlockY={requestedBlockY}
 			requestedPage={requestedPage}
 			requestNonce={requestNonce}
 			selectedBlockId={selectedBlockId}
 			selectedBlockRequestNonce={selectedBlockRequestNonce}
+			handleCreateReaderAnnotation={handleCreateReaderAnnotation}
+			handleDeleteReaderAnnotation={handleDeleteReaderAnnotation}
 			viewMode={viewMode}
 		/>
 	)
@@ -530,10 +563,18 @@ interface MainViewProps {
 	handleMainInteract: () => void
 	handleSelectBlock: (block: Block) => void
 	handleSetBlockHighlight: (blockId: string, color: string) => Promise<void> | void
+	handleCreateReaderAnnotation: (input: {
+		page: number
+		kind: ReaderAnnotationKind
+		color: string
+		body: ReaderAnnotationBody
+	}) => Promise<unknown> | unknown
+	handleDeleteReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
 	hoveredBlockId: string | null
 	onViewportAnchorChange: (page: number, yRatio: number) => void
 	palette: ReturnType<typeof usePalette>["palette"]
 	paperId: string
+	readerAnnotations: ReaderAnnotation[]
 	renderActions: (block: Block) => React.ReactNode
 	requestedBlockY: number | undefined
 	requestedPage: number | undefined
@@ -551,6 +592,8 @@ const MainView = memo(function MainView(props: MainViewProps) {
 				colorByBlock={props.colorByBlock}
 				hoveredBlockId={props.hoveredBlockId}
 				onClearHighlight={props.handleClearBlockHighlight}
+				onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
+				onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
 				onClearSelectedBlock={props.handleClearSelectedBlock}
 				onHoverBlock={props.handleHoverBlock}
 				onInteract={props.handleMainInteract}
@@ -559,6 +602,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 				onSetHighlight={props.handleSetBlockHighlight}
 				palette={props.palette}
 				paperId={props.paperId}
+				readerAnnotations={props.readerAnnotations}
 				renderActions={props.renderActions}
 				requestedBlockY={props.requestedBlockY}
 				requestedPage={props.requestedPage}

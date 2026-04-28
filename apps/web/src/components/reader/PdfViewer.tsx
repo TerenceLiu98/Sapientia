@@ -11,8 +11,19 @@ import {
 import { RotateCw } from "lucide-react"
 import { Document, Page } from "react-pdf"
 import type { Block } from "@/api/hooks/blocks"
+import type { ReaderAnnotation } from "@/api/hooks/reader-annotations"
 import { usePaperPdfUrl } from "@/api/hooks/papers"
 import { type PaletteEntry, paletteColorVars } from "@/lib/highlight-palette"
+import {
+	READER_ANNOTATION_COLORS,
+	clampUnit as clampAnnotationUnit,
+	distanceBetweenPoints,
+	pointsToSvgPath,
+	rectFromPoints,
+	type ReaderAnnotationBody,
+	type ReaderAnnotationPoint,
+	type ReaderAnnotationTool,
+} from "@/lib/reader-annotations"
 import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
 const MIN_SCALE = 0.5
@@ -25,6 +36,8 @@ const PREVIEW_VIEWPORT_MARGIN_PX = 48
 const PREVIEW_SUMMARY_ALLOWANCE_PX = 132
 const FIT_WIDTH_GUTTER_PX = 32
 const BBOX_EPSILON = 0.02
+const HIGHLIGHT_MIN_H = 0.018
+const HIGHLIGHT_MIN_W = 0.01
 
 interface PdfViewerProps {
 	paperId: string
@@ -44,6 +57,14 @@ interface PdfViewerProps {
 	onClearSelectedBlock?: () => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	onClearHighlight?: (blockId: string) => Promise<void> | void
+	readerAnnotations?: ReaderAnnotation[]
+	onCreateReaderAnnotation?: (input: {
+		page: number
+		kind: ReaderAnnotationTool
+		color: string
+		body: ReaderAnnotationBody
+	}) => Promise<unknown> | unknown
+	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	// Mirrors BlocksPanel's renderActions slot — caller emits the
 	// cite/add-note button so the PDF toolbar matches the parsed-blocks pane.
 	renderActions?: (block: Block) => React.ReactNode
@@ -67,6 +88,9 @@ function PdfViewerInner({
 	onClearSelectedBlock,
 	onSetHighlight,
 	onClearHighlight,
+	readerAnnotations,
+	onCreateReaderAnnotation,
+	onDeleteReaderAnnotation,
 	renderActions,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
@@ -77,6 +101,10 @@ function PdfViewerInner({
 	const [showLayoutBoxes, setShowLayoutBoxes] = useState(false)
 	const [basePageWidth, setBasePageWidth] = useState<number | null>(null)
 	const [renderError, setRenderError] = useState<string | null>(null)
+	const [annotationMode, setAnnotationMode] = useState(false)
+	const [annotationTool, setAnnotationTool] = useState<ReaderAnnotationTool>("highlight")
+	const [annotationColor, setAnnotationColor] = useState(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
+	const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
 	const viewerRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -90,6 +118,10 @@ function PdfViewerInner({
 		setShowLayoutBoxes(false)
 		setBasePageWidth(null)
 		setRenderError(null)
+		setAnnotationMode(false)
+		setAnnotationTool("highlight")
+		setAnnotationColor(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
+		setSelectedAnnotationId(null)
 		pageRefs.current.clear()
 	}, [paperId])
 
@@ -111,6 +143,18 @@ function PdfViewerInner({
 				: null,
 		[blocks, selectedBlockId],
 	)
+
+	const annotationsByPage = useMemo(() => {
+		const map = new Map<number, ReaderAnnotation[]>()
+		for (const annotation of readerAnnotations ?? []) {
+			const list = map.get(annotation.page) ?? []
+			list.push(annotation)
+			map.set(annotation.page, list)
+		}
+		return map
+	}, [readerAnnotations])
+
+	const canAnnotate = Boolean(onCreateReaderAnnotation)
 
 	const scrollToPage = useCallback((page: number, blockYRatio?: number) => {
 		const el = pageRefs.current.get(page)
@@ -275,6 +319,81 @@ function PdfViewerInner({
 					of {numPages ?? "—"}
 				</div>
 				<div className="flex items-center gap-1">
+					{canAnnotate ? (
+						<>
+							<button
+								aria-pressed={annotationMode}
+								className={`mr-2 flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+									annotationMode
+										? "border-accent-600 bg-accent-600 text-text-inverse hover:bg-accent-700"
+										: "border-border-default text-text-secondary hover:bg-surface-hover"
+								}`}
+								onClick={() => {
+									setAnnotationMode((value) => !value)
+									setSelectedAnnotationId(null)
+								}}
+								title={annotationMode ? "Exit markup mode" : "Enter markup mode"}
+								type="button"
+							>
+								<MarkupIcon />
+							</button>
+							{annotationMode ? (
+								<>
+									<div className="mr-2 flex items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/80 px-1.5 py-1">
+										<AnnotationToolButton
+											active={annotationTool === "highlight"}
+											ariaLabel="Highlight tool"
+											icon={<HighlightToolIcon />}
+											onClick={() => setAnnotationTool("highlight")}
+										/>
+										<AnnotationToolButton
+											active={annotationTool === "underline"}
+											ariaLabel="Underline tool"
+											icon={<UnderlineToolIcon />}
+											onClick={() => setAnnotationTool("underline")}
+										/>
+										<AnnotationToolButton
+											active={annotationTool === "ink"}
+											ariaLabel="Freehand tool"
+											icon={<InkToolIcon />}
+											onClick={() => setAnnotationTool("ink")}
+										/>
+										<div className="mx-1 h-4 w-px bg-border-subtle" />
+										{READER_ANNOTATION_COLORS.map((entry) => (
+											<button
+												aria-label={`${entry.label} markup color`}
+												aria-pressed={annotationColor === entry.value}
+												className={`h-5 w-5 rounded-full border transition-transform hover:scale-105 ${
+													annotationColor === entry.value
+														? "border-text-primary ring-2 ring-accent-600/35"
+														: "border-border-default"
+												}`}
+												key={entry.value}
+												onClick={() => setAnnotationColor(entry.value)}
+												style={{ backgroundColor: entry.value }}
+												type="button"
+											/>
+										))}
+										<div className="mx-1 h-4 w-px bg-border-subtle" />
+										<button
+											aria-label="Delete selected annotation"
+											className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+											disabled={!selectedAnnotationId}
+											onClick={() => {
+												if (!selectedAnnotationId) return
+												void onDeleteReaderAnnotation?.(selectedAnnotationId)
+												setSelectedAnnotationId(null)
+											}}
+											title="Delete selected annotation"
+											type="button"
+										>
+											<TrashIcon />
+										</button>
+									</div>
+								</>
+							) : null}
+						</>
+					) : null}
 					<button
 						aria-pressed={showLayoutBoxes}
 						className={`mr-2 flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
@@ -348,13 +467,19 @@ function PdfViewerInner({
 					{numPages != null
 						? Array.from({ length: numPages }, (_, index) => index + 1).map((page) => (
 								<PdfPageWithOverlay
+									annotationColor={annotationColor}
+									annotationMode={annotationMode}
+									annotations={annotationsByPage.get(page)}
+									annotationTool={annotationTool}
 									blocks={blocksByPage.get(page)}
 									colorByBlock={colorByBlock}
 									hoveredBlockId={hoveredBlockId}
 									key={page}
 									onClearHighlight={onClearHighlight}
+									onCreateReaderAnnotation={onCreateReaderAnnotation}
 									onHoverBlock={onHoverBlock}
 									onPointDims={(dims) => setBasePageWidth((current) => current ?? dims.w)}
+									onSelectAnnotation={setSelectedAnnotationId}
 									onSelectBlock={onSelectBlock}
 									onSetHighlight={onSetHighlight}
 									page={page}
@@ -362,6 +487,7 @@ function PdfViewerInner({
 									palette={palette}
 									renderActions={renderActions}
 									scale={scale}
+									selectedAnnotationId={selectedAnnotationId}
 									selectedBlockId={selectedBlockId}
 									showLayoutBoxes={showLayoutBoxes}
 								/>
@@ -663,12 +789,18 @@ function isRenderableBbox(
 }
 
 const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
+	annotationColor,
+	annotationMode,
+	annotations,
+	annotationTool,
 	blocks,
 	colorByBlock,
 	hoveredBlockId,
 	onClearHighlight,
+	onCreateReaderAnnotation,
 	onHoverBlock,
 	onPointDims,
+	onSelectAnnotation,
 	onSelectBlock,
 	onSetHighlight,
 	page,
@@ -676,15 +808,27 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	palette,
 	renderActions,
 	scale,
+	selectedAnnotationId,
 	selectedBlockId,
 	showLayoutBoxes,
 }: {
+	annotationColor: string
+	annotationMode: boolean
+	annotations: ReaderAnnotation[] | undefined
+	annotationTool: ReaderAnnotationTool
 	blocks: Block[] | undefined
 	colorByBlock?: Map<string, string>
 	hoveredBlockId?: string | null
 	onClearHighlight?: (blockId: string) => Promise<void> | void
+	onCreateReaderAnnotation?: (input: {
+		page: number
+		kind: ReaderAnnotationTool
+		color: string
+		body: ReaderAnnotationBody
+	}) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
 	onPointDims?: (dims: { w: number; h: number }) => void
+	onSelectAnnotation?: (annotationId: string | null) => void
 	onSelectBlock?: (block: Block) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	page: number
@@ -692,42 +836,204 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	palette?: PaletteEntry[]
 	renderActions?: (block: Block) => React.ReactNode
 	scale: number
+	selectedAnnotationId?: string | null
 	selectedBlockId?: string | null
 	showLayoutBoxes: boolean
 }) {
 	const wrapRef = useRef<HTMLDivElement | null>(null)
+	const annotationSvgRef = useRef<SVGSVGElement | null>(null)
 	const [pointDims, setPointDims] = useState<{ w: number; h: number } | null>(null)
-	const [canvasRect, setCanvasRect] = useState<{
-		left: number
-		top: number
-		width: number
-		height: number
-	} | null>(null)
+	const [draftBody, setDraftBody] = useState<ReaderAnnotationBody | null>(null)
+	const draftSessionRef = useRef<
+		| {
+				pointerId: number
+				start: ReaderAnnotationPoint
+				current: ReaderAnnotationPoint
+				points: ReaderAnnotationPoint[]
+		  }
+		| null
+	>(null)
 
-	const measureCanvas = useCallback(() => {
-		const wrap = wrapRef.current
-		if (!wrap) return
-		const canvas = wrap.querySelector("canvas")
-		if (!canvas) return
-		const wrapRectBox = wrap.getBoundingClientRect()
-		const canvasRectBox = canvas.getBoundingClientRect()
-		setCanvasRect({
-			left: canvasRectBox.left - wrapRectBox.left,
-			top: canvasRectBox.top - wrapRectBox.top,
-			width: canvasRectBox.width,
-			height: canvasRectBox.height,
-		})
+	const getPagePointFromPointer = useCallback((clientX: number, clientY: number) => {
+		const svg = annotationSvgRef.current
+		if (!svg) return null
+		const rect = svg.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) return null
+		return {
+			x: clampAnnotationUnit((clientX - rect.left) / rect.width),
+			y: clampAnnotationUnit((clientY - rect.top) / rect.height),
+		}
 	}, [])
 
+	const finishDraft = useCallback(
+		async (commit: boolean) => {
+			const session = draftSessionRef.current
+			draftSessionRef.current = null
+			setDraftBody(null)
+			if (!commit || !session || !onCreateReaderAnnotation) return
+
+			// Bare clicks (no real drag) shouldn't litter the page with minimum-
+			// sized shapes. Require a minimum movement before committing.
+			const dragDistance = distanceBetweenPoints(session.start, session.current)
+			const inkTotalDistance =
+				annotationTool === "ink"
+					? session.points.reduce(
+							(sum, point, idx) =>
+								idx === 0 ? 0 : sum + distanceBetweenPoints(session.points[idx - 1]!, point),
+							0,
+						)
+					: 0
+			if (annotationTool === "ink" ? inkTotalDistance < 0.01 : dragDistance < 0.01) return
+
+			const body =
+				annotationTool === "highlight"
+					? { rect: padHighlightRect(rectFromPoints(session.start, session.current)) }
+					: annotationTool === "underline"
+						? { from: session.start, to: session.current }
+						: { points: session.points }
+
+			if (bodyHasNoVisibleExtent(body)) return
+			try {
+				await onCreateReaderAnnotation({
+					page,
+					kind: annotationTool,
+					color: annotationColor,
+					body,
+				})
+			} catch (err) {
+				console.error("Failed to persist reader annotation", err)
+			}
+		},
+		[annotationColor, annotationTool, onCreateReaderAnnotation, page],
+	)
+
 	useEffect(() => {
-		const wrap = wrapRef.current
-		if (!wrap || typeof ResizeObserver === "undefined") return
-		const canvas = wrap.querySelector("canvas")
-		if (!canvas) return
-		const observer = new ResizeObserver(() => measureCanvas())
-		observer.observe(canvas)
-		return () => observer.disconnect()
-	}, [measureCanvas])
+		if (annotationMode) return
+		draftSessionRef.current = null
+		setDraftBody(null)
+	}, [annotationMode])
+
+	// Persisted annotations and the parsed-blocks layer are independent of
+	// draftBody. Memoize so they don't re-render on every pointermove tick
+	// (otherwise large pages stutter while drawing ink/underlines).
+	const annotationNodes = useMemo(
+		() =>
+			(annotations ?? []).map((annotation) => (
+				<ReaderAnnotationShape
+					annotation={annotation}
+					isSelected={selectedAnnotationId === annotation.id}
+					key={annotation.id}
+					onSelect={onSelectAnnotation}
+				/>
+			)),
+		[annotations, selectedAnnotationId, onSelectAnnotation],
+	)
+
+	const blocksLayer = useMemo(
+		() =>
+			blocks?.map((block) => {
+				if (!isRenderableBbox(block.bbox)) return null
+				const isSelected = selectedBlockId === block.blockId
+				const isHovered = hoveredBlockId === block.blockId
+				const highlightColor = colorByBlock?.get(block.blockId) ?? null
+				const showBoxChrome =
+					showLayoutBoxes || isSelected || isHovered || highlightColor !== null
+				const fill = highlightColor ? paletteColorVars(palette ?? [], highlightColor) : null
+				const hasToolbar = palette && (onSetHighlight || onClearHighlight || renderActions)
+
+				return (
+					// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
+					// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
+					<div
+						className="group absolute cursor-pointer"
+						data-block-id={block.blockId}
+						data-block-type={block.type}
+						key={block.blockId}
+						onClick={(e) => {
+							e.stopPropagation()
+							onSelectBlock?.(block)
+						}}
+						onMouseEnter={() => onHoverBlock?.(block.blockId)}
+						onMouseLeave={() => onHoverBlock?.(null)}
+						style={{
+							left: `${block.bbox.x * 100}%`,
+							top: `${block.bbox.y * 100}%`,
+							width: `${block.bbox.w * 100}%`,
+							height: `${block.bbox.h * 100}%`,
+						}}
+						title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
+					>
+						<div
+							className={`absolute inset-0 rounded-[2px] border transition-colors ${
+								!showBoxChrome
+									? "border-transparent bg-transparent"
+									: isSelected
+										? "border-accent-600 bg-accent-600/10 shadow-[0_0_0_1px_var(--color-accent-600)]"
+										: isHovered
+											? "border-accent-600/70 bg-accent-600/8"
+											: "border-accent-600/35 bg-accent-600/3"
+							}`}
+							style={
+								fill
+									? {
+											background: `color-mix(in oklch, ${fill.bg} 38%, transparent)`,
+										}
+									: undefined
+							}
+						/>
+						{hasToolbar ? (
+							// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
+							<div
+								className="-translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+								onClick={(e) => e.stopPropagation()}
+								onKeyDown={(e) => e.stopPropagation()}
+								onMouseDown={(e) => e.stopPropagation()}
+							>
+								{palette && (onSetHighlight || onClearHighlight) ? (
+									<>
+										<BlockHighlightPicker
+											currentColor={highlightColor ?? undefined}
+											onClear={() => void onClearHighlight?.(block.blockId)}
+											onPick={(color) => void onSetHighlight?.(block.blockId, color)}
+											palette={palette}
+											size="sm"
+										/>
+										<div className="mx-0.5 h-4 w-px bg-border-subtle" />
+									</>
+								) : null}
+								<button
+									aria-label="Copy block text"
+									className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+									onClick={(e) => {
+										e.stopPropagation()
+										const text = (block.caption ?? block.text ?? "").trim()
+										if (text) void navigator.clipboard?.writeText(text)
+									}}
+									title="Copy"
+									type="button"
+								>
+									<CopyIcon />
+								</button>
+								{renderActions ? renderActions(block) : null}
+							</div>
+						) : null}
+					</div>
+				)
+			}),
+		[
+			blocks,
+			colorByBlock,
+			hoveredBlockId,
+			onClearHighlight,
+			onHoverBlock,
+			onSelectBlock,
+			onSetHighlight,
+			palette,
+			renderActions,
+			selectedBlockId,
+			showLayoutBoxes,
+		],
+	)
 
 	return (
 		<div
@@ -747,119 +1053,99 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						onPointDims?.(dims)
 					}
 				}}
-				onRenderSuccess={measureCanvas}
 				pageNumber={page}
 				renderAnnotationLayer={false}
-				renderTextLayer={true}
+				// pdf.js's text layer sits above the canvas with pointer-events
+				// enabled so users can select text. In markup mode it would
+				// swallow pointerdowns over text — disable it so the SVG below
+				// receives the drag everywhere on the page.
+				renderTextLayer={!annotationMode}
 				scale={scale}
 			/>
-			{blocks && blocks.length > 0 && pointDims ? (
-				<div
-					className="absolute"
-					style={
-						canvasRect
-							? {
-									left: canvasRect.left,
-									top: canvasRect.top,
-									width: canvasRect.width,
-									height: canvasRect.height,
-								}
-							: {
-									inset: 0,
-									width: pointDims.w * scale,
-									height: pointDims.h * scale,
-								}
-					}
-				>
-					{blocks.map((block) => {
-						if (!isRenderableBbox(block.bbox)) return null
-						const isSelected = selectedBlockId === block.blockId
-						const isHovered = hoveredBlockId === block.blockId
-						const highlightColor = colorByBlock?.get(block.blockId) ?? null
-						const showBoxChrome =
-							showLayoutBoxes || isSelected || isHovered || highlightColor !== null
-						const fill = highlightColor ? paletteColorVars(palette ?? [], highlightColor) : null
-						const hasToolbar = palette && (onSetHighlight || onClearHighlight || renderActions)
-
-						return (
-							// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
-							// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
-							<div
-								className="group absolute cursor-pointer"
-								data-block-id={block.blockId}
-								data-block-type={block.type}
-								key={block.blockId}
-								onClick={(e) => {
-									e.stopPropagation()
-									onSelectBlock?.(block)
-								}}
-								onMouseEnter={() => onHoverBlock?.(block.blockId)}
-								onMouseLeave={() => onHoverBlock?.(null)}
-								style={{
-									left: `${block.bbox.x * 100}%`,
-									top: `${block.bbox.y * 100}%`,
-									width: `${block.bbox.w * 100}%`,
-									height: `${block.bbox.h * 100}%`,
-								}}
-								title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
-							>
-								<div
-									className={`absolute inset-0 rounded-[2px] border transition-colors ${
-										!showBoxChrome
-											? "border-transparent bg-transparent"
-											: isSelected
-												? "border-accent-600 bg-accent-600/10 shadow-[0_0_0_1px_var(--color-accent-600)]"
-												: isHovered
-													? "border-accent-600/70 bg-accent-600/8"
-													: "border-accent-600/35 bg-accent-600/3"
-									}`}
-									style={
-										fill
-											? {
-													background: `color-mix(in oklch, ${fill.bg} 38%, transparent)`,
-												}
-											: undefined
-									}
-								/>
-								{hasToolbar ? (
-									// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
-									<div
-										className="-translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-										onClick={(e) => e.stopPropagation()}
-										onKeyDown={(e) => e.stopPropagation()}
-										onMouseDown={(e) => e.stopPropagation()}
-									>
-										{palette && (onSetHighlight || onClearHighlight) ? (
-											<>
-												<BlockHighlightPicker
-													currentColor={highlightColor ?? undefined}
-													onClear={() => void onClearHighlight?.(block.blockId)}
-													onPick={(color) => void onSetHighlight?.(block.blockId, color)}
-													palette={palette}
-													size="sm"
-												/>
-												<div className="mx-0.5 h-4 w-px bg-border-subtle" />
-											</>
-										) : null}
-										<button
-											aria-label="Copy block text"
-											className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-											onClick={(e) => {
-												e.stopPropagation()
-												const text = (block.caption ?? block.text ?? "").trim()
-												if (text) void navigator.clipboard?.writeText(text)
-											}}
-											title="Copy"
-											type="button"
-										>
-											<CopyIcon />
-										</button>
-										{renderActions ? renderActions(block) : null}
-									</div>
-								) : null}
-							</div>
-						)
-					})}
+			{pointDims ? (
+				// Cover the full page wrapper. Earlier this used a measured
+				// canvasRect, but ResizeObserver bound to the original canvas
+				// missed react-pdf re-creating the canvas on zoom, leaving the
+				// overlay short — drawing/clicks at the page bottom fell
+				// outside the SVG. The page wrapper hugs the canvas exactly,
+				// so inset:0 is both simpler and always correct.
+				<div className="absolute inset-0">
+					<svg
+						aria-label={`Reader annotations page ${page}`}
+						className={`absolute inset-0 z-[1] ${annotationMode ? "pointer-events-auto" : "pointer-events-none"}`}
+						onClick={(event) => {
+							// Only treat clicks on empty page surface as "deselect".
+							// Clicks on existing annotation shapes already handle
+							// selection on their own — falling through here would
+							// race their stopPropagation and clear the selection.
+							if (event.target !== event.currentTarget) return
+							onSelectAnnotation?.(null)
+						}}
+						onPointerCancel={() => void finishDraft(false)}
+						onPointerDown={(event) => {
+							if (!annotationMode || !onCreateReaderAnnotation || event.button !== 0) return
+							// Guard: clicks/drags that started on an annotation shape
+							// must not start a new draft on top of it.
+							if (event.target !== event.currentTarget) return
+							const point = getPagePointFromPointer(event.clientX, event.clientY)
+							if (!point) return
+							draftSessionRef.current = {
+								pointerId: event.pointerId,
+								start: point,
+								current: point,
+								points: [point],
+							}
+							setDraftBody(
+								annotationTool === "highlight"
+									? { rect: padHighlightRect(rectFromPoints(point, point)) }
+									: annotationTool === "underline"
+										? { from: point, to: point }
+										: { points: [point] },
+							)
+							onSelectAnnotation?.(null)
+							event.currentTarget.setPointerCapture(event.pointerId)
+							event.preventDefault()
+						}}
+						onPointerMove={(event) => {
+							const session = draftSessionRef.current
+							if (!session || session.pointerId !== event.pointerId) return
+							const point = getPagePointFromPointer(event.clientX, event.clientY)
+							if (!point) return
+							session.current = point
+							if (annotationTool === "highlight") {
+								setDraftBody({ rect: padHighlightRect(rectFromPoints(session.start, point)) })
+								return
+							}
+							if (annotationTool === "underline") {
+								setDraftBody({ from: session.start, to: point })
+								return
+							}
+							const nextPoints = [...session.points, point]
+							session.points = nextPoints
+							setDraftBody({ points: nextPoints })
+						}}
+						onPointerUp={(event) => {
+							const session = draftSessionRef.current
+							if (!session || session.pointerId !== event.pointerId) return
+							event.currentTarget.releasePointerCapture(event.pointerId)
+							void finishDraft(true)
+						}}
+						ref={annotationSvgRef}
+						viewBox="0 0 1 1"
+						preserveAspectRatio="none"
+					>
+						{annotationNodes}
+						{draftBody ? (
+							<ReaderAnnotationDraft
+								body={draftBody}
+								color={annotationColor}
+								kind={annotationTool}
+							/>
+						) : null}
+					</svg>
+					<div className={`absolute inset-0 z-[2] ${annotationMode ? "pointer-events-none" : ""}`}>
+						{blocksLayer}
+					</div>
 				</div>
 			) : null}
 		</div>
@@ -867,6 +1153,214 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 })
 
 PdfPageWithOverlay.displayName = "PdfPageWithOverlay"
+
+function ReaderAnnotationShape({
+	annotation,
+	isSelected,
+	onSelect,
+}: {
+	annotation: ReaderAnnotation
+	isSelected: boolean
+	onSelect?: (annotationId: string | null) => void
+}) {
+	const highlightStroke = isSelected ? "rgba(15, 23, 42, 0.55)" : "transparent"
+	const stopAndSelect = {
+		onClick: (event: React.MouseEvent) => event.stopPropagation(),
+		onPointerDown: (event: React.PointerEvent) => {
+			event.stopPropagation()
+			event.preventDefault()
+			onSelect?.(annotation.id)
+		},
+	}
+	if (annotation.kind === "highlight" && "rect" in annotation.body) {
+		const { rect } = annotation.body
+		return (
+			<rect
+				fill={annotation.color}
+				fillOpacity={0.28}
+				height={rect.h}
+				rx={0.004}
+				ry={0.004}
+				stroke={highlightStroke}
+				strokeDasharray={isSelected ? "0.012 0.008" : undefined}
+				strokeWidth={isSelected ? 0.0018 : 0.004}
+				width={rect.w}
+				x={rect.x}
+				y={rect.y}
+				{...stopAndSelect}
+			/>
+		)
+	}
+	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
+		const { from, to } = annotation.body
+		// Visible stroke is thin; the second line is a transparent fat hit
+		// target on top so the user can comfortably click to select. Handlers
+		// live on the hit line itself — no <g> wrapper means there's no
+		// bubble-stage where the parent SVG might race the selection.
+		return (
+			<>
+				<line
+					pointerEvents="none"
+					stroke={annotation.color}
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeOpacity={0.95}
+					strokeWidth={isSelected ? 0.01 : 0.006}
+					x1={from.x}
+					x2={to.x}
+					y1={from.y}
+					y2={to.y}
+				/>
+				<line
+					{...stopAndSelect}
+					pointerEvents="stroke"
+					stroke="transparent"
+					strokeWidth={0.03}
+					x1={from.x}
+					x2={to.x}
+					y1={from.y}
+					y2={to.y}
+				/>
+			</>
+		)
+	}
+	if (annotation.kind === "ink" && "points" in annotation.body) {
+		const d = pointsToSvgPath(annotation.body.points)
+		return (
+			<>
+				<path
+					d={d}
+					fill="none"
+					pointerEvents="none"
+					stroke={annotation.color}
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeOpacity={0.95}
+					strokeWidth={isSelected ? 0.012 : 0.0075}
+				/>
+				<path
+					{...stopAndSelect}
+					d={d}
+					fill="none"
+					pointerEvents="stroke"
+					stroke="transparent"
+					strokeWidth={0.03}
+				/>
+			</>
+		)
+	}
+	return null
+}
+
+function ReaderAnnotationDraft({
+	body,
+	color,
+	kind,
+}: {
+	body: ReaderAnnotationBody
+	color: string
+	kind: ReaderAnnotationTool
+}) {
+	if (kind === "highlight" && "rect" in body) {
+		return (
+			<rect
+				fill={color}
+				fillOpacity={0.22}
+				height={body.rect.h}
+				rx={0.004}
+				ry={0.004}
+				stroke={color}
+				strokeDasharray="0.015 0.01"
+				strokeOpacity={0.65}
+				strokeWidth={0.003}
+				width={body.rect.w}
+				x={body.rect.x}
+				y={body.rect.y}
+			/>
+		)
+	}
+	if (kind === "underline" && "from" in body && "to" in body) {
+		return (
+			<line
+				stroke={color}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeOpacity={0.8}
+				strokeWidth={0.006}
+				x1={body.from.x}
+				x2={body.to.x}
+				y1={body.from.y}
+				y2={body.to.y}
+			/>
+		)
+	}
+	if (kind === "ink" && "points" in body) {
+		return (
+			<path
+				d={pointsToSvgPath(body.points)}
+				fill="none"
+				stroke={color}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeOpacity={0.8}
+				strokeWidth={0.0075}
+			/>
+		)
+	}
+	return null
+}
+
+function bodyHasNoVisibleExtent(body: ReaderAnnotationBody) {
+	// Reject only true zero-extent shapes (accidental clicks). Highlights are
+	// intentionally thin bands; we no longer require a vertical drag.
+	if ("rect" in body) return body.rect.w < 0.002 && body.rect.h < 0.002
+	if ("from" in body && "to" in body) return distanceBetweenPoints(body.from, body.to) < 0.005
+	if ("points" in body) {
+		if (body.points.length < 2) return true
+		return body.points.every((point) => distanceBetweenPoints(point, body.points[0]!) < 0.005)
+	}
+	return true
+}
+
+// Highlights track a horizontal text drag, so the raw bbox is often
+// near-zero in one axis. Inflate to a visible band, clamped to the page.
+function padHighlightRect(rect: { x: number; y: number; w: number; h: number }) {
+	const w = Math.max(rect.w, HIGHLIGHT_MIN_W)
+	const h = Math.max(rect.h, HIGHLIGHT_MIN_H)
+	const cx = rect.x + rect.w / 2
+	const cy = rect.y + rect.h / 2
+	const x = Math.max(0, Math.min(1 - w, cx - w / 2))
+	const y = Math.max(0, Math.min(1 - h, cy - h / 2))
+	return { x, y, w, h }
+}
+
+function AnnotationToolButton({
+	active,
+	ariaLabel,
+	icon,
+	onClick,
+}: {
+	active: boolean
+	ariaLabel: string
+	icon: React.ReactNode
+	onClick: () => void
+}) {
+	return (
+		<button
+			aria-label={ariaLabel}
+			aria-pressed={active}
+			className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+				active
+					? "border-accent-600 bg-accent-600 text-text-inverse"
+					: "border-transparent text-text-secondary hover:bg-surface-hover"
+			}`}
+			onClick={onClick}
+			type="button"
+		>
+			{icon}
+		</button>
+	)
+}
 
 function CopyIcon() {
 	return (
@@ -883,6 +1377,104 @@ function CopyIcon() {
 		>
 			<rect height="13" rx="2" width="13" x="9" y="9" />
 			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+		</svg>
+	)
+}
+
+function TrashIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M3 6h18" />
+			<path d="M8 6V4h8v2" />
+			<path d="M19 6l-1 14H6L5 6" />
+			<path d="M10 11v6M14 11v6" />
+		</svg>
+	)
+}
+
+function MarkupIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M4 20h4l10-10-4-4L4 16v4Z" />
+			<path d="m12 6 4 4" />
+		</svg>
+	)
+}
+
+function HighlightToolIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="m6 15 5-5 4 4-5 5H6v-4Z" />
+			<path d="M14 7 17 10" />
+			<path d="M4 20h16" />
+		</svg>
+	)
+}
+
+function UnderlineToolIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M7 5v6a5 5 0 0 0 10 0V5" />
+			<path d="M5 20h14" />
+		</svg>
+	)
+}
+
+function InkToolIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M3 14c3-4 5-4 8 0s5 4 10-2" />
+			<path d="M3 19c2-2 4-2 6 0" />
 		</svg>
 	)
 }

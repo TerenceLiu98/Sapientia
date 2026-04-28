@@ -92,6 +92,13 @@
       "when": 1777332067000,
       "tag": "0012_heavy_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777368819623,
+      "tag": "0013_left_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

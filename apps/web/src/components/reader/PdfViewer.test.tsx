@@ -60,6 +60,12 @@ beforeEach(async () => {
 			return 872
 		},
 	})
+	if (!SVGSVGElement.prototype.setPointerCapture) {
+		SVGSVGElement.prototype.setPointerCapture = vi.fn()
+	}
+	if (!SVGSVGElement.prototype.releasePointerCapture) {
+		SVGSVGElement.prototype.releasePointerCapture = vi.fn()
+	}
 })
 
 afterEach(() => {
@@ -382,5 +388,94 @@ describe("PdfViewer", () => {
 		await screen.findByAltText("A magnified chart")
 		fireEvent.keyDown(window, { key: "Escape" })
 		expect(onClearSelectedBlock).toHaveBeenCalledTimes(1)
+	})
+
+	it("creates a reader annotation in dedicated markup mode without relying on block ids", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onCreateReaderAnnotation = vi.fn().mockResolvedValue(undefined)
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					onCreateReaderAnnotation={onCreateReaderAnnotation}
+					paperId="paper-1"
+					readerAnnotations={[]}
+				/>
+			</Wrapper>,
+		)
+
+		await screen.findByTestId("pdf-page-1")
+		await user.click(screen.getByRole("button", { name: /markup/i }))
+		const layer = await screen.findByLabelText("Reader annotations page 1")
+		vi.spyOn(layer, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 600,
+			bottom: 800,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		fireEvent.pointerDown(layer, { button: 0, clientX: 60, clientY: 80, pointerId: 1 })
+		fireEvent.pointerMove(layer, { clientX: 240, clientY: 200, pointerId: 1 })
+		fireEvent.pointerUp(layer, { clientX: 240, clientY: 200, pointerId: 1 })
+
+		expect(onCreateReaderAnnotation).toHaveBeenCalledTimes(1)
+		expect(onCreateReaderAnnotation.mock.calls[0]?.[0]).toMatchObject({
+			page: 1,
+			kind: "highlight",
+			color: "#f4c84f",
+			body: {
+				rect: { x: 0.1, y: 0.1, h: 0.15 },
+			},
+		})
+		expect(onCreateReaderAnnotation.mock.calls[0]?.[0]?.body.rect.w).toBeCloseTo(0.3)
+	})
+
+	it("renders persisted reader annotations as a separate overlay layer", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					paperId="paper-1"
+					readerAnnotations={[
+						{
+							id: "annotation-1",
+							paperId: "paper-1",
+							workspaceId: "workspace-1",
+							userId: "user-1",
+							page: 1,
+							kind: "highlight",
+							color: "#f4c84f",
+							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						},
+					]}
+				/>
+			</Wrapper>,
+		)
+
+		const layer = await screen.findByLabelText("Reader annotations page 1")
+		expect(layer.querySelector("rect")).not.toBeNull()
 	})
 })
