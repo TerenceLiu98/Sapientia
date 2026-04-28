@@ -82,13 +82,13 @@ sapientia/
 │       ├── seed-minio.sh
 │       └── pg-backup.sh
 ├── docs/
-│   ├── PRD_v0.1.md
+│   ├── PRD.md
 │   ├── DECISIONS.md
 │   ├── DESIGN_TOKENS.md
 │   ├── DEPLOYMENT.md           # K8s deployment runbook
 │   ├── STATUS.md               # Current phase + active tasks
 │   ├── NOTES.md                # Deferred improvements / ideas
-│   └── tasks/                  # Task cards (TASK-NNN.md)
+│   └── tasks/                  # Task cards (TASK-NUM.md)
 ├── CLAUDE.md                   # This file
 ├── README.md
 ├── biome.json                  # Shared linting config

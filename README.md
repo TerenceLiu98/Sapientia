@@ -1,104 +1,157 @@
-# Sapientia
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="demo/logo-dark.svg">
+    <img alt="Sapientia" src="demo/logo-light.svg" width="120" height="120">
+  </picture>
 
-Sapientia is a web app for researchers who want to read papers deeply while AI assists with restraint. Humans read; AI helps only when summoned. PDFs are parsed into addressable blocks, notes cite blocks, and accumulated notes grow into auto-built wiki pages and a knowledge graph.
+  <h1>Sapientia</h1>
 
-For full product context see [docs/PRD_v0.1.md](docs/PRD_v0.1.md). For architecture decisions see [docs/DECISIONS.md](docs/DECISIONS.md). For the agent operations manual see [CLAUDE.md](CLAUDE.md).
+  <p><strong>Read papers deeply. Let AI help only when you ask.</strong></p>
 
-## Repository layout
+  <p>
+    A web reader for researchers. PDFs are parsed into addressable blocks; notes cite blocks; accumulated notes grow into auto-built wiki pages and a knowledge graph. AI is summoned, not assumed.
+  </p>
 
-```
-apps/web/      React 19 + Vite + TypeScript frontend
-apps/api/      Hono backend on Bun (config, logger, S3 client, /health)
-packages/
-  shared/      Zod schemas, types, prompts shared across the stack
-  db/          Drizzle schema, client, and migrations
-infra/
-  docker/      docker-compose for local dev (Postgres + Redis + MinIO)
-  k8s/         Kustomize manifests (filled in deployment task)
-docs/          PRD, ADRs, deployment runbook, design tokens, task cards
-```
+  <p>
+    <a href="docs/PRD_v0.1.md">Product&nbsp;PRD</a> ·
+    <a href="docs/DECISIONS.md">Architecture&nbsp;decisions</a> ·
+    <a href="docs/STATUS.md">Roadmap</a> ·
+    <a href="CLAUDE.md">Agent&nbsp;manual</a>
+  </p>
+</div>
 
-## Prerequisites
+---
 
-- Node.js ≥ 20 with [Corepack](https://nodejs.org/api/corepack.html) enabled — `corepack enable && corepack prepare pnpm@latest --activate`
-- [Bun](https://bun.sh) ≥ 1.2 — `curl -fsSL https://bun.sh/install | bash`
-- Docker + Docker Compose. On macOS: [colima](https://github.com/abiosoft/colima) or OrbStack works fine — `brew install colima docker docker-compose && colima start`
+## Why
+
+Most "AI for papers" tools answer for you. Sapientia is built for the opposite habit: you read, and the assistant stays out of the way until you summon it. When you do summon it, every claim is grounded in addressable blocks of the paper you're reading, citations stay verifiable, and the notes you write become the knowledge base — not a chat log.
+
+## Features
+
+- **Block-addressable PDFs.** Papers are parsed by [MinerU](https://mineru.net) into stable, content-hashed blocks. Every figure, equation, paragraph, and table has its own ID — `paperId#blockId` — that survives re-parse.
+- **Side-by-side reading.** PDF and parsed-Markdown views of the same paper, kept in sync. Click a block in either pane to focus it in the other; both views remember scroll on toggle.
+- **Citations as first-class data.** Notes are written in BlockNote and embed `@[block N]` chips that link to the source block. Click a chip to jump to the exact figure or paragraph it cites.
+- **Highlights with semantics.** A built-in five-color palette (Questioning / Important / Original / Pending / Conclusion) plus user-defined palettes. Highlights persist per-block, render in both views, and tag the citation chip with the same color.
+- **Reader markup.** Highlight, underline, and freehand ink on the PDF itself — overlay-only, your original PDF is never modified.
+- **Restraint-first AI.** v0.1 ships a single-turn "ask about this paper" agent with explicit context layers. No tool-calling, no auto-summoning, no workspace-wide context bleed.
+- **Self-hostable.** Bring your own MinerU token and Anthropic / OpenAI key. Postgres + Redis + MinIO run in your cluster.
+
+## Screenshots
+
+> Drop `.png`s into [`demo/`](demo/) and reference them here as your reading flow stabilizes. The block-level highlight palette, the three-pane note editor, and the wiki-page knowledge graph are the obvious shots.
 
 ## Quick start
 
 ```bash
-pnpm install
+# Toolchain
+corepack enable && corepack prepare pnpm@latest --activate
+curl -fsSL https://bun.sh/install | bash    # Bun ≥ 1.2
+brew install colima docker docker-compose && colima start   # macOS
 
-# Copy env templates (real values live outside git)
+# Project
+pnpm install
 cp apps/api/.env.example apps/api/.env
 cp packages/db/.env.example packages/db/.env
 
-# Start Postgres + Redis + MinIO (port 5432, 6379, 9000+9001)
-pnpm infra:up
+pnpm infra:up        # Postgres :5432, Redis :6379, MinIO :9000/:9001
+pnpm db:migrate      # better-auth + app schema
 
-# Apply migrations (creates better-auth tables in Phase 1)
-pnpm db:migrate
-
-# Backend on http://localhost:3000 → `curl :3000/health`
-pnpm dev:api
-
-# Frontend on http://localhost:5173 → sign-in / sign-up / protected shell
-pnpm dev:web
+pnpm dev:api         # http://localhost:3000  →  /health
+pnpm dev:web         # http://localhost:5173  →  sign in
+pnpm worker:dev      # BullMQ worker for parse + enrich
 ```
 
-`/health` reports the status of every dependency. Returns `200 {status:"ok",db:"connected",redis:"connected",s3:"connected"}` when everything is up; `503 {status:"degraded",...}` if any service is unreachable.
+`/health` returns `200 {status:"ok",db:"connected",redis:"connected",s3:"connected"}` when every dependency is up, `503 {status:"degraded",...}` otherwise.
 
-After signing in: configure your MinerU + LLM API keys in **/settings**. Uploaded PDFs are queued for parsing by the worker (see `pnpm worker:dev`); progress shows in the library badge as `parsing N/M`. Click into a parsed paper to see the side-by-side PDF + blocks panel; click "New note for this paper" for the three-pane reading + writing layout, with a Cite button on every block and a `(N)` badge on blocks that any of your notes already reference.
+After signing in, configure your **MinerU token** and **LLM API key** in `/settings`. Uploaded PDFs queue for parsing; progress shows in the library badge as `parsing N/M`. Open a parsed paper for the side-by-side reader; click "New note" for the three-pane reading + writing layout.
+
+## Tech stack
+
+| Layer | Stack |
+| --- | --- |
+| Frontend | React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui · Zustand · TanStack Query/Router · BlockNote · PDF.js · sigma.js |
+| Backend | Bun ≥ 1.2 · Hono · Drizzle ORM · Zod · BullMQ · better-auth · AWS SDK v3 |
+| Data | PostgreSQL 16 + pgvector · Redis 7 · MinIO |
+| External | MinerU (PDF parsing) · Anthropic or OpenAI (LLM) |
+| Tooling | pnpm workspaces · Biome · vitest · Playwright · testcontainers-node · Docker Compose · Kustomize |
+
+Stack choices for v0.1 are locked. See [`docs/DECISIONS.md`](docs/DECISIONS.md) for the rationale behind each call.
+
+## Repository layout
+
+```
+apps/
+  web/                  React frontend (Vite)
+  api/                  Hono backend (Bun) — routes, services, BullMQ workers
+packages/
+  shared/               Zod schemas, types, prompts shared across the stack
+  db/                   Drizzle schema, migrations, client
+infra/
+  docker/               docker-compose for Postgres + Redis + MinIO
+  k8s/                  Kustomize manifests (base + dev/prod overlays)
+docs/                   PRD, ADRs, deployment runbook, design tokens, task cards
+demo/                   Logo + landing assets
+```
 
 ## Common scripts
 
-| Command             | What it does                                                                  |
-| ------------------- | ----------------------------------------------------------------------------- |
-| `pnpm dev:web`      | Vite dev server                                                               |
-| `pnpm dev:api`      | `bun --hot` Hono server                                                       |
-| `pnpm worker:dev`   | BullMQ worker (paper parsing). Run alongside `dev:api`                        |
-| `pnpm infra:up`     | `docker compose up -d` for Postgres + Redis + MinIO                           |
-| `pnpm infra:down`   | Stop the dev stack                                                            |
-| `pnpm infra:logs`   | Tail compose logs                                                             |
-| `pnpm db:generate`  | Drizzle Kit — diff schema files to a new migration                            |
-| `pnpm db:migrate`   | Apply migrations against `DATABASE_URL`                                       |
-| `pnpm db:studio`    | Drizzle Studio (web UI on a free port)                                        |
-| `pnpm typecheck`    | TypeScript across all packages                                                |
-| `pnpm run lint`     | `biome check .` (use `pnpm run` because pnpm 10 reserves `pnpm lint`)         |
-| `pnpm format`       | `biome format --write .`                                                      |
-| `pnpm build`        | Build all packages                                                            |
-| `pnpm test`         | Run all package test scripts (vitest, with testcontainers for integration)   |
+| Command | What it does |
+| --- | --- |
+| `pnpm dev:web` | Vite dev server |
+| `pnpm dev:api` | `bun --hot` Hono server |
+| `pnpm worker:dev` | BullMQ worker (paper parse + enrich) |
+| `pnpm infra:up` / `infra:down` / `infra:logs` | Docker dev stack |
+| `pnpm db:generate` | Drizzle Kit — diff schema files into a new migration |
+| `pnpm db:migrate` | Apply migrations against `DATABASE_URL` |
+| `pnpm db:studio` | Drizzle Studio web UI |
+| `pnpm typecheck` | TypeScript across the workspace |
+| `pnpm run lint` | `biome check .` (use `pnpm run` — pnpm 10 reserves `pnpm lint`) |
+| `pnpm format` | `biome format --write .` |
+| `pnpm build` | Build all packages |
+| `pnpm test` | Vitest across the workspace (testcontainers for backend integration) |
 
 ## Tests
 
-`pnpm test` runs vitest across the workspace. `apps/web` contains component tests for the auth flow; `apps/api` contains integration tests backed by `testcontainers-node`, which needs a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` before running.
+`pnpm test` runs vitest across the workspace. The web tests cover auth flow + reader components; the API tests use [`testcontainers-node`](https://node.testcontainers.org) for ephemeral Postgres + Redis + MinIO and need a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` first.
+
+## Authentication
+
+Email/password works out of the box with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL=http://localhost:3000`, and `FRONTEND_ORIGIN=http://localhost:5173` set in `apps/api/.env`. OAuth is optional in local development.
+
+<details>
+<summary><strong>Google OAuth</strong></summary>
+
+1. Visit [Google Cloud Console](https://console.cloud.google.com/) and create a project.
+2. Enable the Google Sign-In APIs.
+3. Create an **OAuth 2.0 Web application** client.
+4. Add redirect URI `http://localhost:3000/api/auth/callback/google`.
+5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `apps/api/.env`.
+</details>
+
+<details>
+<summary><strong>GitHub OAuth</strong></summary>
+
+1. Visit [GitHub Developer Settings](https://github.com/settings/developers) → **New OAuth App**.
+2. Authorization callback URL: `http://localhost:3000/api/auth/callback/github`.
+3. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `apps/api/.env`.
+</details>
+
+If you set one value of an OAuth provider pair you must set the other — config validation rejects partial provider configuration on boot.
 
 ## Frontend notes
 
-The web app uses TanStack Router with the Vite router plugin. File-based routes live in `apps/web/src/routes`, and `apps/web/src/routeTree.gen.ts` is generated automatically during build/dev and should be committed when it changes.
+The web app uses TanStack Router with the Vite router plugin. File-based routes live in `apps/web/src/routes`; `apps/web/src/routeTree.gen.ts` is generated automatically during build/dev and should be committed when it changes.
 
-In local development, Vite proxies `/api/*` from `http://localhost:5173` to `http://localhost:3000`, so better-auth stays same-origin from the browser's perspective and auth cookies work without extra client configuration.
+In dev, Vite proxies `/api/*` from `:5173` to `:3000`, so better-auth stays same-origin from the browser's perspective and auth cookies work without extra client configuration.
 
-## OAuth setup for local development
+## Project status
 
-OAuth is optional in v0.1 local development. Email/password auth works with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `FRONTEND_ORIGIN` set. For the default local setup, use `BETTER_AUTH_URL=http://localhost:3000` and `FRONTEND_ORIGIN=http://localhost:5173`.
+Phase 1 — **Reading Foundation**. Sign-up → upload PDF → parse via MinerU → block-addressable reader. See [`docs/STATUS.md`](docs/STATUS.md) for the live phase + task list.
 
-For Google OAuth:
+## Contributing
 
-1. Go to `https://console.cloud.google.com/`.
-2. Create a project or select an existing one.
-3. Enable the Google Sign-In APIs required by your project setup.
-4. Create an OAuth 2.0 client with application type `Web application`.
-5. Add the redirect URI `http://localhost:3000/api/auth/callback/google`.
-6. Copy the client ID and secret into `apps/api/.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+Sapientia is in heavy development. Open an issue before significant changes; the [`CLAUDE.md`](CLAUDE.md) file at the repo root is the operations manual that human + AI contributors share — it documents the locked tech stack, naming conventions, and "do not" rules.
 
-For GitHub OAuth:
+## License
 
-1. Go to `https://github.com/settings/developers`.
-2. Create a new OAuth App.
-3. Set the authorization callback URL to `http://localhost:3000/api/auth/callback/github`.
-4. Copy the client ID and secret into `apps/api/.env` as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
-
-If you set one value from an OAuth provider pair, you must set the other too. The API config validation rejects partial provider configuration on boot.
-
-Current phase + status: [docs/STATUS.md](docs/STATUS.md).
+Not yet decided. Treat as source-available for now; add an explicit license before any external use.
