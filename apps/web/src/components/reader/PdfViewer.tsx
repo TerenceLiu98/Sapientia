@@ -18,7 +18,6 @@ import {
 	READER_ANNOTATION_COLORS,
 	clampUnit as clampAnnotationUnit,
 	distanceBetweenPoints,
-	pointsToSvgPath,
 	rectFromPoints,
 	type ReaderAnnotationBody,
 	type ReaderAnnotationPoint,
@@ -843,6 +842,10 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	const wrapRef = useRef<HTMLDivElement | null>(null)
 	const annotationSvgRef = useRef<SVGSVGElement | null>(null)
 	const [pointDims, setPointDims] = useState<{ w: number; h: number } | null>(null)
+	// Real, measured CSS dimensions of the rendered canvas. We use these
+	// for the SVG and viewBox so coordinates are in screen pixels and
+	// strokes don't get distorted by viewBox stretching.
+	const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null)
 	const [draftBody, setDraftBody] = useState<ReaderAnnotationBody | null>(null)
 	const draftSessionRef = useRef<
 		| {
@@ -865,12 +868,19 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		}
 	}, [])
 
+	// While we await the POST + refetch, keep the released shape visible
+	// so the user doesn't see a blank gap between "released draft" and
+	// "persisted annotation appearing in the list".
+	const pendingPersistRef = useRef(false)
+
 	const finishDraft = useCallback(
 		async (commit: boolean) => {
 			const session = draftSessionRef.current
 			draftSessionRef.current = null
-			setDraftBody(null)
-			if (!commit || !session || !onCreateReaderAnnotation) return
+			if (!commit || !session || !onCreateReaderAnnotation) {
+				setDraftBody(null)
+				return
+			}
 
 			// Bare clicks (no real drag) shouldn't litter the page with minimum-
 			// sized shapes. Require a minimum movement before committing.
@@ -883,7 +893,10 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 							0,
 						)
 					: 0
-			if (annotationTool === "ink" ? inkTotalDistance < 0.01 : dragDistance < 0.01) return
+			if (annotationTool === "ink" ? inkTotalDistance < 0.01 : dragDistance < 0.01) {
+				setDraftBody(null)
+				return
+			}
 
 			const body =
 				annotationTool === "highlight"
@@ -892,7 +905,16 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						? { from: session.start, to: session.current }
 						: { points: session.points }
 
-			if (bodyHasNoVisibleExtent(body)) return
+			if (bodyHasNoVisibleExtent(body)) {
+				setDraftBody(null)
+				return
+			}
+
+			// Hold the draft on screen until the persisted annotation lands
+			// in the annotations array. The useEffect on `annotations` clears
+			// it then, giving a seamless handoff (no flash).
+			pendingPersistRef.current = true
+			setDraftBody(body)
 			try {
 				await onCreateReaderAnnotation({
 					page,
@@ -902,10 +924,20 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				})
 			} catch (err) {
 				console.error("Failed to persist reader annotation", err)
+				pendingPersistRef.current = false
+				setDraftBody(null)
 			}
 		},
 		[annotationColor, annotationTool, onCreateReaderAnnotation, page],
 	)
+
+	useEffect(() => {
+		if (!pendingPersistRef.current) return
+		// If a new draw is already in progress, don't clear it.
+		if (draftSessionRef.current) return
+		pendingPersistRef.current = false
+		setDraftBody(null)
+	}, [annotations])
 
 	useEffect(() => {
 		if (annotationMode) return
@@ -913,20 +945,63 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		setDraftBody(null)
 	}, [annotationMode])
 
+	// Track the real rendered canvas dimensions. ResizeObserver picks up
+	// zoom changes and react-pdf swapping the canvas element. We feed
+	// these into the SVG's viewBox so 1 SVG unit == 1 CSS pixel and
+	// strokes never get distorted by non-uniform viewBox stretching.
+	useEffect(() => {
+		const wrap = wrapRef.current
+		if (!wrap || typeof ResizeObserver === "undefined") return
+		const update = () => {
+			const canvas = wrap.querySelector("canvas")
+			if (!canvas) return
+			const r = canvas.getBoundingClientRect()
+			if (r.width <= 0 || r.height <= 0) return
+			setCanvasSize((prev) =>
+				prev && prev.w === r.width && prev.h === r.height ? prev : { w: r.width, h: r.height },
+			)
+		}
+		update()
+		const observer = new ResizeObserver(update)
+		observer.observe(wrap)
+		const canvas = wrap.querySelector("canvas")
+		if (canvas) observer.observe(canvas)
+		return () => observer.disconnect()
+		// scale + pointDims drive canvas size, so re-bind when they change
+		// (the canvas element itself may be swapped out by react-pdf).
+	}, [scale, pointDims])
+
+	// Use measured canvas size when available; fall back to pointDims*scale
+	// for the first frame before the ResizeObserver has reported.
+	const displayW = canvasSize?.w ?? (pointDims ? pointDims.w * scale : 0)
+	const displayH = canvasSize?.h ?? (pointDims ? pointDims.h * scale : 0)
+
 	// Persisted annotations and the parsed-blocks layer are independent of
 	// draftBody. Memoize so they don't re-render on every pointermove tick
-	// (otherwise large pages stutter while drawing ink/underlines).
+	// (otherwise large pages stutter while drawing ink/underlines). Note
+	// that selection state no longer affects shape props — the outline is
+	// painted as a separate sibling so the shape itself never repaints on
+	// select/deselect (matches pdf.js's editor pattern).
 	const annotationNodes = useMemo(
 		() =>
 			(annotations ?? []).map((annotation) => (
 				<ReaderAnnotationShape
 					annotation={annotation}
-					isSelected={selectedAnnotationId === annotation.id}
+					H={displayH}
 					key={annotation.id}
 					onSelect={onSelectAnnotation}
+					W={displayW}
 				/>
 			)),
-		[annotations, selectedAnnotationId, onSelectAnnotation],
+		[annotations, displayH, displayW, onSelectAnnotation],
+	)
+
+	const selectedAnnotation = useMemo(
+		() =>
+			selectedAnnotationId
+				? (annotations ?? []).find((a) => a.id === selectedAnnotationId) ?? null
+				: null,
+		[annotations, selectedAnnotationId],
 	)
 
 	const blocksLayer = useMemo(
@@ -1062,84 +1137,103 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				renderTextLayer={!annotationMode}
 				scale={scale}
 			/>
-			{pointDims ? (
-				// Cover the full page wrapper. Earlier this used a measured
-				// canvasRect, but ResizeObserver bound to the original canvas
-				// missed react-pdf re-creating the canvas on zoom, leaving the
-				// overlay short — drawing/clicks at the page bottom fell
-				// outside the SVG. The page wrapper hugs the canvas exactly,
-				// so inset:0 is both simpler and always correct.
-				<div className="absolute inset-0">
+			{pointDims && displayW > 0 && displayH > 0 ? (
+				// Overlay sized to the real measured canvas dimensions
+				// (canvasSize) so the SVG always covers exactly the canvas
+				// — no underflow at the page bottom, no overflow.
+				<div
+					className="absolute left-0 top-0"
+					style={{ width: `${displayW}px`, height: `${displayH}px` }}
+				>
 					<svg
 						aria-label={`Reader annotations page ${page}`}
 						className={`absolute inset-0 z-[1] ${annotationMode ? "pointer-events-auto" : "pointer-events-none"}`}
-						onClick={(event) => {
-							// Only treat clicks on empty page surface as "deselect".
-							// Clicks on existing annotation shapes already handle
-							// selection on their own — falling through here would
-							// race their stopPropagation and clear the selection.
-							if (event.target !== event.currentTarget) return
-							onSelectAnnotation?.(null)
-						}}
-						onPointerCancel={() => void finishDraft(false)}
-						onPointerDown={(event) => {
-							if (!annotationMode || !onCreateReaderAnnotation || event.button !== 0) return
-							// Guard: clicks/drags that started on an annotation shape
-							// must not start a new draft on top of it.
-							if (event.target !== event.currentTarget) return
-							const point = getPagePointFromPointer(event.clientX, event.clientY)
-							if (!point) return
-							draftSessionRef.current = {
-								pointerId: event.pointerId,
-								start: point,
-								current: point,
-								points: [point],
-							}
-							setDraftBody(
-								annotationTool === "highlight"
-									? { rect: padHighlightRect(rectFromPoints(point, point)) }
-									: annotationTool === "underline"
-										? { from: point, to: point }
-										: { points: [point] },
-							)
-							onSelectAnnotation?.(null)
-							event.currentTarget.setPointerCapture(event.pointerId)
-							event.preventDefault()
-						}}
-						onPointerMove={(event) => {
-							const session = draftSessionRef.current
-							if (!session || session.pointerId !== event.pointerId) return
-							const point = getPagePointFromPointer(event.clientX, event.clientY)
-							if (!point) return
-							session.current = point
-							if (annotationTool === "highlight") {
-								setDraftBody({ rect: padHighlightRect(rectFromPoints(session.start, point)) })
-								return
-							}
-							if (annotationTool === "underline") {
-								setDraftBody({ from: session.start, to: point })
-								return
-							}
-							const nextPoints = [...session.points, point]
-							session.points = nextPoints
-							setDraftBody({ points: nextPoints })
-						}}
-						onPointerUp={(event) => {
-							const session = draftSessionRef.current
-							if (!session || session.pointerId !== event.pointerId) return
-							event.currentTarget.releasePointerCapture(event.pointerId)
-							void finishDraft(true)
-						}}
+						height={displayH}
 						ref={annotationSvgRef}
-						viewBox="0 0 1 1"
-						preserveAspectRatio="none"
+						viewBox={`0 0 ${displayW} ${displayH}`}
+						width={displayW}
 					>
+						{/* pdf.js-style layering: a dedicated transparent backdrop
+						    rect at the bottom captures "draw new" pointerdowns.
+						    Existing annotation shapes paint above and take hit
+						    priority because they sit higher in DOM order — no
+						    stopPropagation race. The SVG element itself has no
+						    pointer handlers. */}
+						{annotationMode && onCreateReaderAnnotation ? (
+							<rect
+								aria-label={`Reader annotations canvas page ${page}`}
+								fill="transparent"
+								height={displayH}
+								onClick={() => onSelectAnnotation?.(null)}
+								onPointerCancel={() => void finishDraft(false)}
+								onPointerDown={(event) => {
+									if (event.button !== 0) return
+									const point = getPagePointFromPointer(event.clientX, event.clientY)
+									if (!point) return
+									draftSessionRef.current = {
+										pointerId: event.pointerId,
+										start: point,
+										current: point,
+										points: [point],
+									}
+									setDraftBody(
+										annotationTool === "highlight"
+											? { rect: padHighlightRect(rectFromPoints(point, point)) }
+											: annotationTool === "underline"
+												? { from: point, to: point }
+												: { points: [point] },
+									)
+									onSelectAnnotation?.(null)
+									event.currentTarget.setPointerCapture(event.pointerId)
+									event.preventDefault()
+								}}
+								onPointerMove={(event) => {
+									const session = draftSessionRef.current
+									if (!session || session.pointerId !== event.pointerId) return
+									const point = getPagePointFromPointer(event.clientX, event.clientY)
+									if (!point) return
+									session.current = point
+									if (annotationTool === "highlight") {
+										setDraftBody({
+											rect: padHighlightRect(rectFromPoints(session.start, point)),
+										})
+										return
+									}
+									if (annotationTool === "underline") {
+										setDraftBody({ from: session.start, to: point })
+										return
+									}
+									const nextPoints = [...session.points, point]
+									session.points = nextPoints
+									setDraftBody({ points: nextPoints })
+								}}
+								onPointerUp={(event) => {
+									const session = draftSessionRef.current
+									if (!session || session.pointerId !== event.pointerId) return
+									event.currentTarget.releasePointerCapture(event.pointerId)
+									void finishDraft(true)
+								}}
+								pointerEvents="all"
+								width={displayW}
+								x={0}
+								y={0}
+							/>
+						) : null}
 						{annotationNodes}
+						{selectedAnnotation ? (
+							<ReaderAnnotationSelectionOutline
+								annotation={selectedAnnotation}
+								H={displayH}
+								W={displayW}
+							/>
+						) : null}
 						{draftBody ? (
 							<ReaderAnnotationDraft
 								body={draftBody}
 								color={annotationColor}
+								H={displayH}
 								kind={annotationTool}
+								W={displayW}
 							/>
 						) : null}
 					</svg>
@@ -1156,14 +1250,18 @@ PdfPageWithOverlay.displayName = "PdfPageWithOverlay"
 
 function ReaderAnnotationShape({
 	annotation,
-	isSelected,
+	H,
 	onSelect,
+	W,
 }: {
 	annotation: ReaderAnnotation
-	isSelected: boolean
+	H: number
 	onSelect?: (annotationId: string | null) => void
+	W: number
 }) {
-	const highlightStroke = isSelected ? "rgba(15, 23, 42, 0.55)" : "transparent"
+	// SVG viewBox is "0 0 W H" (pixel coordinates). 0..1-stored values
+	// are scaled by W or H so 1 SVG unit == 1 CSS pixel — strokes render
+	// at consistent pixel widths regardless of line direction.
 	const stopAndSelect = {
 		onClick: (event: React.MouseEvent) => event.stopPropagation(),
 		onPointerDown: (event: React.PointerEvent) => {
@@ -1178,25 +1276,18 @@ function ReaderAnnotationShape({
 			<rect
 				fill={annotation.color}
 				fillOpacity={0.28}
-				height={rect.h}
-				rx={0.004}
-				ry={0.004}
-				stroke={highlightStroke}
-				strokeDasharray={isSelected ? "0.012 0.008" : undefined}
-				strokeWidth={isSelected ? 0.0018 : 0.004}
-				width={rect.w}
-				x={rect.x}
-				y={rect.y}
+				height={rect.h * H}
+				rx={3}
+				ry={3}
+				width={rect.w * W}
+				x={rect.x * W}
+				y={rect.y * H}
 				{...stopAndSelect}
 			/>
 		)
 	}
 	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
 		const { from, to } = annotation.body
-		// Visible stroke is thin; the second line is a transparent fat hit
-		// target on top so the user can comfortably click to select. Handlers
-		// live on the hit line itself — no <g> wrapper means there's no
-		// bubble-stage where the parent SVG might race the selection.
 		return (
 			<>
 				<line
@@ -1205,27 +1296,27 @@ function ReaderAnnotationShape({
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					strokeOpacity={0.95}
-					strokeWidth={isSelected ? 0.01 : 0.006}
-					x1={from.x}
-					x2={to.x}
-					y1={from.y}
-					y2={to.y}
+					strokeWidth={3}
+					x1={from.x * W}
+					x2={to.x * W}
+					y1={from.y * H}
+					y2={to.y * H}
 				/>
 				<line
 					{...stopAndSelect}
 					pointerEvents="stroke"
 					stroke="transparent"
-					strokeWidth={0.03}
-					x1={from.x}
-					x2={to.x}
-					y1={from.y}
-					y2={to.y}
+					strokeWidth={16}
+					x1={from.x * W}
+					x2={to.x * W}
+					y1={from.y * H}
+					y2={to.y * H}
 				/>
 			</>
 		)
 	}
 	if (annotation.kind === "ink" && "points" in annotation.body) {
-		const d = pointsToSvgPath(annotation.body.points)
+		const d = pointsToScaledPath(annotation.body.points, W, H)
 		return (
 			<>
 				<path
@@ -1236,7 +1327,7 @@ function ReaderAnnotationShape({
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					strokeOpacity={0.95}
-					strokeWidth={isSelected ? 0.012 : 0.0075}
+					strokeWidth={3.5}
 				/>
 				<path
 					{...stopAndSelect}
@@ -1244,7 +1335,7 @@ function ReaderAnnotationShape({
 					fill="none"
 					pointerEvents="stroke"
 					stroke="transparent"
-					strokeWidth={0.03}
+					strokeWidth={16}
 				/>
 			</>
 		)
@@ -1252,30 +1343,98 @@ function ReaderAnnotationShape({
 	return null
 }
 
+function pointsToScaledPath(points: ReaderAnnotationPoint[], W: number, H: number) {
+	if (points.length === 0) return ""
+	return points
+		.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`)
+		.join(" ")
+}
+
+function annotationBoundingBox(annotation: ReaderAnnotation) {
+	if (annotation.kind === "highlight" && "rect" in annotation.body) {
+		return annotation.body.rect
+	}
+	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
+		const { from, to } = annotation.body
+		return {
+			x: Math.min(from.x, to.x),
+			y: Math.min(from.y, to.y),
+			w: Math.abs(to.x - from.x),
+			h: Math.abs(to.y - from.y),
+		}
+	}
+	if (annotation.kind === "ink" && "points" in annotation.body && annotation.body.points.length) {
+		const xs = annotation.body.points.map((p) => p.x)
+		const ys = annotation.body.points.map((p) => p.y)
+		const x = Math.min(...xs)
+		const y = Math.min(...ys)
+		return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
+	}
+	return null
+}
+
+function ReaderAnnotationSelectionOutline({
+	annotation,
+	H,
+	W,
+}: {
+	annotation: ReaderAnnotation
+	H: number
+	W: number
+}) {
+	const bbox = annotationBoundingBox(annotation)
+	if (!bbox) return null
+	const padX = 0.006
+	const padY = 0.008
+	const x = Math.max(0, bbox.x - padX) * W
+	const y = Math.max(0, bbox.y - padY) * H
+	const w = Math.min(1 - Math.max(0, bbox.x - padX), bbox.w + padX * 2) * W
+	const h = Math.min(1 - Math.max(0, bbox.y - padY), bbox.h + padY * 2) * H
+	return (
+		<rect
+			fill="none"
+			height={h}
+			pointerEvents="none"
+			rx={3}
+			ry={3}
+			stroke="rgba(15, 23, 42, 0.55)"
+			strokeDasharray="6 4"
+			strokeWidth={1.5}
+			width={w}
+			x={x}
+			y={y}
+		/>
+	)
+}
+
 function ReaderAnnotationDraft({
 	body,
 	color,
+	H,
 	kind,
+	W,
 }: {
 	body: ReaderAnnotationBody
 	color: string
+	H: number
 	kind: ReaderAnnotationTool
+	W: number
 }) {
 	if (kind === "highlight" && "rect" in body) {
 		return (
 			<rect
 				fill={color}
 				fillOpacity={0.22}
-				height={body.rect.h}
-				rx={0.004}
-				ry={0.004}
+				height={body.rect.h * H}
+				rx={3}
+				ry={3}
 				stroke={color}
-				strokeDasharray="0.015 0.01"
+				strokeDasharray="8 5"
 				strokeOpacity={0.65}
-				strokeWidth={0.003}
-				width={body.rect.w}
-				x={body.rect.x}
-				y={body.rect.y}
+				strokeWidth={1.2}
+				width={body.rect.w * W}
+				x={body.rect.x * W}
+				y={body.rect.y * H}
 			/>
 		)
 	}
@@ -1286,24 +1445,24 @@ function ReaderAnnotationDraft({
 				strokeLinecap="round"
 				strokeLinejoin="round"
 				strokeOpacity={0.8}
-				strokeWidth={0.006}
-				x1={body.from.x}
-				x2={body.to.x}
-				y1={body.from.y}
-				y2={body.to.y}
+				strokeWidth={3}
+				x1={body.from.x * W}
+				x2={body.to.x * W}
+				y1={body.from.y * H}
+				y2={body.to.y * H}
 			/>
 		)
 	}
 	if (kind === "ink" && "points" in body) {
 		return (
 			<path
-				d={pointsToSvgPath(body.points)}
+				d={pointsToScaledPath(body.points, W, H)}
 				fill="none"
 				stroke={color}
 				strokeLinecap="round"
 				strokeLinejoin="round"
 				strokeOpacity={0.8}
-				strokeWidth={0.0075}
+				strokeWidth={3.5}
 			/>
 		)
 	}
@@ -1324,7 +1483,10 @@ function bodyHasNoVisibleExtent(body: ReaderAnnotationBody) {
 
 // Highlights track a horizontal text drag, so the raw bbox is often
 // near-zero in one axis. Inflate to a visible band, clamped to the page.
+// Already-large rects pass through unchanged so we don't introduce
+// floating-point drift on a normal drag.
 function padHighlightRect(rect: { x: number; y: number; w: number; h: number }) {
+	if (rect.w >= HIGHLIGHT_MIN_W && rect.h >= HIGHLIGHT_MIN_H) return rect
 	const w = Math.max(rect.w, HIGHLIGHT_MIN_W)
 	const h = Math.max(rect.h, HIGHLIGHT_MIN_H)
 	const cx = rect.x + rect.w / 2

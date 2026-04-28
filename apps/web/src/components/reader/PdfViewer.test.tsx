@@ -60,11 +60,16 @@ beforeEach(async () => {
 			return 872
 		},
 	})
-	if (!SVGSVGElement.prototype.setPointerCapture) {
-		SVGSVGElement.prototype.setPointerCapture = vi.fn()
-	}
-	if (!SVGSVGElement.prototype.releasePointerCapture) {
-		SVGSVGElement.prototype.releasePointerCapture = vi.fn()
+	// Pointer-capture API isn't implemented for SVG nodes in JSDOM. The
+	// drawing surface is a <rect> (SVGRectElement) and the parent <svg>
+	// is SVGSVGElement — stub both prototypes.
+	for (const proto of [SVGSVGElement.prototype, SVGElement.prototype]) {
+		if (!(proto as { setPointerCapture?: unknown }).setPointerCapture) {
+			;(proto as { setPointerCapture: (id: number) => void }).setPointerCapture = vi.fn()
+		}
+		if (!(proto as { releasePointerCapture?: unknown }).releasePointerCapture) {
+			;(proto as { releasePointerCapture: (id: number) => void }).releasePointerCapture = vi.fn()
+		}
 	}
 })
 
@@ -415,6 +420,9 @@ describe("PdfViewer", () => {
 		await screen.findByTestId("pdf-page-1")
 		await user.click(screen.getByRole("button", { name: /markup/i }))
 		const layer = await screen.findByLabelText("Reader annotations page 1")
+		// Coordinate math reads the SVG's bounding rect via the ref, so
+		// keep mocking that, even though pointer events now fire on the
+		// backdrop rect inside the SVG.
 		vi.spyOn(layer, "getBoundingClientRect").mockReturnValue({
 			x: 0,
 			y: 0,
@@ -426,10 +434,11 @@ describe("PdfViewer", () => {
 			height: 800,
 			toJSON: () => ({}),
 		} as DOMRect)
+		const canvas = await screen.findByLabelText("Reader annotations canvas page 1")
 
-		fireEvent.pointerDown(layer, { button: 0, clientX: 60, clientY: 80, pointerId: 1 })
-		fireEvent.pointerMove(layer, { clientX: 240, clientY: 200, pointerId: 1 })
-		fireEvent.pointerUp(layer, { clientX: 240, clientY: 200, pointerId: 1 })
+		fireEvent.pointerDown(canvas, { button: 0, clientX: 60, clientY: 80, pointerId: 1 })
+		fireEvent.pointerMove(canvas, { clientX: 240, clientY: 200, pointerId: 1 })
+		fireEvent.pointerUp(canvas, { clientX: 240, clientY: 200, pointerId: 1 })
 
 		expect(onCreateReaderAnnotation).toHaveBeenCalledTimes(1)
 		expect(onCreateReaderAnnotation.mock.calls[0]?.[0]).toMatchObject({
