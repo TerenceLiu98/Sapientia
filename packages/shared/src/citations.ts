@@ -19,6 +19,13 @@ export interface CitationRef {
 	count: number
 }
 
+export interface AnnotationCitationRef {
+	paperId: string
+	annotationId: string
+	annotationKind: "highlight" | "underline"
+	count: number
+}
+
 interface Node {
 	type?: string
 	content?: unknown
@@ -39,6 +46,11 @@ interface Node {
 		blockId?: string
 		blockNumber?: number
 		snapshot?: string
+		annotationId?: string
+		annotationKind?: "highlight" | "underline" | "ink"
+		page?: number
+		yRatio?: number
+		color?: string
 	} & Record<string, unknown>
 }
 
@@ -80,6 +92,49 @@ export function extractCitations(doc: unknown): CitationRef[] {
 	return [...counts.values()]
 }
 
+export function extractAnnotationCitations(doc: unknown): AnnotationCitationRef[] {
+	const counts = new Map<string, AnnotationCitationRef>()
+
+	const visit = (node: unknown): void => {
+		if (typeof node !== "object" || node === null) return
+		const n = node as Node
+
+		if (n.type === "annotationCitation") {
+			const data = n.attrs ?? n.props
+			const paperId = data?.paperId
+			const annotationId = data?.annotationId
+			const annotationKind = data?.annotationKind
+			if (
+				typeof paperId === "string" &&
+				typeof annotationId === "string" &&
+				(annotationKind === "highlight" || annotationKind === "underline") &&
+				paperId &&
+				annotationId
+			) {
+				const key = `${paperId}#${annotationId}`
+				const existing = counts.get(key)
+				if (existing) existing.count += 1
+				else counts.set(key, { paperId, annotationId, annotationKind, count: 1 })
+			}
+		}
+
+		if (Array.isArray(n.content)) {
+			for (const child of n.content) visit(child)
+		}
+		if (Array.isArray(n.children)) {
+			for (const child of n.children) visit(child)
+		}
+	}
+
+	if (Array.isArray(doc)) {
+		for (const block of doc) visit(block)
+	} else if (typeof doc === "object" && doc !== null) {
+		visit(doc)
+	}
+
+	return [...counts.values()]
+}
+
 // Markdown surface form for a citation chip. New format anchors the
 // citation to its 1-based block index — e.g. `[[block 12 · paperId#blockId]]`
 // — so the markdown stays readable while still being grep-able and
@@ -96,4 +151,16 @@ export function formatCitationToken(args: {
 	}
 	const safe = (args.snapshot ?? "").replace(/\]\]/g, "] ]")
 	return `[[${args.paperId}#${args.blockId}${safe ? `: ${safe}` : ""}]]`
+}
+
+export function formatAnnotationCitationToken(args: {
+	paperId: string
+	annotationId: string
+	annotationKind: "highlight" | "underline"
+	page?: number
+	snapshot?: string
+}): string {
+	const prefix = `${args.annotationKind}${typeof args.page === "number" && args.page > 0 ? ` p.${args.page}` : ""}`
+	const safe = (args.snapshot ?? "").replace(/\]\]/g, "] ]")
+	return `[[${prefix} · ${args.paperId}#${args.annotationId}${safe ? `: ${safe}` : ""}]]`
 }

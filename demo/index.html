@@ -170,6 +170,22 @@
         line-height: 1.5;
       }
 
+      .decision-link {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+        color: var(--color-text-accent);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .decision-link::after {
+        content: "↗";
+        font-size: 0.95em;
+      }
+
       .artboard {
         max-width: 1440px;
         margin: 0 auto;
@@ -787,6 +803,7 @@
             <span class="code">pending</span> 目前按文档保持 teal 家族，会自然接近链接/按钮色。
             页面里保留了一个 lavender 候选色块，方便判断是否要把它从交互色语义里拆出来。
           </p>
+          <a class="decision-link" href="./marginalia-notes.html">Open marginalia notes UX mock</a>
         </aside>
       </section>
 

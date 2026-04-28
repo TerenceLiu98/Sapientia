@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../client"
 
+export type NoteAnchorKind = "page" | "block" | "highlight" | "underline"
+
 export interface Note {
 	id: string
 	workspaceId: string
@@ -8,11 +10,19 @@ export interface Note {
 	paperId: string | null
 	title: string
 	currentVersion: number
-	// Spatial anchor (TASK-018). All three may be null on legacy or
-	// standalone notes; the notes pane groups those under "Unanchored".
+	// Marginalia anchor: a note pins to a (page, yRatio) plus optionally a
+	// structural source. `anchorKind` declares which id is the user's
+	// primary intent — block / highlight / underline / page (no id).
+	// Both `anchorBlockId` and `anchorAnnotationId` may co-exist (e.g. a
+	// highlight-anchored note also remembers the block it landed inside, so
+	// the slip kicker can show "block 7" as a secondary structural tag and
+	// jump-to-anchor has a stable fallback if the highlight is later
+	// deleted).
 	anchorPage: number | null
 	anchorYRatio: number | null
+	anchorKind: NoteAnchorKind | null
 	anchorBlockId: string | null
+	anchorAnnotationId: string | null
 	createdAt: string
 	updatedAt: string
 }
@@ -47,7 +57,9 @@ export interface CreateNoteInput {
 	blocknoteJson: unknown
 	anchorPage?: number | null
 	anchorYRatio?: number | null
+	anchorKind?: NoteAnchorKind | null
 	anchorBlockId?: string | null
+	anchorAnnotationId?: string | null
 }
 
 export function useCreateNote(workspaceId: string) {
@@ -70,7 +82,9 @@ export interface UpdateNoteInput {
 	blocknoteJson?: unknown
 	anchorPage?: number | null
 	anchorYRatio?: number | null
+	anchorKind?: NoteAnchorKind | null
 	anchorBlockId?: string | null
+	anchorAnnotationId?: string | null
 }
 
 export function useUpdateNote() {

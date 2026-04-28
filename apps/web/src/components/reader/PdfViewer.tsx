@@ -72,9 +72,13 @@ interface PdfViewerProps {
 		annotationId: string,
 		color: string,
 	) => Promise<unknown> | unknown
+	renderAnnotationActions?: (annotation: ReaderAnnotation) => React.ReactNode
 	// Mirrors BlocksPanel's renderActions slot — caller emits the
 	// cite/add-note button so the PDF toolbar matches the parsed-blocks pane.
 	renderActions?: (block: Block) => React.ReactNode
+	// When set, the matching annotation pulses briefly on the page so the
+	// reader can see what a citation chip just jumped them to.
+	flashedAnnotationId?: string | null
 }
 
 interface PdfDocumentLike {
@@ -102,7 +106,9 @@ function PdfViewerInner({
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
 	onUpdateReaderAnnotationColor,
+	renderAnnotationActions,
 	renderActions,
+	flashedAnnotationId,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
@@ -627,6 +633,7 @@ function PdfViewerInner({
 										colorByBlock={colorByBlock}
 										estimatedAspectRatio={pageAspectRatioFor(page)}
 										estimatedWidth={pageWidthEstimate}
+										flashedAnnotationId={flashedAnnotationId}
 										hoveredBlockId={hoveredBlockId}
 										isPageRendered={renderedPages.has(page)}
 										key={page}
@@ -644,6 +651,7 @@ function PdfViewerInner({
 										onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
 										page={page}
 										palette={palette}
+										renderAnnotationActions={renderAnnotationActions}
 										renderActions={renderActions}
 										scale={scale}
 									selectedAnnotationId={selectedAnnotationId}
@@ -806,6 +814,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	colorByBlock,
 	estimatedAspectRatio,
 	estimatedWidth,
+	flashedAnnotationId,
 	hoveredBlockId,
 	isPageRendered,
 	onClearHighlight,
@@ -822,6 +831,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onUpdateReaderAnnotationColor,
 	page,
 	palette,
+	renderAnnotationActions,
 	renderActions,
 	scale,
 	selectedAnnotationId,
@@ -836,6 +846,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	colorByBlock?: Map<string, string>
 	estimatedAspectRatio: number
 	estimatedWidth: number | null
+	flashedAnnotationId?: string | null
 	hoveredBlockId?: string | null
 	isPageRendered: boolean
 	onClearHighlight?: (blockId: string) => Promise<void> | void
@@ -860,6 +871,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	) => Promise<unknown> | unknown
 	page: number
 	palette?: PaletteEntry[]
+	renderAnnotationActions?: (annotation: ReaderAnnotation) => React.ReactNode
 	renderActions?: (block: Block) => React.ReactNode
 	scale: number
 	selectedAnnotationId?: string | null
@@ -1049,13 +1061,14 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 			(annotations ?? []).map((annotation) => (
 				<ReaderAnnotationShape
 					annotation={annotation}
+					flashed={annotation.id === flashedAnnotationId}
 					H={displayH}
 					key={annotation.id}
 					onSelect={onSelectAnnotation}
 					W={displayW}
 				/>
 			)),
-		[annotations, displayH, displayW, onSelectAnnotation],
+		[annotations, displayH, displayW, flashedAnnotationId, onSelectAnnotation],
 	)
 
 	const selectedAnnotation = useMemo(
@@ -1352,6 +1365,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					{selectedAnnotation ? (
 						<ReaderAnnotationActionsPopover
 							annotation={selectedAnnotation}
+							extraActions={renderAnnotationActions?.(selectedAnnotation)}
 							H={displayH}
 							onChangeColor={(color: string) => {
 								void onUpdateReaderAnnotationColor?.(selectedAnnotation.id, color)

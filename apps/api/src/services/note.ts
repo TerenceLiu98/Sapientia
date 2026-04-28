@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { PutObjectCommand } from "@aws-sdk/client-s3"
-import { memberships, type NewNote, type Note, noteBlockRefs, notes } from "@sapientia/db"
-import { blocknoteJsonToMarkdown, extractCitations } from "@sapientia/shared"
+import { memberships, type NewNote, type Note, noteAnnotationRefs, noteBlockRefs, notes } from "@sapientia/db"
+import { blocknoteJsonToMarkdown, extractAnnotationCitations, extractCitations } from "@sapientia/shared"
 import { and, asc, eq, isNull, sql } from "drizzle-orm"
 import { config } from "../config"
 import { db } from "../db"
@@ -26,6 +26,21 @@ async function syncNoteBlockRefs(noteId: string, blocknoteJson: unknown): Promis
 	)
 }
 
+async function syncNoteAnnotationRefs(noteId: string, blocknoteJson: unknown): Promise<void> {
+	const refs = extractAnnotationCitations(blocknoteJson)
+	await db.delete(noteAnnotationRefs).where(eq(noteAnnotationRefs.noteId, noteId))
+	if (refs.length === 0) return
+	await db.insert(noteAnnotationRefs).values(
+		refs.map((r) => ({
+			noteId,
+			paperId: r.paperId,
+			annotationId: r.annotationId,
+			annotationKind: r.annotationKind,
+			citationCount: r.count,
+		})),
+	)
+}
+
 function jsonKey(workspaceId: string, noteId: string, version: number) {
 	return `workspaces/${workspaceId}/notes/${noteId}/v${version}.json`
 }
@@ -44,8 +59,7 @@ async function uploadVersion(args: {
 	const mdObjectKey = mdKey(args.workspaceId, args.noteId, args.version)
 
 	const jsonString = JSON.stringify(args.blocknoteJson)
-	const docArray = Array.isArray(args.blocknoteJson) ? args.blocknoteJson : []
-	const markdown = blocknoteJsonToMarkdown(docArray)
+	const markdown = blocknoteJsonToMarkdown(args.blocknoteJson)
 
 	// Pre-compute byte lengths so the SDK doesn't have to guess — strings
 	// otherwise trip the "stream of unknown length" warning.
@@ -76,18 +90,26 @@ async function uploadVersion(args: {
 	return { jsonObjectKey, mdObjectKey, markdown }
 }
 
+export type NoteAnchorKind = "page" | "block" | "highlight" | "underline"
+
 export interface CreateNoteInput {
 	workspaceId: string
 	ownerUserId: string
 	paperId?: string | null
 	title?: string
 	blocknoteJson: unknown
-	// Spatial anchor (TASK-018). Optional; all three flow straight to the
-	// row. Notes without an anchor land in the "Unanchored" group in the
-	// notes pane. The cite-from-block path also sets `anchorBlockId`.
+	// Spatial anchor for the marginalia model. Optional; notes without an
+	// anchor land in the "Unanchored" group. `anchorKind` declares which of
+	// the id fields is the user's primary intent — block / highlight /
+	// underline / page. Both `anchorBlockId` and `anchorAnnotationId` may
+	// co-exist (a highlight-anchored note still remembers the block it
+	// landed inside, so the marginalia tag strip can show "block 7" as a
+	// secondary structural anchor).
 	anchorPage?: number | null
 	anchorYRatio?: number | null
+	anchorKind?: NoteAnchorKind | null
 	anchorBlockId?: string | null
+	anchorAnnotationId?: string | null
 }
 
 export async function createNote(input: CreateNoteInput): Promise<Note> {
@@ -116,11 +138,14 @@ export async function createNote(input: CreateNoteInput): Promise<Note> {
 			searchText: sql`to_tsvector('english', ${markdown})` as unknown as string,
 			anchorPage: input.anchorPage ?? null,
 			anchorYRatio: input.anchorYRatio ?? null,
+			anchorKind: input.anchorKind ?? null,
 			anchorBlockId: input.anchorBlockId ?? null,
+			anchorAnnotationId: input.anchorAnnotationId ?? null,
 		})
 		.returning()
 
 	await syncNoteBlockRefs(note.id, input.blocknoteJson)
+	await syncNoteAnnotationRefs(note.id, input.blocknoteJson)
 	return note
 }
 
@@ -131,7 +156,9 @@ export interface UpdateNoteInput {
 	// Anchor edits — null means "unset", undefined means "leave alone".
 	anchorPage?: number | null
 	anchorYRatio?: number | null
+	anchorKind?: NoteAnchorKind | null
 	anchorBlockId?: string | null
+	anchorAnnotationId?: string | null
 }
 
 export async function updateNote(input: UpdateNoteInput): Promise<Note> {
@@ -146,7 +173,10 @@ export async function updateNote(input: UpdateNoteInput): Promise<Note> {
 	if (input.title !== undefined) updates.title = input.title
 	if (input.anchorPage !== undefined) updates.anchorPage = input.anchorPage
 	if (input.anchorYRatio !== undefined) updates.anchorYRatio = input.anchorYRatio
+	if (input.anchorKind !== undefined) updates.anchorKind = input.anchorKind
 	if (input.anchorBlockId !== undefined) updates.anchorBlockId = input.anchorBlockId
+	if (input.anchorAnnotationId !== undefined)
+		updates.anchorAnnotationId = input.anchorAnnotationId
 
 	if (input.blocknoteJson !== undefined) {
 		const newVersion = existing.currentVersion + 1
@@ -173,6 +203,7 @@ export async function updateNote(input: UpdateNoteInput): Promise<Note> {
 	// title-only edits don't touch citations.
 	if (input.blocknoteJson !== undefined) {
 		await syncNoteBlockRefs(updated.id, input.blocknoteJson)
+		await syncNoteAnnotationRefs(updated.id, input.blocknoteJson)
 	}
 	return updated
 }

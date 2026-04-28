@@ -143,4 +143,35 @@ describe("blocknoteJsonToMarkdown", () => {
 		])
 		expect(md).toBe("see [[p1#b1: Figure 1]]")
 	})
+
+	it("emits annotation citation tokens for highlight and underline refs", () => {
+		const md = blocknoteJsonToMarkdown([
+			{
+				type: "paragraph",
+				content: [
+					{ type: "text", text: "see " },
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a1",
+							annotationKind: "highlight",
+							page: 12,
+						},
+					},
+					{ type: "text", text: " and " },
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a2",
+							annotationKind: "underline",
+							snapshot: "key line",
+						},
+					},
+				],
+			},
+		])
+		expect(md).toBe("see [[highlight p.12 · p1#a1]] and [[underline · p1#a2: key line]]")
+	})
 })

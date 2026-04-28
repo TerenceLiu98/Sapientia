@@ -1,7 +1,11 @@
 import { Link } from "@tanstack/react-router"
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
-import { useNotesForBlock, usePaperCitationCounts } from "@/api/hooks/citations"
+import {
+	useNotesForBlock,
+	usePaperCitationCounts,
+	usePaperNoteCitations,
+} from "@/api/hooks/citations"
 import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
 import { useCreateNote, useDeleteNote, useNotes } from "@/api/hooks/notes"
 import { type Paper, usePaper } from "@/api/hooks/papers"
@@ -18,26 +22,22 @@ import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer } from "@/components/reader/PdfViewer"
-import { usePalette } from "@/lib/highlight-palette"
-import type { ReaderAnnotationBody, ReaderAnnotationKind } from "@/lib/reader-annotations"
+import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
+import {
+	annotationBodyBoundingBox,
+	type ReaderAnnotationBody,
+	type ReaderAnnotationKind,
+} from "@/lib/reader-annotations"
 
 type ViewMode = "pdf-only" | "md-only"
 
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
-const NOTES_WIDTH_KEY = "paperWorkspace.notesWidthPct.v2"
-const NOTES_VISIBILITY_KEY = "paperWorkspace.notesVisible"
 const AUTO_FOLLOW_LOCK_MS = 1400
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
 	const v = window.localStorage.getItem(VIEW_MODE_KEY)
 	return v === "pdf-only" || v === "md-only" ? v : "pdf-only"
-}
-
-function loadNotesVisible() {
-	if (typeof window === "undefined") return true
-	const v = window.localStorage.getItem(NOTES_VISIBILITY_KEY)
-	return v === null ? true : v !== "false"
 }
 
 export function PaperWorkspace({ paperId }: { paperId: string }) {
@@ -55,10 +55,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [currentAnchorYRatio, setCurrentAnchorYRatio] = useState(0.5)
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
-	const [notesVisible, setNotesVisible] = useState<boolean>(() => loadNotesVisible())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [editor, setEditor] = useState<NoteEditorRef | null>(null)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
+	const [pendingCiteAnnotation, setPendingCiteAnnotation] = useState<ReaderAnnotation | null>(null)
 	const [autoFollowLockUntil, setAutoFollowLockUntil] = useState(0)
 
 	const { data: blocks } = useBlocks(paperId)
@@ -78,12 +78,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			window.localStorage.setItem(VIEW_MODE_KEY, viewMode)
 		}
 	}, [viewMode])
-
-	useEffect(() => {
-		if (typeof window !== "undefined") {
-			window.localStorage.setItem(NOTES_VISIBILITY_KEY, String(notesVisible))
-		}
-	}, [notesVisible])
 
 	const countsMap = useMemo(() => {
 		const m = new Map<string, number>()
@@ -157,6 +151,50 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		[blocks, handleJumpToBlock, paperId],
 	)
 
+	// `flashedAnnotationId` triggers a brief pulse on the matching markup
+	// shape after a citation chip jumps the viewport. The visual cue is the
+	// whole point of citing an annotation — without it the reader lands on
+	// the page but has no idea which highlight/underline they were supposed
+	// to be looking at. Auto-clears after 1.5s; consecutive clicks reset
+	// the timer so a quick second click doesn't strand a stale flash.
+	const [flashedAnnotationId, setFlashedAnnotationId] = useState<string | null>(null)
+	const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const flashAnnotation = useCallback((annotationId: string) => {
+		setFlashedAnnotationId(annotationId)
+		if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+		flashTimerRef.current = setTimeout(() => {
+			setFlashedAnnotationId(null)
+			flashTimerRef.current = null
+		}, 1500)
+	}, [])
+	useEffect(() => {
+		return () => {
+			if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+		}
+	}, [])
+
+	const handleOpenCitationAnnotation = useCallback(
+		(targetPaperId: string, annotationId: string, fallbackPage?: number, fallbackYRatio?: number) => {
+			if (targetPaperId !== paperId) return
+			const annotation = readerAnnotations.find((candidate) => candidate.id === annotationId) ?? null
+			if (!annotation) {
+				if (fallbackPage) {
+					setRequestedPage(fallbackPage)
+					setRequestedBlockY(fallbackYRatio)
+					setRequestNonce((n) => n + 1)
+				}
+				return
+			}
+			const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+			setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
+			setRequestedPage(annotation.page)
+			setRequestedBlockY(bbox?.y ?? fallbackYRatio)
+			setRequestNonce((n) => n + 1)
+			flashAnnotation(annotation.id)
+		},
+		[flashAnnotation, paperId, readerAnnotations],
+	)
+
 	const handleMainInteract = useCallback(() => {
 		setExpandedNoteId(null)
 	}, [])
@@ -220,51 +258,187 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		[editor, expandedNoteId, paperId],
 	)
 
+	const insertAnnotationCitation = useCallback(
+		(annotation: ReaderAnnotation) => {
+			if (!editor || !expandedNoteId) return false
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return false
+			const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+			if (!editor.isFocused) {
+				editor.chain().focus("end").run()
+			} else {
+				editor.chain().focus().run()
+			}
+			editor
+				.chain()
+				.insertContent([
+					{
+						type: "annotationCitation",
+						attrs: {
+							paperId,
+							annotationId: annotation.id,
+							annotationKind: annotation.kind,
+							page: annotation.page,
+							yRatio: bbox?.y ?? 0.5,
+							color: annotation.color,
+							snapshot: `${annotation.kind} p.${annotation.page}`,
+						},
+					},
+					{ type: "text", text: " " },
+				])
+				.run()
+			return true
+		},
+		[editor, expandedNoteId, paperId],
+	)
+
 	// "Cite or create": if the user already has a note expanded, append the
 	// chip to that note. Otherwise create a brand-new note anchored to the
 	// block's position, expand it, and queue a citation insert for once the
 	// editor mounts (handled by the effect at the bottom).
-	const handleBlockAction = useCallback(
+	// Cite-only: insert a `@[block N]` chip into the currently open note.
+	// No-op if no note is open — the toolbar disables the button in that
+	// case so this branch is just a safety net.
+	const handleCiteBlock = useCallback(
+		(block: Block) => {
+			if (!expandedNoteId) return
+			handleSelectBlock(block)
+			if (!insertCitation(block)) setPendingCiteBlock(block)
+		},
+		[expandedNoteId, handleSelectBlock, insertCitation],
+	)
+
+	// New-note-only: always create a fresh block-anchored note. If a
+	// note is already open we close it first so the new one slides in
+	// cleanly.
+	const handleNewNoteForBlock = useCallback(
 		async (block: Block) => {
-			if (expandedNoteId) {
-				handleSelectBlock(block)
-				if (!insertCitation(block)) {
-					setPendingCiteBlock(block)
-				}
-				return
-			}
 			if (!workspace) return
+			if (expandedNoteId) setExpandedNoteId(null)
 			const note = await createNote.mutateAsync({
 				paperId,
 				title: `Page ${block.page}`,
 				blocknoteJson: [],
 				anchorPage: block.page,
 				anchorYRatio: block.bbox?.y ?? null,
+				anchorKind: "block",
 				anchorBlockId: block.blockId,
 			})
 			handleSelectBlock(block)
 			setExpandedNoteId(note.id)
-			setPendingCiteBlock(block)
 		},
-		[createNote, expandedNoteId, handleSelectBlock, insertCitation, paperId, workspace],
+		[createNote, expandedNoteId, handleSelectBlock, paperId, workspace],
 	)
 
+	const handleCiteAnnotation = useCallback(
+		(annotation: ReaderAnnotation) => {
+			if (!expandedNoteId) return
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return
+			if (!insertAnnotationCitation(annotation)) setPendingCiteAnnotation(annotation)
+		},
+		[expandedNoteId, insertAnnotationCitation],
+	)
+
+	const handleNewNoteForAnnotation = useCallback(
+		async (annotation: ReaderAnnotation) => {
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return
+			if (!workspace) return
+			if (expandedNoteId) setExpandedNoteId(null)
+			const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+			// Resolve the block this annotation visually overlaps so the
+			// note carries a stable structural anchor — block ids survive
+			// re-parse, annotation ids don't.
+			const overlappingBlockId = bbox
+				? findOverlappingBlockId(blocks ?? [], annotation.page, bbox)
+				: null
+			const note = await createNote.mutateAsync({
+				paperId,
+				title: `Page ${annotation.page}`,
+				blocknoteJson: [],
+				anchorPage: annotation.page,
+				anchorYRatio: bbox?.y ?? 0.5,
+				anchorKind: annotation.kind,
+				anchorAnnotationId: annotation.id,
+				anchorBlockId: overlappingBlockId,
+			})
+			setExpandedNoteId(note.id)
+		},
+		[blocks, createNote, expandedNoteId, paperId, workspace],
+	)
+
+	// Two-icon block toolbar:
+	//   • New note  — always creates a fresh note (NoteIcon).
+	//   • Cite      — only enabled when a note is open; inserts the
+	//                 `@[block N]` chip into it (CiteIcon).
+	// Disabled-but-visible cite button keeps the visual rhythm steady
+	// while still telegraphing that the action exists when you have a
+	// note open.
 	const renderActions = useCallback(
 		(block: Block) => (
-			<button
-				aria-label={expandedNoteId ? "Cite this block" : "Add note for this block"}
-				className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-accent"
-				onClick={(e) => {
-					e.stopPropagation()
-					void handleBlockAction(block)
-				}}
-				title={expandedNoteId ? "Cite" : "Add note"}
-				type="button"
-			>
-				{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
-			</button>
+			<>
+				<button
+					aria-label="Add a new note for this block"
+					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-accent"
+					onClick={(e) => {
+						e.stopPropagation()
+						void handleNewNoteForBlock(block)
+					}}
+					title="New note"
+					type="button"
+				>
+					<NoteIcon />
+				</button>
+				<button
+					aria-label="Cite this block in the open note"
+					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+					disabled={!expandedNoteId}
+					onClick={(e) => {
+						e.stopPropagation()
+						handleCiteBlock(block)
+					}}
+					title={expandedNoteId ? "Cite in open note" : "Open a note first to cite"}
+					type="button"
+				>
+					<CiteIcon />
+				</button>
+			</>
 		),
-		[expandedNoteId, handleBlockAction],
+		[expandedNoteId, handleCiteBlock, handleNewNoteForBlock],
+	)
+
+	const renderAnnotationActions = useCallback(
+		(annotation: ReaderAnnotation) => {
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return null
+			return (
+				<>
+					<button
+						aria-label="Add a new note for this annotation"
+						className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+						onClick={(e) => {
+							e.stopPropagation()
+							void handleNewNoteForAnnotation(annotation)
+						}}
+						title="New note"
+						type="button"
+					>
+						<NoteIcon />
+					</button>
+					<button
+						aria-label="Cite this annotation in the open note"
+						className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+						disabled={!expandedNoteId}
+						onClick={(e) => {
+							e.stopPropagation()
+							handleCiteAnnotation(annotation)
+						}}
+						title={expandedNoteId ? "Cite in open note" : "Open a note first to cite"}
+						type="button"
+					>
+						<CiteIcon />
+					</button>
+				</>
+			)
+		},
+		[expandedNoteId, handleCiteAnnotation, handleNewNoteForAnnotation],
 	)
 
 	const handleSetBlockHighlight = useCallback(
@@ -316,6 +490,75 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return map
 	}, [highlights])
 
+	// Resolve a block highlight's palette key into a CSS color via
+	// `paletteVisualTokens`. The block_highlights table stores the
+	// palette key (e.g. "questioning"), not a CSS color, so the
+	// marginalia rail can't paint dots straight from `colorByBlock`.
+	const cssColorByBlock = useMemo(() => {
+		const map = new Map<string, string>()
+		for (const [blockId, key] of colorByBlock.entries()) {
+			map.set(blockId, paletteVisualTokens(palette, key).fillBg)
+		}
+		return map
+	}, [colorByBlock, palette])
+
+	// annotationId → its display color. Reader annotations store their
+	// color directly as a CSS string, so this is a straight pass-through.
+	const colorByAnnotation = useMemo(() => {
+		const map = new Map<string, string>()
+		for (const annotation of readerAnnotations) map.set(annotation.id, annotation.color)
+		return map
+	}, [readerAnnotations])
+
+	// All cited blocks + annotations per note, grouped by note. Drives
+	// the marginalia rail dot's pie-chart fill when a note cites
+	// multiple sources.
+	const { data: noteCitations } = usePaperNoteCitations(paperId)
+	const dotColorsByNote = useMemo(() => {
+		const map = new Map<string, string[]>()
+		for (const row of noteCitations ?? []) {
+			const colors: string[] = []
+			const seen = new Set<string>()
+			for (const blockId of row.blockIds) {
+				const css = cssColorByBlock.get(blockId)
+				if (css && !seen.has(css)) {
+					seen.add(css)
+					colors.push(css)
+				}
+			}
+			for (const annotation of row.annotations) {
+				const css = colorByAnnotation.get(annotation.id)
+				if (css && !seen.has(css)) {
+					seen.add(css)
+					colors.push(css)
+				}
+			}
+			if (colors.length > 0) map.set(row.noteId, colors)
+		}
+		return map
+	}, [colorByAnnotation, cssColorByBlock, noteCitations])
+
+	// Total page count for the marginalia rail, so each dot can land at
+	// `((page-1) + yRatio) / numPages` along the rail. Falls back to 1 so
+	// notes still render reasonably while the paper is mid-parse.
+	const numPages = useMemo(() => {
+		if (!blocks || blocks.length === 0) return 1
+		let max = 1
+		for (const block of blocks) {
+			if (block.page > max) max = block.page
+		}
+		return max
+	}, [blocks])
+
+	// blockId → 1-based blockIndex. Drives the marginalia kicker tags so a
+	// block-anchored slip reads "block 7" instead of just "block". Lookup
+	// only — never store; the index changes on re-parse.
+	const blockNumberByBlockId = useMemo(() => {
+		const map = new Map<string, number>()
+		for (const block of blocks ?? []) map.set(block.blockId, block.blockIndex + 1)
+		return map
+	}, [blocks])
+
 	// Toolbar `+ Note` — creates a note anchored to the user's current reading
 	// position in the main pane.
 	const handleCreateAtCurrent = useCallback(async () => {
@@ -358,6 +601,13 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		}
 	}, [editor, expandedNoteId, insertCitation, pendingCiteBlock])
 
+	useEffect(() => {
+		if (!expandedNoteId || !editor || !pendingCiteAnnotation) return
+		if (insertAnnotationCitation(pendingCiteAnnotation)) {
+			setPendingCiteAnnotation(null)
+		}
+	}, [editor, expandedNoteId, insertAnnotationCitation, pendingCiteAnnotation])
+
 	const main = (
 		<MainView
 			autoFollowLockUntil={autoFollowLockUntil}
@@ -375,6 +625,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			palette={palette}
 			paperId={paperId}
 			readerAnnotations={readerAnnotations}
+			renderAnnotationActions={renderAnnotationActions}
 			renderActions={renderActions}
 			requestedBlockY={requestedBlockY}
 			requestedPage={requestedPage}
@@ -383,7 +634,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			selectedBlockRequestNonce={selectedBlockRequestNonce}
 			handleCreateReaderAnnotation={handleCreateReaderAnnotation}
 			handleDeleteReaderAnnotation={handleDeleteReaderAnnotation}
+			handleOpenCitationAnnotation={handleOpenCitationAnnotation}
 			handleUpdateReaderAnnotationColor={handleUpdateReaderAnnotationColor}
+			flashedAnnotationId={flashedAnnotationId}
 			viewMode={viewMode}
 		/>
 	)
@@ -392,6 +645,11 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		<AppShell title={paper?.title ?? "Paper"}>
 			<WorkspaceContent
 				activeCitingNoteIds={activeCitingNoteIds}
+				blockNumberByBlockId={blockNumberByBlockId}
+				colorByAnnotation={colorByAnnotation}
+				colorByBlock={colorByBlock}
+				dotColorsByNote={dotColorsByNote}
+				numPages={numPages}
 				currentAnchorYRatio={currentAnchorYRatio}
 				currentPage={currentPage}
 				expandedNoteId={expandedNoteId}
@@ -399,19 +657,13 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				isLoading={isLoading}
 				main={main}
 				notes={notesPaneFor(paperNotes)}
-				notesVisible={notesVisible}
 				onCreateAtCurrent={handleCreateAtCurrent}
 				onDeleteNote={handleDeleteNote}
 				onEditorReady={setEditor}
 				onExpand={setExpandedNoteId}
 				onJumpToPage={handleJumpToPage}
 				onOpenCitationBlock={handleOpenCitationBlock}
-				onToggleNotes={() =>
-					setNotesVisible((value) => {
-						if (value) setExpandedNoteId(null)
-						return !value
-					})
-				}
+				onOpenCitationAnnotation={handleOpenCitationAnnotation}
 				paper={paper}
 				viewMode={viewMode}
 				onChangeViewMode={setViewMode}
@@ -424,16 +676,43 @@ function notesPaneFor(notes: ReturnType<typeof useNotes>["data"]) {
 	return notes ?? []
 }
 
+// Pick the block whose bbox the annotation's center falls inside on the
+// given page. Used at note-creation time so a highlight/underline note
+// carries the structural block as a secondary anchor — block ids are
+// stable across re-parse, annotation ids aren't, so this is the
+// jump-to-anchor fallback when the user later deletes the markup.
+function findOverlappingBlockId(
+	blocks: Block[],
+	page: number,
+	bbox: { x: number; y: number; w: number; h: number },
+): string | null {
+	const cx = bbox.x + bbox.w / 2
+	const cy = bbox.y + bbox.h / 2
+	const onPage = blocks.filter((block) => block.page === page && block.bbox != null)
+	for (const block of onPage) {
+		if (!block.bbox) continue
+		const { x, y, w, h } = block.bbox
+		if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
+			return block.blockId
+		}
+	}
+	return null
+}
+
 interface WorkspaceContentProps {
 	activeCitingNoteIds: Set<string>
 	autoFollowLockUntil: number
+	blockNumberByBlockId: Map<string, number>
+	colorByAnnotation: Map<string, string>
+	colorByBlock: Map<string, string>
+	dotColorsByNote: Map<string, string[]>
+	numPages: number
 	currentAnchorYRatio: number
 	currentPage: number
 	expandedNoteId: string | null
 	isLoading: boolean
 	main: React.ReactNode
 	notes: Note[]
-	notesVisible: boolean
 	onChangeViewMode: (mode: ViewMode) => void
 	onCreateAtCurrent: () => void
 	onDeleteNote: (noteId: string) => Promise<void> | void
@@ -441,7 +720,12 @@ interface WorkspaceContentProps {
 	onExpand: (noteId: string | null) => void
 	onJumpToPage: (page: number, yRatio?: number) => void
 	onOpenCitationBlock: (paperId: string, blockId: string) => void
-	onToggleNotes: () => void
+	onOpenCitationAnnotation: (
+		paperId: string,
+		annotationId: string,
+		page?: number,
+		yRatio?: number,
+	) => void
 	paper: Paper | undefined
 	viewMode: ViewMode
 }
@@ -449,13 +733,17 @@ interface WorkspaceContentProps {
 function WorkspaceContent({
 	activeCitingNoteIds,
 	autoFollowLockUntil,
+	blockNumberByBlockId,
+	colorByAnnotation,
+	colorByBlock,
+	dotColorsByNote,
+	numPages,
 	currentAnchorYRatio,
 	currentPage,
 	expandedNoteId,
 	isLoading,
 	main,
 	notes,
-	notesVisible,
 	onChangeViewMode,
 	onCreateAtCurrent,
 	onDeleteNote,
@@ -463,7 +751,7 @@ function WorkspaceContent({
 	onExpand,
 	onJumpToPage,
 	onOpenCitationBlock,
-	onToggleNotes,
+	onOpenCitationAnnotation,
 	paper,
 	viewMode,
 }: WorkspaceContentProps) {
@@ -479,30 +767,30 @@ function WorkspaceContent({
 
 			<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
 				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
-				<SidebarToggleButtons
-					leftOpen={isLeftNavOpen}
-					onToggleLeft={toggleLeftNav}
-					onToggleRight={onToggleNotes}
-					rightOpen={notesVisible}
-				/>
+				<SidebarToggleButtons leftOpen={isLeftNavOpen} onToggleLeft={toggleLeftNav} />
 			</div>
 
 			<div className="min-h-0 flex-1 p-6">
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
+					blockNumberByBlockId={blockNumberByBlockId}
+					colorByAnnotation={colorByAnnotation}
+					colorByBlock={colorByBlock}
+					dotColorsByNote={dotColorsByNote}
+					numPages={numPages}
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					expandedNoteId={expandedNoteId}
 					autoFollowLockUntil={autoFollowLockUntil}
 					main={main}
 					notes={notes}
-					notesVisible={notesVisible}
 					onCreateAtCurrent={onCreateAtCurrent}
 					onDeleteNote={onDeleteNote}
 					onEditorReady={onEditorReady}
 					onExpand={onExpand}
 					onJumpToPage={onJumpToPage}
 					onOpenCitationBlock={onOpenCitationBlock}
+					onOpenCitationAnnotation={onOpenCitationAnnotation}
 				/>
 			</div>
 		</div>
@@ -602,14 +890,10 @@ function MarkdownIcon() {
 
 function SidebarToggleButtons({
 	leftOpen,
-	rightOpen,
 	onToggleLeft,
-	onToggleRight,
 }: {
 	leftOpen: boolean
-	rightOpen: boolean
 	onToggleLeft: () => void
-	onToggleRight: () => void
 }) {
 	return (
 		<div className="inline-flex overflow-hidden rounded-lg border border-border-default bg-bg-primary/90 p-0.5 shadow-[var(--shadow-popover)]">
@@ -621,47 +905,24 @@ function SidebarToggleButtons({
 				title={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
 				type="button"
 			>
-				<SidebarIcon open={leftOpen} side="left" />
-			</button>
-			<button
-				aria-label={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
-				aria-pressed={rightOpen}
-				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
-				onClick={onToggleRight}
-				title={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
-				type="button"
-			>
-				<SidebarIcon open={rightOpen} side="right" />
+				<SidebarIcon open={leftOpen} />
 			</button>
 		</div>
 	)
 }
 
-function SidebarIcon({ side, open }: { side: "left" | "right"; open: boolean }) {
-	if (side === "left") {
-		return (
-			<span
-				className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
-					open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
-				}`}
-			>
-				<span
-					className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`}
-				/>
-				<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
-				<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
-			</span>
-		)
-	}
+function SidebarIcon({ open }: { open: boolean }) {
 	return (
 		<span
 			className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
 				open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
 			}`}
 		>
-			<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
+			<span
+				className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`}
+			/>
 			<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
-			<span className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`} />
+			<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
 		</span>
 	)
 }
@@ -685,6 +946,12 @@ interface MainViewProps {
 		body: ReaderAnnotationBody
 	}) => Promise<unknown> | unknown
 	handleDeleteReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
+	handleOpenCitationAnnotation: (
+		paperId: string,
+		annotationId: string,
+		page?: number,
+		yRatio?: number,
+	) => void
 	handleUpdateReaderAnnotationColor: (
 		annotationId: string,
 		color: string,
@@ -693,12 +960,14 @@ interface MainViewProps {
 	palette: ReturnType<typeof usePalette>["palette"]
 	paperId: string
 	readerAnnotations: ReaderAnnotation[]
+	renderAnnotationActions: (annotation: ReaderAnnotation) => React.ReactNode
 	renderActions: (block: Block) => React.ReactNode
 	requestedBlockY: number | undefined
 	requestedPage: number | undefined
 	requestNonce: number
 	selectedBlockId: string | null
 	selectedBlockRequestNonce: number
+	flashedAnnotationId: string | null
 	viewMode: ViewMode
 }
 
@@ -724,6 +993,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 					<PdfViewer
 						blocks={props.blocks}
 						colorByBlock={props.colorByBlock}
+						flashedAnnotationId={props.flashedAnnotationId}
 						onClearHighlight={props.handleClearBlockHighlight}
 						onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
 						onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
@@ -736,6 +1006,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						palette={props.palette}
 						paperId={props.paperId}
 						readerAnnotations={props.readerAnnotations}
+						renderAnnotationActions={props.renderAnnotationActions}
 						renderActions={props.renderActions}
 						requestedBlockY={props.requestedBlockY}
 						requestedPage={props.requestedPage}
@@ -779,130 +1050,78 @@ import type { Note } from "@/api/hooks/notes"
 interface MainNotesSplitProps {
 	activeCitingNoteIds: Set<string>
 	autoFollowLockUntil: number
+	blockNumberByBlockId: Map<string, number>
+	colorByAnnotation: Map<string, string>
+	colorByBlock: Map<string, string>
+	dotColorsByNote: Map<string, string[]>
+	numPages: number
 	main: React.ReactNode
 	notes: Note[]
 	expandedNoteId: string | null
 	currentAnchorYRatio: number
 	currentPage: number
-	notesVisible: boolean
 	onExpand: (noteId: string | null) => void
 	onJumpToPage: (page: number, yRatio?: number) => void
 	onCreateAtCurrent: () => void
 	onDeleteNote: (noteId: string) => Promise<void> | void
 	onEditorReady: (editor: NoteEditorRef) => void
 	onOpenCitationBlock: (paperId: string, blockId: string) => void
+	onOpenCitationAnnotation: (
+		paperId: string,
+		annotationId: string,
+		page?: number,
+		yRatio?: number,
+	) => void
 }
 
 function MainNotesSplit({
 	activeCitingNoteIds,
 	autoFollowLockUntil,
+	blockNumberByBlockId,
+	colorByAnnotation,
+	colorByBlock,
+	dotColorsByNote,
+	numPages,
 	main,
 	notes,
 	expandedNoteId,
 	currentAnchorYRatio,
 	currentPage,
-	notesVisible,
 	onExpand,
 	onJumpToPage,
 	onCreateAtCurrent,
 	onDeleteNote,
 	onEditorReady,
 	onOpenCitationBlock,
+	onOpenCitationAnnotation,
 }: MainNotesSplitProps) {
-	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const [leftPct, setLeftPct] = useState<number>(() => {
-		if (typeof window === "undefined") return 83
-		const stored = window.localStorage.getItem(NOTES_WIDTH_KEY)
-		const n = stored ? Number(stored) : NaN
-		return Number.isFinite(n) && n >= 55 && n <= 90 ? n : 83
-	})
-	const [dragging, setDragging] = useState(false)
-	const dragRef = useRef<{ startX: number; startPct: number; wrapW: number } | null>(null)
-
-	const onPointerDown = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!wrapRef.current) return
-			e.preventDefault()
-			;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-			dragRef.current = {
-				startX: e.clientX,
-				startPct: leftPct,
-				wrapW: wrapRef.current.getBoundingClientRect().width,
-			}
-			setDragging(true)
-		},
-		[leftPct],
-	)
-	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-		const s = dragRef.current
-		if (!s) return
-		const deltaPct = ((e.clientX - s.startX) / s.wrapW) * 100
-		setLeftPct(Math.max(55, Math.min(90, s.startPct + deltaPct)))
-	}, [])
-	const onPointerUp = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			if (!dragRef.current) return
-			;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-			dragRef.current = null
-			setDragging(false)
-			if (typeof window !== "undefined") {
-				window.localStorage.setItem(NOTES_WIDTH_KEY, String(leftPct))
-			}
-		},
-		[leftPct],
-	)
-	useEffect(() => {
-		if (!dragging) return
-		const prev = document.body.style.cursor
-		document.body.style.cursor = "col-resize"
-		return () => {
-			document.body.style.cursor = prev
-		}
-	}, [dragging])
-
+	// Rail is a fixed-width strip glued to the main pane's right edge —
+	// no draggable splitter, no per-user width, no framed column. The
+	// note popover is portaled and expands left over the PDF, so the
+	// rail itself only needs room for its dots.
 	return (
-		<div
-			className={`grid h-full min-h-0 min-w-0 gap-0 ${
-				notesVisible ? "grid-cols-[var(--left)_8px_minmax(280px,1fr)]" : "grid-cols-[minmax(0,1fr)]"
-			}`}
-			ref={wrapRef}
-			style={{ ["--left" as string]: `${leftPct}%` }}
-		>
-			<div className="min-h-0 min-w-0">{main}</div>
-			{notesVisible ? (
-				<>
-					{/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer handlers; role="separator" is the correct ARIA */}
-					<div
-						aria-label="Resize main / notes split"
-						aria-orientation="vertical"
-						aria-valuenow={leftPct}
-						className="group relative cursor-col-resize select-none"
-						onPointerDown={onPointerDown}
-						onPointerMove={onPointerMove}
-						onPointerUp={onPointerUp}
-						role="separator"
-						tabIndex={0}
-					>
-						<div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-border-subtle transition-colors group-hover:bg-accent-600" />
-					</div>
-					<div className="min-h-0 min-w-0 overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
-						<NotesPanel
-							activeCitingNoteIds={activeCitingNoteIds}
-							currentAnchorYRatio={currentAnchorYRatio}
-							currentPage={currentPage}
-							externalFollowLockUntil={autoFollowLockUntil}
-							expandedNoteId={expandedNoteId}
-							notes={notes}
-							onCreateAtCurrent={onCreateAtCurrent}
-							onDelete={onDeleteNote}
-							onEditorReady={onEditorReady}
-							onExpand={onExpand}
-							onJumpToPage={onJumpToPage}
-							onOpenCitationBlock={onOpenCitationBlock}
-						/>
-					</div>
-				</>
-			) : null}
+		<div className="flex h-full min-h-0 min-w-0">
+			<div className="min-h-0 min-w-0 flex-1">{main}</div>
+			<NotesPanel
+					activeCitingNoteIds={activeCitingNoteIds}
+					blockNumberByBlockId={blockNumberByBlockId}
+					colorByAnnotation={colorByAnnotation}
+					colorByBlock={colorByBlock}
+					dotColorsByNote={dotColorsByNote}
+					numPages={numPages}
+					currentAnchorYRatio={currentAnchorYRatio}
+					currentPage={currentPage}
+					externalFollowLockUntil={autoFollowLockUntil}
+					expandedNoteId={expandedNoteId}
+					notes={notes}
+					onCreateAtCurrent={onCreateAtCurrent}
+					onDelete={onDeleteNote}
+					onEditorReady={onEditorReady}
+					onExpand={onExpand}
+					onJumpToPage={onJumpToPage}
+					onOpenCitationBlock={onOpenCitationBlock}
+					onOpenCitationAnnotation={onOpenCitationAnnotation}
+				/>
 		</div>
 	)
 }

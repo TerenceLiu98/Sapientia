@@ -1,4 +1,12 @@
-import { blocks, memberships, noteBlockRefs, notes, papers, workspacePapers } from "@sapientia/db"
+import {
+	blocks,
+	memberships,
+	noteAnnotationRefs,
+	noteBlockRefs,
+	notes,
+	papers,
+	workspacePapers,
+} from "@sapientia/db"
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -281,6 +289,69 @@ paperRoutes.get("/papers/:id/citation-counts", requireAuth, async (c) => {
 		.groupBy(noteBlockRefs.blockId)
 
 	return c.json(rows)
+})
+
+// For every note attached to this paper that the caller can see, return
+// the set of blocks and reader-annotations the note cites in its body.
+// The marginalia rail uses this to tint each note's dot with the colors
+// of its cited sources — a single-color note paints a solid disc, and a
+// multi-color note paints a conic-gradient pie so the reader can see at
+// a glance "this note pulls from these N highlights".
+paperRoutes.get("/papers/:id/note-citations", requireAuth, async (c) => {
+	const paperId = c.req.param("id")
+	const user = c.get("user")
+	if (!(await userCanAccessPaper(user.id, paperId, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	const [blockRows, annotationRows] = await Promise.all([
+		db
+			.select({ noteId: noteBlockRefs.noteId, blockId: noteBlockRefs.blockId })
+			.from(noteBlockRefs)
+			.innerJoin(notes, eq(notes.id, noteBlockRefs.noteId))
+			.innerJoin(
+				memberships,
+				and(eq(memberships.workspaceId, notes.workspaceId), eq(memberships.userId, user.id)),
+			)
+			.where(and(eq(noteBlockRefs.paperId, paperId), isNull(notes.deletedAt))),
+		db
+			.select({
+				noteId: noteAnnotationRefs.noteId,
+				annotationId: noteAnnotationRefs.annotationId,
+				annotationKind: noteAnnotationRefs.annotationKind,
+			})
+			.from(noteAnnotationRefs)
+			.innerJoin(notes, eq(notes.id, noteAnnotationRefs.noteId))
+			.innerJoin(
+				memberships,
+				and(eq(memberships.workspaceId, notes.workspaceId), eq(memberships.userId, user.id)),
+			)
+			.where(and(eq(noteAnnotationRefs.paperId, paperId), isNull(notes.deletedAt))),
+	])
+
+	const byNote = new Map<
+		string,
+		{
+			noteId: string
+			blockIds: string[]
+			annotations: Array<{ id: string; kind: "highlight" | "underline" }>
+		}
+	>()
+	const ensure = (noteId: string) => {
+		const existing = byNote.get(noteId)
+		if (existing) return existing
+		const created = { noteId, blockIds: [], annotations: [] }
+		byNote.set(noteId, created)
+		return created
+	}
+	for (const row of blockRows) ensure(row.noteId).blockIds.push(row.blockId)
+	for (const row of annotationRows) {
+		const kind = row.annotationKind
+		if (kind !== "highlight" && kind !== "underline") continue
+		ensure(row.noteId).annotations.push({ id: row.annotationId, kind })
+	}
+
+	return c.json([...byNote.values()])
 })
 
 paperRoutes.get("/papers/:id/bibtex", requireAuth, async (c) => {

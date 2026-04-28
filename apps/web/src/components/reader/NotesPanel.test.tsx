@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Note } from "@/api/hooks/notes"
 
@@ -30,7 +30,9 @@ function makeNote(overrides: Partial<Note>): Note {
 		currentVersion: 1,
 		anchorPage: overrides.anchorPage ?? 1,
 		anchorYRatio: overrides.anchorYRatio ?? 0.5,
+		anchorKind: overrides.anchorKind ?? null,
 		anchorBlockId: overrides.anchorBlockId ?? null,
+		anchorAnnotationId: overrides.anchorAnnotationId ?? null,
 		createdAt: overrides.createdAt ?? "2026-04-27T00:00:00.000Z",
 		updatedAt: overrides.updatedAt ?? "2026-04-27T00:00:00.000Z",
 	}
@@ -65,101 +67,39 @@ afterEach(() => {
 })
 
 describe("NotesPanel", () => {
-	it("follows the closest note anchor within the active page", async () => {
+	it("positions each dot at its anchor's normalized rail position", async () => {
+		// Rail is now a fixed-length progress bar, not a scroll container.
+		// Each dot lands at `((page - 1) + yRatio) / numPages` of the rail's
+		// height. With numPages=4: page 2 + yRatio 0.15 = 0.2875 → 28.75%;
+		// page 2 + yRatio 0.78 = 0.445 → 44.5%.
 		const notes = [
 			makeNote({ id: "note-top", title: "Near Top", anchorPage: 2, anchorYRatio: 0.15 }),
 			makeNote({ id: "note-bottom", title: "Near Bottom", anchorPage: 2, anchorYRatio: 0.78 }),
 		]
-		const scrollTo = vi.fn()
-		Object.defineProperty(HTMLElement.prototype, "scrollTo", {
-			configurable: true,
-			value: scrollTo,
-		})
-		HTMLElement.prototype.getBoundingClientRect = function () {
-			const text = this.textContent ?? ""
-			if (this.className.includes("overflow-y-auto")) {
-				return {
-					top: 0,
-					bottom: 400,
-					height: 400,
-					left: 0,
-					right: 320,
-					width: 320,
-					x: 0,
-					y: 0,
-					toJSON() {},
-				}
-			}
-			if (text.includes("Near Top")) {
-				return {
-					top: 40,
-					bottom: 100,
-					height: 60,
-					left: 0,
-					right: 320,
-					width: 320,
-					x: 0,
-					y: 40,
-					toJSON() {},
-				}
-			}
-			if (text.includes("Near Bottom")) {
-				return {
-					top: 240,
-					bottom: 300,
-					height: 60,
-					left: 0,
-					right: 320,
-					width: 320,
-					x: 0,
-					y: 240,
-					toJSON() {},
-				}
-			}
-			if (text.includes("Page 2")) {
-				return {
-					top: 16,
-					bottom: 40,
-					height: 24,
-					left: 0,
-					right: 100,
-					width: 100,
-					x: 0,
-					y: 16,
-					toJSON() {},
-				}
-			}
-			return {
-				top: 0,
-				bottom: 0,
-				height: 0,
-				left: 0,
-				right: 0,
-				width: 0,
-				x: 0,
-				y: 0,
-				toJSON() {},
-			}
-		}
 
 		const NotesPanel = await importNotesPanel()
-		render(
+		const { container } = render(
 			<NotesPanel
 				activeCitingNoteIds={new Set()}
 				currentAnchorYRatio={0.8}
 				currentPage={2}
 				expandedNoteId={null}
 				notes={notes}
+				numPages={4}
 				onCreateAtCurrent={() => {}}
 				onExpand={() => {}}
 				onJumpToPage={() => {}}
 			/>,
 		)
 
-		await waitFor(() => {
-			expect(scrollTo).toHaveBeenCalled()
-		})
-		expect(scrollTo).toHaveBeenLastCalledWith({ top: 332, behavior: "smooth" })
+		const top = container.querySelector('[data-note-id="note-top"]') as HTMLElement | null
+		const bottom = container.querySelector(
+			'[data-note-id="note-bottom"]',
+		) as HTMLElement | null
+		// Subtracts DOT_RADIUS (8px) so the dot's center sits exactly on
+		// the rail line at the normalized top position.
+		expect(top?.style.top).toBe("calc(28.75% - 8px)")
+		expect(bottom?.style.top).toBe("calc(44.5% - 8px)")
 	})
 
 	it("surfaces a visual cue for notes citing the selected block", async () => {

@@ -17,7 +17,7 @@
  * with existing call sites and the matching DB column name; the input it
  * accepts is now opaque editor JSON.
  */
-import { formatCitationToken } from "./citations"
+import { formatAnnotationCitationToken, formatCitationToken } from "./citations"
 
 export type BlockNoteDoc = unknown
 
@@ -177,7 +177,11 @@ function inlinesToMd(content: unknown): string {
 			// above (via marks) and the legacy node branch here.
 			if (node.type === "link") {
 				const inner = inlinesToMd(node.content ?? [])
-				const href = (node.attrs?.href as string) ?? (node.props?.href as string) ?? ""
+				const href =
+					(node.attrs?.href as string) ??
+					(node.props?.href as string) ??
+					(node.href as string) ??
+					""
 				return `[${inner}](${href})`
 			}
 			// Inline math: emit as $latex$ so the LLM and search index see
@@ -201,6 +205,29 @@ function inlinesToMd(content: unknown): string {
 						paperId: data.paperId,
 						blockId: data.blockId,
 						blockNumber: data.blockNumber,
+						snapshot: data.snapshot,
+					})
+				}
+				return data.snapshot ?? ""
+			}
+			if (node.type === "annotationCitation") {
+				const data = (node.attrs ?? node.props ?? {}) as {
+					paperId?: string
+					annotationId?: string
+					annotationKind?: "highlight" | "underline" | "ink"
+					page?: number
+					snapshot?: string
+				}
+				if (
+					data.paperId &&
+					data.annotationId &&
+					(data.annotationKind === "highlight" || data.annotationKind === "underline")
+				) {
+					return formatAnnotationCitationToken({
+						paperId: data.paperId,
+						annotationId: data.annotationId,
+						annotationKind: data.annotationKind,
+						page: data.page,
 						snapshot: data.snapshot,
 					})
 				}

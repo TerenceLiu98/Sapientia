@@ -54,6 +54,7 @@ import {
 import { usePalette } from "@/lib/highlight-palette"
 import { cn } from "@/lib/utils"
 import {
+	AnnotationCitationNode,
 	BlockCitationNode,
 	MathBlockNode,
 	MathInlineNode,
@@ -93,6 +94,7 @@ const editorExtensions = [
 	}),
 	HorizontalRule,
 	BlockCitationNode,
+	AnnotationCitationNode,
 	MathInlineNode,
 	MathBlockNode,
 	NovelCommand.configure({
@@ -249,10 +251,22 @@ interface Props {
 	noteId: string
 	onEditorReady?: (editor: NoteEditorRef) => void
 	onOpenCitationBlock?: (paperId: string, blockId: string) => void
+	onOpenCitationAnnotation?: (
+		paperId: string,
+		annotationId: string,
+		page?: number,
+		yRatio?: number,
+	) => void
 	headerActions?: ReactNode
 }
 
-export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerActions }: Props) {
+export function NoteEditor({
+	noteId,
+	onEditorReady,
+	onOpenCitationBlock,
+	onOpenCitationAnnotation,
+	headerActions,
+}: Props) {
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
@@ -302,6 +316,7 @@ export function NoteEditor({ noteId, onEditorReady, onOpenCitationBlock, headerA
 			debounceRef={debounceRef}
 			onEditorReady={onEditorReady}
 			onOpenCitationBlock={onOpenCitationBlock}
+			onOpenCitationAnnotation={onOpenCitationAnnotation}
 			headerActions={headerActions}
 		/>
 	)
@@ -563,6 +578,7 @@ function NoteEditorInner({
 	debounceRef,
 	onEditorReady,
 	onOpenCitationBlock,
+	onOpenCitationAnnotation,
 	headerActions,
 }: {
 	note: { id: string; title: string; workspaceId: string }
@@ -575,6 +591,12 @@ function NoteEditorInner({
 	debounceRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
 	onEditorReady?: (editor: NoteEditorRef) => void
 	onOpenCitationBlock?: (paperId: string, blockId: string) => void
+	onOpenCitationAnnotation?: (
+		paperId: string,
+		annotationId: string,
+		page?: number,
+		yRatio?: number,
+	) => void
 	headerActions?: ReactNode
 }) {
 	const { palette } = usePalette()
@@ -625,6 +647,7 @@ function NoteEditorInner({
 			<div className="note-editor__body flex-1 overflow-y-auto">
 				<NoteCitationThemeProvider
 					onOpenBlock={onOpenCitationBlock}
+					onOpenAnnotation={onOpenCitationAnnotation}
 					palette={palette}
 					workspaceId={note.workspaceId}
 				>

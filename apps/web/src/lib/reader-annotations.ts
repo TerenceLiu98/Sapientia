@@ -18,6 +18,32 @@ export type ReaderAnnotationBody =
 	| { from: ReaderAnnotationPoint; to: ReaderAnnotationPoint }
 	| { points: ReaderAnnotationPoint[] }
 
+export function annotationBodyBoundingBox(
+	kind: ReaderAnnotationKind,
+	body: ReaderAnnotationBody,
+): ReaderAnnotationRect | null {
+	if (kind === "highlight" && "rect" in body) {
+		return body.rect
+	}
+	if (kind === "underline" && "from" in body && "to" in body) {
+		const { from, to } = body
+		return {
+			x: Math.min(from.x, to.x),
+			y: Math.min(from.y, to.y),
+			w: Math.abs(to.x - from.x),
+			h: Math.abs(to.y - from.y),
+		}
+	}
+	if (kind === "ink" && "points" in body && body.points.length > 0) {
+		const xs = body.points.map((p) => p.x)
+		const ys = body.points.map((p) => p.y)
+		const x = Math.min(...xs)
+		const y = Math.min(...ys)
+		return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
+	}
+	return null
+}
+
 export interface ReaderAnnotationColor {
 	value: string
 	label: string

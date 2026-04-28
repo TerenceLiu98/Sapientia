@@ -30,3 +30,21 @@ export function useNotesForBlock(paperId: string, blockId: string | null) {
 		enabled: Boolean(paperId && blockId),
 	})
 }
+
+export interface NoteCitations {
+	noteId: string
+	blockIds: string[]
+	annotations: Array<{ id: string; kind: "highlight" | "underline" }>
+}
+
+// All citations grouped by note for the given paper. Drives the
+// marginalia rail dot colors — each dot mixes the colors of every block
+// or annotation the note cites in its body.
+export function usePaperNoteCitations(paperId: string) {
+	return useQuery<NoteCitations[]>({
+		queryKey: ["paper", paperId, "note-citations"],
+		queryFn: () => apiFetch<NoteCitations[]>(`/api/v1/papers/${paperId}/note-citations`),
+		enabled: Boolean(paperId),
+		staleTime: 60 * 1000,
+	})
+}

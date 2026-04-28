@@ -1,6 +1,8 @@
+import type { ReactNode } from "react"
 import type { ReaderAnnotation } from "@/api/hooks/reader-annotations"
 import {
 	READER_ANNOTATION_COLORS,
+	annotationBodyBoundingBox,
 	distanceBetweenPoints,
 	type ReaderAnnotationBody,
 	type ReaderAnnotationPoint,
@@ -12,11 +14,13 @@ const HIGHLIGHT_MIN_W = 0.01
 
 export function ReaderAnnotationShape({
 	annotation,
+	flashed,
 	H,
 	onSelect,
 	W,
 }: {
 	annotation: ReaderAnnotation
+	flashed?: boolean
 	H: number
 	onSelect?: (annotationId: string | null) => void
 	W: number
@@ -32,6 +36,21 @@ export function ReaderAnnotationShape({
 			onSelect?.(annotation.id)
 		},
 	}
+	// SMIL pulse used for the citation-jump flash. Mounting the <animate>
+	// element re-runs the animation each time `flashed` flips on, so a
+	// rapid second click on the same chip restarts the pulse instead of
+	// silently ignoring it. We pulse opacity rather than color so it works
+	// uniformly across the user's palette colors.
+	const flashPulse = flashed ? (
+		<animate
+			attributeName="opacity"
+			begin="0s"
+			dur="1.5s"
+			fill="freeze"
+			repeatCount="1"
+			values="1;0.35;1;0.35;1"
+		/>
+	) : null
 	if (annotation.kind === "highlight" && "rect" in annotation.body) {
 		const { rect } = annotation.body
 		return (
@@ -45,7 +64,9 @@ export function ReaderAnnotationShape({
 				x={rect.x * W}
 				y={rect.y * H}
 				{...stopAndSelect}
-			/>
+			>
+				{flashPulse}
+			</rect>
 		)
 	}
 	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
@@ -63,7 +84,9 @@ export function ReaderAnnotationShape({
 					x2={to.x * W}
 					y1={from.y * H}
 					y2={to.y * H}
-				/>
+				>
+					{flashPulse}
+				</line>
 				<line
 					{...stopAndSelect}
 					pointerEvents="stroke"
@@ -90,7 +113,9 @@ export function ReaderAnnotationShape({
 					strokeLinejoin="round"
 					strokeOpacity={0.95}
 					strokeWidth={3.5}
-				/>
+				>
+					{flashPulse}
+				</path>
 				<path
 					{...stopAndSelect}
 					d={d}
@@ -113,26 +138,7 @@ function pointsToScaledPath(points: ReaderAnnotationPoint[], W: number, H: numbe
 }
 
 function annotationBoundingBox(annotation: ReaderAnnotation) {
-	if (annotation.kind === "highlight" && "rect" in annotation.body) {
-		return annotation.body.rect
-	}
-	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
-		const { from, to } = annotation.body
-		return {
-			x: Math.min(from.x, to.x),
-			y: Math.min(from.y, to.y),
-			w: Math.abs(to.x - from.x),
-			h: Math.abs(to.y - from.y),
-		}
-	}
-	if (annotation.kind === "ink" && "points" in annotation.body && annotation.body.points.length) {
-		const xs = annotation.body.points.map((p) => p.x)
-		const ys = annotation.body.points.map((p) => p.y)
-		const x = Math.min(...xs)
-		const y = Math.min(...ys)
-		return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
-	}
-	return null
+	return annotationBodyBoundingBox(annotation.kind, annotation.body)
 }
 
 export function ReaderAnnotationSelectionOutline({
@@ -171,12 +177,14 @@ export function ReaderAnnotationSelectionOutline({
 
 export function ReaderAnnotationActionsPopover({
 	annotation,
+	extraActions,
 	H,
 	onChangeColor,
 	onDelete,
 	W,
 }: {
 	annotation: ReaderAnnotation
+	extraActions?: ReactNode
 	H: number
 	onChangeColor: (color: string) => void
 	onDelete: () => void
@@ -218,6 +226,8 @@ export function ReaderAnnotationActionsPopover({
 				/>
 			))}
 			<div className="mx-1 h-4 w-px bg-border-subtle" />
+			{extraActions}
+			{extraActions ? <div className="mx-1 h-4 w-px bg-border-subtle" /> : null}
 			<button
 				aria-label="Delete annotation"
 				className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-error"

@@ -37,15 +37,30 @@ export const notes = pgTable(
 		title: text("title").notNull().default("Untitled"),
 		currentVersion: integer("current_version").notNull().default(1),
 
-		// Spatial anchor for the marginalia model (TASK-018). A note pins to a
-		// (page, y_ratio) position in its paper. y_ratio is 0..1 within the
+		// Spatial anchor for the marginalia model. A note pins to a
+		// (page, y_ratio) position in its paper; y_ratio is 0..1 within the
 		// page so the anchor survives zoom and device-pixel changes.
-		// `anchorBlockId` is set only by the cite-from-block path and lets us
-		// answer "show me the note(s) that cite this block" without joining
-		// note_block_refs. All three are nullable for legacy / standalone notes.
+		//
+		// `anchorKind` declares which conceptual source the user attached the
+		// note to: a structural block, a highlight/underline they drew, or
+		// just a position on the page. The matching id (block id or
+		// reader-annotation uuid) lives in `anchorBlockId` /
+		// `anchorAnnotationId`. We store both even when one is the primary —
+		// e.g. a highlight-anchored note also remembers which block it
+		// landed inside, so the marginalia tag strip can show "block 7" as a
+		// secondary structural anchor and the jump-to-anchor flow has a
+		// fallback if the highlight is later deleted (block ids are stable;
+		// annotation ids aren't).
+		//
+		// All anchor fields are nullable for legacy / standalone /
+		// workspace-level notes.
 		anchorPage: integer("anchor_page"),
 		anchorYRatio: doublePrecision("anchor_y_ratio"),
+		anchorKind: text("anchor_kind", {
+			enum: ["page", "block", "highlight", "underline"],
+		}),
 		anchorBlockId: text("anchor_block_id"),
+		anchorAnnotationId: uuid("anchor_annotation_id"),
 
 		// MinIO keys for this note's content. The JSON is BlockNote's authoritative
 		// document; the markdown is a lossy derived sibling kept alongside for

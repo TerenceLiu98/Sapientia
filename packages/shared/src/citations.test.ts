@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { extractCitations, formatCitationToken } from "./citations"
+import {
+	extractAnnotationCitations,
+	extractCitations,
+	formatAnnotationCitationToken,
+	formatCitationToken,
+} from "./citations"
 
 describe("extractCitations", () => {
 	it("returns [] for non-array input", () => {
@@ -110,6 +115,78 @@ describe("extractCitations", () => {
 	})
 })
 
+describe("extractAnnotationCitations", () => {
+	it("returns [] when no annotationCitation nodes are present", () => {
+		const doc = [{ type: "paragraph", content: [{ type: "text", text: "plain" }] }]
+		expect(extractAnnotationCitations(doc)).toEqual([])
+	})
+
+	it("finds highlight and underline citations and aggregates duplicates", () => {
+		const doc = [
+			{
+				type: "paragraph",
+				content: [
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a1",
+							annotationKind: "highlight",
+						},
+					},
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a1",
+							annotationKind: "highlight",
+						},
+					},
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a2",
+							annotationKind: "underline",
+						},
+					},
+				],
+			},
+		]
+		expect(extractAnnotationCitations(doc)).toEqual([
+			{ paperId: "p1", annotationId: "a1", annotationKind: "highlight", count: 2 },
+			{ paperId: "p1", annotationId: "a2", annotationKind: "underline", count: 1 },
+		])
+	})
+
+	it("ignores ink annotations and malformed refs", () => {
+		const doc = [
+			{
+				type: "paragraph",
+				content: [
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "a1",
+							annotationKind: "ink",
+						},
+					},
+					{
+						type: "annotationCitation",
+						props: {
+							paperId: "p1",
+							annotationId: "",
+							annotationKind: "highlight",
+						},
+					},
+				],
+			},
+		]
+		expect(extractAnnotationCitations(doc)).toEqual([])
+	})
+})
+
 describe("formatCitationToken", () => {
 	it("renders the [[block N · paperId#blockId]] form when blockNumber is set", () => {
 		expect(formatCitationToken({ paperId: "p1", blockId: "b1", blockNumber: 12 })).toBe(
@@ -131,5 +208,29 @@ describe("formatCitationToken", () => {
 
 	it("emits paperId#blockId without a trailing colon when no payload is provided", () => {
 		expect(formatCitationToken({ paperId: "p1", blockId: "b1" })).toBe("[[p1#b1]]")
+	})
+})
+
+describe("formatAnnotationCitationToken", () => {
+	it("renders the annotation kind, page, and id in a readable token", () => {
+		expect(
+			formatAnnotationCitationToken({
+				paperId: "p1",
+				annotationId: "a1",
+				annotationKind: "highlight",
+				page: 12,
+			}),
+		).toBe("[[highlight p.12 · p1#a1]]")
+	})
+
+	it("appends a snapshot when present", () => {
+		expect(
+			formatAnnotationCitationToken({
+				paperId: "p1",
+				annotationId: "a1",
+				annotationKind: "underline",
+				snapshot: "important line",
+			}),
+		).toBe("[[underline · p1#a1: important line]]")
 	})
 })

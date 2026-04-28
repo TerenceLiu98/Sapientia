@@ -14,13 +14,17 @@ import {
 
 export const noteRoutes = new Hono<AuthContext>()
 
+const AnchorKindSchema = z.enum(["page", "block", "highlight", "underline"])
+
 const CreateNoteBodySchema = z.object({
 	paperId: z.string().uuid().nullable().optional(),
 	title: z.string().min(1).max(200).optional(),
 	blocknoteJson: z.unknown(),
 	anchorPage: z.number().int().min(1).nullable().optional(),
 	anchorYRatio: z.number().min(0).max(1).nullable().optional(),
+	anchorKind: AnchorKindSchema.nullable().optional(),
 	anchorBlockId: z.string().min(1).max(64).nullable().optional(),
+	anchorAnnotationId: z.string().uuid().nullable().optional(),
 })
 
 const UpdateNoteBodySchema = z.object({
@@ -28,7 +32,9 @@ const UpdateNoteBodySchema = z.object({
 	blocknoteJson: z.unknown().optional(),
 	anchorPage: z.number().int().min(1).nullable().optional(),
 	anchorYRatio: z.number().min(0).max(1).nullable().optional(),
+	anchorKind: AnchorKindSchema.nullable().optional(),
 	anchorBlockId: z.string().min(1).max(64).nullable().optional(),
+	anchorAnnotationId: z.string().uuid().nullable().optional(),
 })
 
 // Strip server-only columns (object keys, agent cache, tsvector) before
@@ -43,7 +49,9 @@ function publicNote(note: Note) {
 		currentVersion: note.currentVersion,
 		anchorPage: note.anchorPage,
 		anchorYRatio: note.anchorYRatio,
+		anchorKind: note.anchorKind,
 		anchorBlockId: note.anchorBlockId,
+		anchorAnnotationId: note.anchorAnnotationId,
 		createdAt: note.createdAt,
 		updatedAt: note.updatedAt,
 	}
@@ -82,7 +90,9 @@ noteRoutes.post(
 			blocknoteJson: body.data.blocknoteJson,
 			anchorPage: body.data.anchorPage ?? null,
 			anchorYRatio: body.data.anchorYRatio ?? null,
+			anchorKind: body.data.anchorKind ?? null,
 			anchorBlockId: body.data.anchorBlockId ?? null,
+			anchorAnnotationId: body.data.anchorAnnotationId ?? null,
 		})
 		return c.json(publicNote(note), 201)
 	},
@@ -119,7 +129,9 @@ noteRoutes.put("/notes/:id", requireAuth, async (c) => {
 		blocknoteJson: body.data.blocknoteJson,
 		anchorPage: body.data.anchorPage,
 		anchorYRatio: body.data.anchorYRatio,
+		anchorKind: body.data.anchorKind,
 		anchorBlockId: body.data.anchorBlockId,
+		anchorAnnotationId: body.data.anchorAnnotationId,
 	})
 	return c.json(publicNote(updated))
 })

@@ -6,8 +6,9 @@ import {
 	ReactNodeViewRenderer,
 } from "@tiptap/react"
 import katex from "katex"
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { createContext, type CSSProperties, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { useHighlights } from "@/api/hooks/highlights"
+import { useReaderAnnotations } from "@/api/hooks/reader-annotations"
 import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 
 // Theming context: chip rendering needs the active palette + the workspace
@@ -17,10 +18,14 @@ import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 // attributes (which would denormalize the chip's data).
 const NoteCitationThemeContext = createContext<{
 	onOpenBlock: ((paperId: string, blockId: string) => void) | null
+	onOpenAnnotation:
+		| ((paperId: string, annotationId: string, page?: number, yRatio?: number) => void)
+		| null
 	workspaceId: string | null
 	palette: PaletteEntry[]
 }>({
 	onOpenBlock: null,
+	onOpenAnnotation: null,
 	workspaceId: null,
 	palette: [],
 })
@@ -28,17 +33,24 @@ const NoteCitationThemeContext = createContext<{
 export function NoteCitationThemeProvider({
 	children,
 	onOpenBlock,
+	onOpenAnnotation,
 	palette,
 	workspaceId,
 }: {
 	children: React.ReactNode
 	onOpenBlock?: (paperId: string, blockId: string) => void
+	onOpenAnnotation?: (paperId: string, annotationId: string, page?: number, yRatio?: number) => void
 	palette: PaletteEntry[]
 	workspaceId: string | null
 }) {
 	return (
 		<NoteCitationThemeContext.Provider
-			value={{ onOpenBlock: onOpenBlock ?? null, workspaceId, palette }}
+			value={{
+				onOpenBlock: onOpenBlock ?? null,
+				onOpenAnnotation: onOpenAnnotation ?? null,
+				workspaceId,
+				palette,
+			}}
 		>
 			{children}
 		</NoteCitationThemeContext.Provider>
@@ -85,6 +97,43 @@ export const BlockCitationNode = Node.create({
 	},
 })
 
+export const AnnotationCitationNode = Node.create({
+	name: "annotationCitation",
+	group: "inline",
+	inline: true,
+	atom: true,
+	selectable: false,
+	draggable: false,
+
+	addAttributes() {
+		return {
+			paperId: { default: "" },
+			annotationId: { default: "" },
+			annotationKind: { default: "highlight" },
+			page: { default: 0 },
+			yRatio: { default: 0.5 },
+			color: { default: "" },
+			snapshot: { default: "" },
+		}
+	},
+
+	parseHTML() {
+		return [{ tag: "span[data-annotation-citation]" }]
+	},
+
+	renderHTML({ HTMLAttributes }) {
+		return [
+			"span",
+			mergeAttributes(HTMLAttributes, { "data-annotation-citation": "" }),
+			"",
+		]
+	},
+
+	addNodeView() {
+		return ReactNodeViewRenderer(AnnotationCitationView)
+	},
+})
+
 function BlockCitationView({ node }: NodeViewProps) {
 	const paperId = (node.attrs.paperId as string) ?? ""
 	const blockId = (node.attrs.blockId as string) ?? ""
@@ -101,6 +150,26 @@ function BlockCitationView({ node }: NodeViewProps) {
 				blockNumber={blockNumber}
 				paperId={paperId}
 				snapshot={snapshot}
+			/>
+		</NodeViewWrapper>
+	)
+}
+
+function AnnotationCitationView({ node }: NodeViewProps) {
+	return (
+		<NodeViewWrapper
+			as="span"
+			className="note-editor__citation-node"
+			contentEditable={false}
+		>
+			<AnnotationCitationChip
+				annotationId={(node.attrs.annotationId as string) ?? ""}
+				annotationKind={((node.attrs.annotationKind as string) ?? "highlight") as "highlight" | "underline"}
+				color={(node.attrs.color as string) ?? ""}
+				page={(node.attrs.page as number) ?? 0}
+				paperId={(node.attrs.paperId as string) ?? ""}
+				snapshot={(node.attrs.snapshot as string) ?? ""}
+				yRatio={(node.attrs.yRatio as number) ?? 0.5}
 			/>
 		</NodeViewWrapper>
 	)
@@ -162,6 +231,119 @@ export function BlockCitationChip({
 			<span className="whitespace-nowrap">{label}</span>
 		</span>
 	)
+}
+
+export function AnnotationCitationChip({
+	paperId,
+	annotationId,
+	annotationKind,
+	page,
+	yRatio,
+	color,
+	snapshot,
+}: {
+	paperId: string
+	annotationId: string
+	annotationKind: "highlight" | "underline"
+	page: number
+	yRatio: number
+	color: string
+	snapshot: string
+}) {
+	const { onOpenAnnotation, workspaceId } = useContext(NoteCitationThemeContext)
+	const { data: annotations = [] } = useReaderAnnotations(paperId, workspaceId ?? undefined)
+	const liveAnnotation = annotations.find((annotation) => annotation.id === annotationId) ?? null
+	const effectiveKind =
+		liveAnnotation?.kind === "highlight" || liveAnnotation?.kind === "underline"
+			? liveAnnotation.kind
+			: annotationKind
+	const effectivePage = liveAnnotation?.page ?? page
+	const effectiveColor = liveAnnotation?.color ?? color
+	const isStale = liveAnnotation === null
+	const label =
+		snapshot.trim().length > 0
+			? snapshot
+			: `${effectiveKind === "highlight" ? "highlight" : "underline"}${effectivePage > 0 ? ` p.${effectivePage}` : ""}`
+
+	// Stale: the source annotation has been deleted. Render as a quiet
+	// historical trace — no underline color cue, no jump-to behavior, just
+	// a dotted outline + the snapshot. Clicking still scrolls to the
+	// remembered page so the reader can visit the neighborhood, but we
+	// don't pretend the annotation exists.
+	if (isStale) {
+		return (
+			// biome-ignore lint/a11y/noStaticElementInteractions: chip is a span by Tiptap rules; tabindex+role make it keyboardable
+			// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handler wired alongside click
+			// biome-ignore lint/a11y/useSemanticElements: span on purpose — must be inline atom inside the editor
+			<span
+				className="note-editor__citation-tag mx-0.5 cursor-pointer select-none border border-dashed border-text-tertiary/50 px-1 py-0.5 font-sans text-text-tertiary line-through decoration-from-font transition-colors hover:bg-surface-hover"
+				contentEditable={false}
+				onClick={(e) => {
+					e.stopPropagation()
+					if (effectivePage > 0) {
+						onOpenAnnotation?.(paperId, annotationId, effectivePage, yRatio)
+					}
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault()
+						if (effectivePage > 0) {
+							onOpenAnnotation?.(paperId, annotationId, effectivePage, yRatio)
+						}
+					}
+				}}
+				role="button"
+				tabIndex={0}
+				title={`stale ${effectiveKind} reference · originally at p.${effectivePage > 0 ? effectivePage : "?"}`}
+			>
+				<span className="whitespace-nowrap">{label}</span>
+			</span>
+		)
+	}
+
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: chip is a span by Tiptap rules; tabindex+role make it keyboardable
+		// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handler wired alongside click
+		// biome-ignore lint/a11y/useSemanticElements: span on purpose — must be inline atom inside the editor
+		<span
+			className="note-editor__citation-tag mx-0.5 cursor-pointer select-none font-sans font-semibold tracking-[-0.015em] shadow-sm ring-1 ring-inset ring-current/10 transition-colors hover:brightness-[0.97]"
+			contentEditable={false}
+			onClick={(e) => {
+				e.stopPropagation()
+				onOpenAnnotation?.(paperId, annotationId, effectivePage > 0 ? effectivePage : undefined, yRatio)
+			}}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault()
+					onOpenAnnotation?.(paperId, annotationId, effectivePage > 0 ? effectivePage : undefined, yRatio)
+				}
+			}}
+			role="button"
+			style={annotationCitationStyles(effectiveKind, effectiveColor)}
+			tabIndex={0}
+			title={`${paperId}#${annotationId}`}
+		>
+			<span className="whitespace-nowrap">{label}</span>
+		</span>
+	)
+}
+
+function annotationCitationStyles(
+	annotationKind: "highlight" | "underline",
+	color: string,
+): CSSProperties | undefined {
+	if (!color) {
+		return annotationKind === "highlight"
+			? { backgroundColor: "rgba(244, 200, 79, 0.24)", color: "rgb(120, 53, 15)" }
+			: {
+					backgroundColor: "rgba(59, 130, 246, 0.12)",
+					color: "rgb(29, 78, 216)",
+					boxShadow: "inset 0 -2px 0 rgba(59, 130, 246, 0.45)",
+				}
+	}
+	return annotationKind === "highlight"
+		? { backgroundColor: `${color}33`, color }
+		: { backgroundColor: `${color}18`, color, boxShadow: `inset 0 -2px 0 ${color}` }
 }
 
 function renderKatex(latex: string, displayMode: boolean): string {
