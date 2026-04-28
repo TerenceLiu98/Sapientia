@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note } from "@/api/hooks/notes"
 import { NoteEditor, type NoteEditorRef } from "@/components/notes/NoteEditor"
 
@@ -36,8 +36,9 @@ export function NotesPanel({
 	onOpenCitationBlock,
 }: NotesPanelProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null)
-	const cardRefs = useRef(new Map<string, HTMLDivElement>())
+	const cardRefs = useRef(new Map<string, HTMLElement>())
 	const headerRefs = useRef(new Map<number | "unanchored", HTMLDivElement>())
+	const [cardRefsVersion, setCardRefsVersion] = useState(0)
 	// Soft-lock for the page-driven follow effect: if the user just scrolled
 	// inside the pane themselves, we skip auto-scroll for ~500ms so the two
 	// scroll sources don't fight. Same pattern as BlocksPanel.
@@ -45,10 +46,37 @@ export function NotesPanel({
 
 	const grouped = useGrouped(notes)
 
+	// Auto-expand the first note anchored to the current page; collapse
+	// when the page has none. The user can still expand/collapse manually
+	// — their choice survives until the page changes again.
+	const autoExpandTargetId = useMemo(
+		() => notes.find((note) => note.anchorPage === currentPage)?.id ?? null,
+		[currentPage, notes],
+	)
+	useEffect(() => {
+		if (expandedNoteId === autoExpandTargetId) return
+		onExpand(autoExpandTargetId)
+		// Intentionally only re-runs on page-derived target changes.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [autoExpandTargetId])
+
 	useEffect(() => {
 		if (!externalFollowLockUntil) return
 		lockUntilRef.current = Math.max(lockUntilRef.current, externalFollowLockUntil)
 	}, [externalFollowLockUntil])
+
+	const registerCardRef = useCallback((noteId: string, el: HTMLElement | null) => {
+		const previous = cardRefs.current.get(noteId)
+		if (el) {
+			if (previous === el) return
+			cardRefs.current.set(noteId, el)
+			setCardRefsVersion((value) => value + 1)
+			return
+		}
+		if (!previous) return
+		cardRefs.current.delete(noteId)
+		setCardRefsVersion((value) => value + 1)
+	}, [])
 
 	// Page changes from the PDF/parsed view → scroll the pane to that page's
 	// closest note anchor. Skipped while locked.
@@ -80,7 +108,7 @@ export function NotesPanel({
 		} else {
 			container.scrollTop = top
 		}
-	}, [currentAnchorYRatio, currentPage, expandedNoteId, notes])
+	}, [cardRefsVersion, currentAnchorYRatio, currentPage, expandedNoteId, notes])
 
 	const onUserScroll = useCallback(() => {
 		lockUntilRef.current = Date.now() + 500
@@ -155,30 +183,18 @@ export function NotesPanel({
 										</button>
 									)}
 								</div>
-								<div className="space-y-2">
-									{group.notes.map((note) => {
-										const anchorPage = note.anchorPage
-										return (
-											<NoteCard
-												cardRefs={cardRefs}
-												expanded={expandedNoteId === note.id}
-												isCitingSelectedBlock={activeCitingNoteIds.has(note.id)}
-												key={note.id}
-												note={note}
-												onCollapse={() => onExpand(null)}
-												onDelete={onDelete}
-												onEditorReady={onEditorReady}
-												onOpenCitationBlock={handleOpenCitationBlock}
-												onExpand={() => onExpand(note.id)}
-												onJumpToAnchor={
-													anchorPage != null
-														? () => onJumpToPage(anchorPage, note.anchorYRatio ?? undefined)
-														: undefined
-												}
-											/>
-										)
-									})}
-								</div>
+								<NoteGroupBody
+									activeCitingNoteIds={activeCitingNoteIds}
+									expandedNoteId={expandedNoteId}
+									group={group}
+									onCollapseNote={() => onExpand(null)}
+									onDelete={onDelete}
+									onEditorReady={onEditorReady}
+									onExpandNote={onExpand}
+									onJumpToPage={onJumpToPage}
+									onOpenCitationBlock={handleOpenCitationBlock}
+									onRegisterCardRef={registerCardRef}
+								/>
 							</div>
 						)
 					})
@@ -207,33 +223,88 @@ function useGrouped(notes: Note[]): NoteGroup[] {
 	return groups
 }
 
+interface NoteGroupBodyProps {
+	activeCitingNoteIds: Set<string>
+	expandedNoteId: string | null
+	group: NoteGroup
+	onCollapseNote: () => void
+	onDelete?: (noteId: string) => Promise<void> | void
+	onEditorReady?: (editor: NoteEditorRef) => void
+	onExpandNote: (noteId: string | null) => void
+	onJumpToPage: (page: number, yRatio?: number) => void
+	onOpenCitationBlock?: (paperId: string, blockId: string) => void
+	onRegisterCardRef: (noteId: string, el: HTMLElement | null) => void
+}
+
+const NoteGroupBody = memo(function NoteGroupBody({
+	activeCitingNoteIds,
+	expandedNoteId,
+	group,
+	onCollapseNote,
+	onDelete,
+	onEditorReady,
+	onExpandNote,
+	onJumpToPage,
+	onOpenCitationBlock,
+	onRegisterCardRef,
+}: NoteGroupBodyProps) {
+	return (
+		<div className="space-y-2">
+			{group.notes.map((note) => {
+				const anchorPage = note.anchorPage
+				return (
+					<NoteCard
+						expanded={expandedNoteId === note.id}
+						isCitingSelectedBlock={activeCitingNoteIds.has(note.id)}
+						key={note.id}
+						note={note}
+						onCollapse={onCollapseNote}
+						onDelete={onDelete}
+						onEditorReady={onEditorReady}
+						onOpenCitationBlock={onOpenCitationBlock}
+						onExpand={() => onExpandNote(note.id)}
+						onJumpToAnchor={
+							anchorPage != null
+								? () => onJumpToPage(anchorPage, note.anchorYRatio ?? undefined)
+								: undefined
+						}
+						onRegisterCardRef={onRegisterCardRef}
+					/>
+				)
+			})}
+		</div>
+	)
+})
+
 function NoteCard({
 	note,
 	expanded,
 	isCitingSelectedBlock,
-	cardRefs,
 	onExpand,
 	onCollapse,
 	onJumpToAnchor,
 	onDelete,
 	onEditorReady,
 	onOpenCitationBlock,
+	onRegisterCardRef,
 }: {
 	note: Note
 	expanded: boolean
 	isCitingSelectedBlock: boolean
-	cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
 	onExpand: () => void
 	onCollapse: () => void
 	onJumpToAnchor?: () => void
 	onDelete?: (noteId: string) => Promise<void> | void
 	onEditorReady?: (editor: NoteEditorRef) => void
 	onOpenCitationBlock?: (paperId: string, blockId: string) => void
+	onRegisterCardRef: (noteId: string, el: HTMLElement | null) => void
 }) {
-	const setRef = (el: HTMLDivElement | null) => {
-		if (el) cardRefs.current.set(note.id, el)
-		else cardRefs.current.delete(note.id)
-	}
+	const setRef = useCallback(
+		(el: HTMLElement | null) => {
+			onRegisterCardRef(note.id, el)
+		},
+		[note.id, onRegisterCardRef],
+	)
 
 	if (expanded) {
 		return (
@@ -243,39 +314,42 @@ function NoteCard({
 						? "border-accent-600/55 ring-1 ring-accent-600/20"
 						: "border-border-default"
 				}`}
-				ref={setRef}
+				ref={setRef as (el: HTMLDivElement | null) => void}
 			>
 				<div className="flex h-[420px] min-h-0 flex-col">
 					<NoteEditor
 						headerActions={
-							<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+							<div className="flex items-center justify-end gap-0.5">
 								{onJumpToAnchor ? (
 									<button
-										className="shrink-0 whitespace-nowrap text-text-tertiary text-xs hover:text-text-accent"
+										aria-label="Jump to note anchor"
+										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-accent"
 										onClick={onJumpToAnchor}
 										title="Jump to this note's anchor in the reader"
 										type="button"
 									>
-										Jump
+										<NoteJumpIcon />
 									</button>
 								) : null}
 								{onDelete ? (
 									<button
-										className="shrink-0 whitespace-nowrap text-text-tertiary text-xs hover:text-text-error"
+										aria-label="Delete note"
+										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-error"
 										onClick={() => void onDelete(note.id)}
 										title="Delete note"
 										type="button"
 									>
-										Delete
+										<NoteTrashIcon />
 									</button>
 								) : null}
 								<button
-									className="shrink-0 whitespace-nowrap text-text-tertiary text-xs hover:text-text-primary"
+									aria-label="Collapse note"
+									className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
 									onClick={onCollapse}
 									title="Collapse"
 									type="button"
 								>
-									Close
+									<NoteCloseIcon />
 								</button>
 							</div>
 						}
@@ -296,7 +370,7 @@ function NoteCard({
 					: "border-border-subtle bg-bg-primary/60"
 			}`}
 			onClick={onExpand}
-			ref={(el) => setRef(el as unknown as HTMLDivElement | null)}
+			ref={setRef as (el: HTMLButtonElement | null) => void}
 			type="button"
 		>
 			<div className="flex items-start justify-between gap-2">
@@ -312,5 +386,64 @@ function NoteCard({
 				{note.anchorBlockId ? "block-anchored" : note.anchorPage ? "page" : "unanchored"}
 			</div>
 		</button>
+	)
+}
+
+function NoteJumpIcon() {
+	// Arrow heading up-and-out — "go to" the anchor.
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M7 17 17 7" />
+			<path d="M9 7h8v8" />
+		</svg>
+	)
+}
+
+function NoteTrashIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M3 6h18" />
+			<path d="M8 6V4h8v2" />
+			<path d="M19 6l-1 14H6L5 6" />
+			<path d="M10 11v6M14 11v6" />
+		</svg>
+	)
+}
+
+function NoteCloseIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="m6 6 12 12M18 6 6 18" />
+		</svg>
 	)
 }

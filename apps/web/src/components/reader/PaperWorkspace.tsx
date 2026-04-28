@@ -117,11 +117,15 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 
 	const handleSelectBlockFromPane = useCallback(
 		(block: Block) => {
+			if (selectedBlockId === block.blockId) {
+				setSelectedBlockId(null)
+				return
+			}
 			setSelectedBlockId(block.blockId)
 			if (viewMode !== "pdf-only") return
 			requestMainPaneFocus(block)
 		},
-		[requestMainPaneFocus, viewMode],
+		[selectedBlockId, requestMainPaneFocus, viewMode],
 	)
 
 	const handleClearSelectedBlock = useCallback(() => {

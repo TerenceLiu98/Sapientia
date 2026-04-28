@@ -1251,6 +1251,26 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 									: undefined
 							}
 						/>
+						{showBoxChrome ? (
+							<span
+								className={`pointer-events-none absolute -top-[14px] left-0 z-[1] inline-flex select-none rounded-t-md rounded-br-md px-1.5 py-0.5 font-medium text-[10px] leading-none shadow-[0_1px_2px_rgba(15,23,42,0.18)] ${
+									fill
+										? ""
+										: `text-text-inverse ${isSelected || isHovered ? "bg-accent-600" : "bg-accent-600/85"}`
+								}`}
+								style={
+									fill
+										? {
+												background: fill.bg,
+												color: fill.text,
+												opacity: isSelected || isHovered ? 1 : 0.95,
+											}
+										: undefined
+								}
+							>
+								block {block.blockIndex + 1}
+							</span>
+						) : null}
 						{hasToolbar ? (
 							// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
 							<div

@@ -192,6 +192,11 @@ function NoteEditorInner({
 	const editor = useCreateBlockNote({
 		schema: noteSchema as never,
 		initialContent: initialContent.length > 0 ? (initialContent as never) : undefined,
+		// BlockNote's default drop cursor (`#ddeeff`, 5px) reads as teal/green
+		// over our cream reading background. Tone it down to a subtle gray
+		// pill that stays readable while dragging without screaming for
+		// attention when hovered.
+		dropCursor: { color: "rgba(15, 23, 42, 0.22)", width: 2 },
 	})
 
 	// Hand the editor up to whichever pane wants to insert citations.

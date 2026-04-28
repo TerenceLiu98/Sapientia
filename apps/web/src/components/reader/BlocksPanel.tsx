@@ -317,7 +317,7 @@ function BlocksPanelScrollBody({
 				: null
 		const targetBlock =
 			exactSelectedBlock ??
-			typeof requestedAnchorYRatio === "number"
+			(typeof requestedAnchorYRatio === "number"
 				? pageBlocks.reduce<Block | null>((best, block) => {
 						if (!block.bbox) return best
 						if (!best?.bbox) return block
@@ -325,7 +325,7 @@ function BlocksPanelScrollBody({
 						const nextDistance = Math.abs(block.bbox.y + block.bbox.h / 2 - requestedAnchorYRatio)
 						return nextDistance < bestDistance ? block : best
 					}, null)
-				: null
+				: null)
 		if (targetBlock && !cardRefs.current.get(targetBlock.blockId)) return
 		const targetEl = targetBlock ? (cardRefs.current.get(targetBlock.blockId) ?? header) : header
 		const targetRect = targetEl.getBoundingClientRect()
@@ -792,12 +792,14 @@ const BlockRow = memo(function BlockRow({
 		: undefined
 
 	const wrapperClass = `group relative cursor-pointer rounded-md px-3 py-2 transition-colors ${
-		isSelected
-			? "ring-1 ring-inset ring-accent-600/55"
-			: isHovered
-				? "ring-1 ring-inset ring-accent-600/25"
-				: ""
-	} ${highlightColor ? "" : "hover:bg-bg-overlay/50"}`
+		highlightColor
+			? ""
+			: isSelected
+				? "bg-accent-600/12"
+				: isHovered
+					? "bg-accent-600/7"
+					: "hover:bg-bg-overlay/50"
+	}`
 
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: nesting <h1>/<figure>/<pre> inside a <button> would break their semantics; role="button" on a <div> is the right escape hatch

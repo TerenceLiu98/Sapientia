@@ -32,7 +32,7 @@ export function BlockHighlightPicker({
 					<button
 						aria-label={`${entry.label} highlight${isActive ? " (click to clear)" : ""}`}
 						aria-pressed={isActive}
-						className={`${dim} rounded-sm border-2 transition-transform hover:scale-110 ${
+						className={`${dim} rounded-sm transition-transform hover:scale-110 ${
 							isActive ? "shadow-[0_0_0_1.5px_var(--color-text-accent)]" : ""
 						}`}
 						key={entry.key}
@@ -42,10 +42,7 @@ export function BlockHighlightPicker({
 							else onPick(entry.key)
 						}}
 						onMouseDown={(e) => e.stopPropagation()}
-						style={{
-							backgroundColor: colors.bg,
-							borderColor: colors.text,
-						}}
+						style={{ backgroundColor: colors.bg }}
 						title={`${entry.label}${isActive ? " · click to clear" : ""}`}
 						type="button"
 					/>
