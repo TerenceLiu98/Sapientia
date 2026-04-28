@@ -7,6 +7,14 @@ import type { Block } from "@/api/hooks/blocks"
 
 const refetchMock = vi.fn()
 const usePaperPdfUrlMock = vi.fn()
+const pdfDocumentGetDestinationMock = vi.fn()
+let documentItemClickArgs:
+	| {
+			dest?: unknown
+			pageIndex: number
+			pageNumber: number
+	  }
+	| null = null
 
 vi.mock("@/api/hooks/papers", () => ({
 	usePaperPdfUrl: (...args: Array<unknown>) => usePaperPdfUrlMock(...args),
@@ -16,26 +24,50 @@ vi.mock("react-pdf", () => ({
 	Document: ({
 		children,
 		onLoadSuccess,
+		onItemClick,
 	}: {
 		children?: ReactNode
-		onLoadSuccess?: (info: { numPages: number }) => void
+		onLoadSuccess?: (info: { getDestination: typeof pdfDocumentGetDestinationMock; numPages: number }) => void
+		onItemClick?: (args: { dest?: unknown; pageIndex: number; pageNumber: number }) => void
 	}) => {
 		// Trigger numPages discovery synchronously so the page list renders.
-		queueMicrotask(() => onLoadSuccess?.({ numPages: 3 }))
-		return <div data-testid="pdf-document">{children}</div>
+		queueMicrotask(() =>
+			onLoadSuccess?.({
+				getDestination: pdfDocumentGetDestinationMock,
+				numPages: 3,
+			}),
+		)
+		return (
+			<div data-testid="pdf-document">
+				<button
+					data-testid="pdf-internal-link"
+					onClick={() => {
+						if (documentItemClickArgs) onItemClick?.(documentItemClickArgs)
+					}}
+					type="button"
+				>
+					Jump
+				</button>
+				{children}
+			</div>
+		)
 	},
 	Page: ({
 		pageNumber,
 		scale,
 		onLoadSuccess,
+		onRenderSuccess,
 	}: {
 		pageNumber: number
 		scale: number
 		onLoadSuccess?: (page: { view: number[] }) => void
+		onRenderSuccess?: () => void
 	}) => {
 		queueMicrotask(() => onLoadSuccess?.({ view: [0, 0, 600, 800] }))
+		queueMicrotask(() => onRenderSuccess?.())
 		return (
 			<div data-testid={`pdf-page-${pageNumber}`} data-scale={scale}>
+				<canvas data-testid={`pdf-canvas-${pageNumber}`} />
 				page {pageNumber}
 			</div>
 		)
@@ -54,6 +86,8 @@ function makeWrapper() {
 beforeEach(async () => {
 	refetchMock.mockReset()
 	usePaperPdfUrlMock.mockReset()
+	pdfDocumentGetDestinationMock.mockReset()
+	documentItemClickArgs = null
 	Object.defineProperty(HTMLElement.prototype, "clientWidth", {
 		configurable: true,
 		get() {
@@ -513,5 +547,223 @@ describe("PdfViewer", () => {
 
 		const layer = await screen.findByLabelText("Reader annotations page 1")
 		expect(layer.querySelector("rect")).not.toBeNull()
+	})
+
+	it("hides block overlays while markup mode is active and restores them when markup mode closes", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Appendix E",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer blocks={blocks} onCreateReaderAnnotation={vi.fn()} paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
+
+		await user.click(screen.getByRole("button", { name: /markup/i }))
+		expect(screen.queryByTitle("Appendix E")).not.toBeInTheDocument()
+
+		await user.click(screen.getByTitle("Exit markup mode"))
+		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
+	})
+
+	it("uses internal destination coordinates to jump to the target position within a page", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		documentItemClickArgs = {
+			dest: [null, { name: "XYZ" }, 0, 600, null],
+			pageIndex: 2,
+			pageNumber: 3,
+		}
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+		const scrollToMock = vi.fn()
+
+		const { container } = render(
+			<Wrapper>
+				<PdfViewer paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		await screen.findByTestId("pdf-page-3")
+
+		const scrollContainer = container.querySelector(".scrollbar-none")
+		expect(scrollContainer).not.toBeNull()
+		Object.defineProperty(scrollContainer!, "clientHeight", {
+			configurable: true,
+			value: 400,
+		})
+		Object.defineProperty(scrollContainer!, "scrollHeight", {
+			configurable: true,
+			value: 2600,
+		})
+		Object.defineProperty(scrollContainer!, "scrollTop", {
+			configurable: true,
+			value: 500,
+			writable: true,
+		})
+		scrollContainer!.scrollTo = scrollToMock
+		vi.spyOn(scrollContainer!, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 100,
+			top: 100,
+			left: 0,
+			right: 900,
+			bottom: 900,
+			width: 900,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		const pageWrap = container.querySelector("[data-page-number='3']")
+		const pageCanvas = await screen.findByTestId("pdf-canvas-3")
+		expect(pageWrap).not.toBeNull()
+		vi.spyOn(pageWrap!, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 900,
+			top: 900,
+			left: 0,
+			right: 600,
+			bottom: 1700,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+		vi.spyOn(pageCanvas, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 900,
+			top: 900,
+			left: 0,
+			right: 600,
+			bottom: 1700,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		await user.click(screen.getByTestId("pdf-internal-link"))
+
+		expect(scrollToMock).toHaveBeenCalledWith({
+			top: 1400,
+			behavior: "smooth",
+		})
+	})
+
+	it("resolves named internal destinations before scrolling", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		pdfDocumentGetDestinationMock.mockResolvedValue([null, { name: "FitH" }, 640])
+		documentItemClickArgs = {
+			dest: "appendix-e",
+			pageIndex: 2,
+			pageNumber: 3,
+		}
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+		const scrollToMock = vi.fn()
+
+		const { container } = render(
+			<Wrapper>
+				<PdfViewer paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		await screen.findByTestId("pdf-page-3")
+
+		const scrollContainer = container.querySelector(".scrollbar-none")
+		expect(scrollContainer).not.toBeNull()
+		Object.defineProperty(scrollContainer!, "clientHeight", {
+			configurable: true,
+			value: 400,
+		})
+		Object.defineProperty(scrollContainer!, "scrollHeight", {
+			configurable: true,
+			value: 2600,
+		})
+		Object.defineProperty(scrollContainer!, "scrollTop", {
+			configurable: true,
+			value: 500,
+			writable: true,
+		})
+		scrollContainer!.scrollTo = scrollToMock
+		vi.spyOn(scrollContainer!, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 100,
+			top: 100,
+			left: 0,
+			right: 900,
+			bottom: 900,
+			width: 900,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		const pageWrap = container.querySelector("[data-page-number='3']")
+		const pageCanvas = await screen.findByTestId("pdf-canvas-3")
+		expect(pageWrap).not.toBeNull()
+		vi.spyOn(pageWrap!, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 900,
+			top: 900,
+			left: 0,
+			right: 600,
+			bottom: 1700,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+		vi.spyOn(pageCanvas, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 900,
+			top: 900,
+			left: 0,
+			right: 600,
+			bottom: 1700,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		await user.click(screen.getByTestId("pdf-internal-link"))
+
+		expect(pdfDocumentGetDestinationMock).toHaveBeenCalledWith("appendix-e")
+		expect(scrollToMock).toHaveBeenCalledWith({
+			top: 1360,
+			behavior: "smooth",
+		})
 	})
 })

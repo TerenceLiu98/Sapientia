@@ -77,6 +77,11 @@ interface PdfViewerProps {
 	renderActions?: (block: Block) => React.ReactNode
 }
 
+interface PdfDocumentLike {
+	getDestination?: (dest: string) => Promise<unknown>
+	numPages?: number
+}
+
 function PdfViewerInner({
 	paperId,
 	requestedPage,
@@ -117,8 +122,12 @@ function PdfViewerInner({
 	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 	const [pageRefsVersion, setPageRefsVersion] = useState(0)
 	const [pageCanvasVersion, setPageCanvasVersion] = useState(0)
+	const [internalRequestedPage, setInternalRequestedPage] = useState<number | null>(null)
+	const [internalRequestedDest, setInternalRequestedDest] = useState<unknown[] | null>(null)
+	const [internalRequestedPageNonce, setInternalRequestedPageNonce] = useState(0)
 	const viewerRef = useRef<HTMLDivElement>(null)
 	const scrollContainerRef = useRef<HTMLDivElement>(null)
+	const pdfDocumentRef = useRef<PdfDocumentLike | null>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 	const intersectionRatiosRef = useRef<Map<number, number>>(new Map())
 	const activePageRef = useRef(1)
@@ -143,6 +152,10 @@ function PdfViewerInner({
 		setHoveredBlockId(null)
 		setPageRefsVersion(0)
 		setPageCanvasVersion(0)
+		setInternalRequestedPage(null)
+		setInternalRequestedDest(null)
+		setInternalRequestedPageNonce(0)
+		pdfDocumentRef.current = null
 		pageRefs.current.clear()
 		intersectionRatiosRef.current.clear()
 		activePageRef.current = 1
@@ -201,9 +214,10 @@ function PdfViewerInner({
 		const centers = new Set<number>()
 		centers.add(currentPage)
 		if (requestedPage != null) centers.add(requestedPage)
+		if (internalRequestedPage != null) centers.add(internalRequestedPage)
 		if (selectedBlock?.page != null) centers.add(selectedBlock.page)
 		return Array.from(centers)
-	}, [currentPage, requestedPage, selectedBlock])
+	}, [currentPage, internalRequestedPage, requestedPage, selectedBlock])
 
 	const renderedPages = useMemo(() => {
 		if (numPages == null) return new Set<number>()
@@ -290,6 +304,31 @@ function PdfViewerInner({
 		if (!scrollToPage(requestedPage, requestedBlockY)) return
 		handledJumpRequestRef.current = requestKey
 	}, [numPages, pageCanvasVersion, pageRefsVersion, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
+
+	useEffect(() => {
+		if (internalRequestedPage == null) return
+		if (numPages == null) return
+		if (!renderedPages.has(internalRequestedPage)) return
+		if (internalRequestedDest && !pagePointDimsByPage.has(internalRequestedPage)) return
+		const internalRequestedBlockY = getInternalDestinationTopRatio(
+			internalRequestedDest,
+			pagePointDimsByPage.get(internalRequestedPage),
+		)
+		const requestKey = `internal:${internalRequestedPageNonce}:${internalRequestedPage}:${internalRequestedBlockY ?? "none"}`
+		if (handledJumpRequestRef.current === requestKey) return
+		if (!scrollToPage(internalRequestedPage, internalRequestedBlockY)) return
+		handledJumpRequestRef.current = requestKey
+	}, [
+		internalRequestedDest,
+		internalRequestedPage,
+		internalRequestedPageNonce,
+		numPages,
+		pageCanvasVersion,
+		pagePointDimsByPage,
+		pageRefsVersion,
+		renderedPages,
+		scrollToPage,
+	])
 
 	useEffect(() => {
 		const container = scrollContainerRef.current
@@ -473,6 +512,16 @@ function PdfViewerInner({
 		[onInteract],
 	)
 
+	const handleDocumentItemClick = useCallback(
+		async ({ dest, pageNumber }: { dest?: unknown; pageNumber: number }) => {
+			const explicitDest = await resolveExplicitDestination(dest, pdfDocumentRef.current)
+			setInternalRequestedPage(pageNumber)
+			setInternalRequestedDest(explicitDest)
+			setInternalRequestedPageNonce((value) => value + 1)
+		},
+		[],
+	)
+
 	if (isLoading) {
 		return <div className="p-8 text-text-tertiary">Loading PDF…</div>
 	}
@@ -557,9 +606,13 @@ function PdfViewerInner({
 					error={
 						<div className="p-8 text-text-error">{renderError ?? "Failed to render PDF."}</div>
 					}
-					onLoadSuccess={({ numPages: total }) => {
-						setNumPages(total)
+					onLoadSuccess={(loadedDocument) => {
+						pdfDocumentRef.current = loadedDocument
+						setNumPages(loadedDocument.numPages)
 						setRenderError(null)
+					}}
+					onItemClick={(args) => {
+						void handleDocumentItemClick(args)
 					}}
 					onLoadError={(err) => setRenderError(err.message)}
 				>
@@ -601,7 +654,7 @@ function PdfViewerInner({
 						: null}
 				</Document>
 			</div>
-			{selectedBlock && isPreviewableBlock(selectedBlock) ? (
+			{!annotationMode && selectedBlock && isPreviewableBlock(selectedBlock) ? (
 				<SelectedBlockPreview
 					block={selectedBlock}
 					key={selectedBlock.blockId}
@@ -631,6 +684,63 @@ function clamp(scale: number) {
 	return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale))
 }
 
+async function resolveExplicitDestination(
+	dest: unknown,
+	pdfDocument: PdfDocumentLike | null,
+): Promise<unknown[] | null> {
+	const resolvedDest = isPromiseLike(dest) ? await dest : dest
+	if (Array.isArray(resolvedDest)) return resolvedDest
+	if (typeof resolvedDest === "string") {
+		const namedDestination = await pdfDocument?.getDestination?.(resolvedDest)
+		return Array.isArray(namedDestination) ? namedDestination : null
+	}
+	return null
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+	return typeof value === "object" && value !== null && "then" in value
+}
+
+function getInternalDestinationTopRatio(
+	destArray: unknown[] | null,
+	pageDims: { w: number; h: number } | undefined,
+) {
+	if (!destArray) return undefined
+	const destinationName = getDestinationName(destArray)
+	if (!destinationName) return undefined
+	if (destinationName === "Fit" || destinationName === "FitB" || destinationName === "FitV" || destinationName === "FitBV") {
+		return 0
+	}
+	if (!pageDims || !Number.isFinite(pageDims.h) || pageDims.h <= 0) return undefined
+	switch (destinationName) {
+		case "XYZ":
+			return clampPdfTopToRatio(getNullableNumber(destArray[3]) ?? pageDims.h, pageDims.h)
+		case "FitH":
+		case "FitBH":
+			return clampPdfTopToRatio(getNullableNumber(destArray[2]) ?? pageDims.h, pageDims.h)
+		case "FitR": {
+			const top = getNullableNumber(destArray[5])
+			if (top == null) return undefined
+			return clampPdfTopToRatio(top, pageDims.h)
+		}
+		default:
+			return undefined
+	}
+}
+
+function getDestinationName(destArray: unknown[]) {
+	const destination = destArray[1]
+	if (typeof destination !== "object" || destination === null || !("name" in destination)) return null
+	return typeof destination.name === "string" ? destination.name : null
+}
+
+function getNullableNumber(value: unknown) {
+	return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function clampPdfTopToRatio(pdfTop: number, pageHeight: number) {
+	return clampUnit(1 - pdfTop / pageHeight)
+}
 
 function clampUnit(value: number) {
 	return Math.max(0, Math.min(1, value))
@@ -639,6 +749,35 @@ function clampUnit(value: number) {
 function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
 	if (!(target instanceof HTMLElement)) return false
 	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
+}
+
+function activateUnderlyingPdfLink(
+	event: Pick<MouseEvent | globalThis.MouseEvent, "clientX" | "clientY">,
+	overlayEl: HTMLElement,
+) {
+	if (typeof document.elementFromPoint !== "function") return false
+	const previousPointerEvents = overlayEl.style.pointerEvents
+	overlayEl.style.pointerEvents = "none"
+	let underlying: Element | null = null
+	try {
+		underlying = document.elementFromPoint(event.clientX, event.clientY)
+	} finally {
+		overlayEl.style.pointerEvents = previousPointerEvents
+	}
+	if (!(underlying instanceof HTMLElement)) return false
+	const anchor = underlying.closest("a")
+	if (!(anchor instanceof HTMLAnchorElement)) return false
+	// Only hijack links that belong to the PDF annotation layer; everything
+	// else should keep flowing through our normal block-selection logic.
+	if (
+		!anchor.closest(
+			".react-pdf__Page__annotations, .annotationLayer, .linkAnnotation, [data-internal-link]",
+		)
+	) {
+		return false
+	}
+	anchor.click()
+	return true
 }
 
 function isPreviewableBlock(block: Block) {
@@ -943,12 +1082,15 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
 					// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
 						<div
-							className="group absolute cursor-pointer"
+							className="group pointer-events-auto absolute cursor-pointer"
 							data-block-id={block.blockId}
 							data-block-type={block.type}
 							key={block.blockId}
 							onClick={(e) => {
 								e.stopPropagation()
+								if (activateUnderlyingPdfLink(e.nativeEvent, e.currentTarget)) {
+									return
+								}
 								if (selectedBlockId === block.blockId) {
 									onClearSelectedBlock?.()
 									return
@@ -1088,7 +1230,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						onPageCanvasReady?.(page)
 					}}
 					pageNumber={page}
-					renderAnnotationLayer={false}
+					renderAnnotationLayer
 					// Keep this prop stable so toggling markup mode never tears
 					// down react-pdf's text layer (which would force the canvas
 					// to re-render). We disable text-selection separately via
@@ -1202,9 +1344,11 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 							/>
 						) : null}
 					</svg>
-					<div className={`absolute inset-0 z-[2] ${annotationMode ? "pointer-events-none" : ""}`}>
-						{blocksLayer}
-					</div>
+					{!annotationMode ? (
+						<div className="pointer-events-none absolute inset-0 z-[2]">
+							{blocksLayer}
+						</div>
+					) : null}
 					{selectedAnnotation ? (
 						<ReaderAnnotationActionsPopover
 							annotation={selectedAnnotation}
