@@ -65,12 +65,32 @@ export interface CreateNoteInput {
 export function useCreateNote(workspaceId: string) {
 	const qc = useQueryClient()
 	return useMutation({
-		mutationFn: (input: CreateNoteInput) =>
-			apiFetch<Note>(`/api/v1/workspaces/${workspaceId}/notes`, {
+		mutationFn: (input: CreateNoteInput) => {
+			const payload =
+				typeof input.title === "string" && input.title.trim().length === 0
+					? Object.fromEntries(
+							Object.entries(input).filter(([key]) => key !== "title"),
+						)
+					: input
+			return apiFetch<Note>(`/api/v1/workspaces/${workspaceId}/notes`, {
 				method: "POST",
-				body: JSON.stringify(input),
-			}),
-		onSuccess: () => {
+				body: JSON.stringify(payload),
+			})
+		},
+		onSuccess: (created, variables) => {
+			const upsert = (current: Note[] | undefined) => {
+				if (!current) return [created]
+				const existingIndex = current.findIndex((note) => note.id === created.id)
+				if (existingIndex === -1) return [created, ...current]
+				const next = [...current]
+				next[existingIndex] = created
+				return next
+			}
+			qc.setQueryData<Note[]>(["notes", workspaceId, "all"], upsert)
+			const targetPaperId = variables.paperId ?? created.paperId
+			if (targetPaperId) {
+				qc.setQueryData<Note[]>(["notes", workspaceId, targetPaperId], upsert)
+			}
 			qc.invalidateQueries({ queryKey: ["notes", workspaceId] })
 		},
 	})

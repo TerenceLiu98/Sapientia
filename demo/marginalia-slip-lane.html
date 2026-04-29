@@ -1,0 +1,1101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sapientia · Slip Lane + Rail (UX 提案)</title>
+    <style>
+      :root {
+        --ink-0: oklch(0.992 0.003 85);
+        --ink-1: oklch(0.975 0.006 85);
+        --ink-2: oklch(0.942 0.008 85);
+        --ink-3: oklch(0.895 0.01 85);
+        --ink-4: oklch(0.77 0.012 80);
+        --ink-5: oklch(0.58 0.012 80);
+        --ink-6: oklch(0.43 0.012 75);
+        --ink-7: oklch(0.25 0.012 70);
+
+        --teal-1: oklch(0.95 0.03 195);
+        --teal-2: oklch(0.88 0.06 195);
+        --teal-4: oklch(0.56 0.11 195);
+        --teal-5: oklch(0.43 0.1 195);
+        --amber-1: oklch(0.95 0.045 87);
+        --amber-2: oklch(0.88 0.07 85);
+        --amber-4: oklch(0.67 0.11 82);
+        --rose-1: oklch(0.955 0.03 22);
+        --rose-4: oklch(0.6 0.12 22);
+        --emerald-1: oklch(0.94 0.04 162);
+        --emerald-4: oklch(0.55 0.1 162);
+
+        --page-bg: oklch(0.986 0.006 86);
+        --panel-bg: color-mix(in oklch, white 85%, var(--ink-1) 15%);
+        --paper-bg: oklch(1 0 0);
+        --reading-bg: oklch(0.992 0.006 86);
+        --border: oklch(0.84 0.01 82 / 0.9);
+        --border-strong: oklch(0.72 0.012 78 / 0.9);
+        --text: var(--ink-7);
+        --muted: var(--ink-5);
+        --soft: var(--ink-4);
+        --accent: var(--teal-5);
+        --accent-soft: var(--teal-2);
+        --shadow-sm: 0 4px 14px oklch(0.26 0.01 75 / 0.08);
+        --shadow-md: 0 14px 38px oklch(0.2 0.01 75 / 0.12);
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 18px;
+        --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+        --font-sans: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--page-bg);
+        color: var(--text);
+        font-family: var(--font-sans);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      main {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 36px 32px 80px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: 32px;
+        align-items: end;
+        padding: 12px 4px 28px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        font-family: var(--font-serif);
+        font-size: 30px;
+        line-height: 1.2;
+        margin: 6px 0 8px;
+        color: var(--ink-7);
+      }
+      .lede {
+        margin: 0;
+        color: var(--ink-6);
+        max-width: 60ch;
+      }
+      .hero aside {
+        background: var(--panel-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 18px 22px;
+        font-size: 13.5px;
+      }
+      .hero aside h2 {
+        margin: 0 0 6px;
+        font-family: var(--font-serif);
+        font-size: 17px;
+        color: var(--ink-7);
+      }
+      .hero aside p {
+        margin: 6px 0;
+        color: var(--ink-6);
+      }
+      .hero aside strong {
+        color: var(--ink-7);
+      }
+
+      /* ===== Workspace canvas ===== */
+      .stage {
+        background: var(--panel-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 0;
+        margin-top: 18px;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(
+          to bottom,
+          color-mix(in oklch, white 45%, var(--ink-1) 55%),
+          var(--panel-bg)
+        );
+      }
+      .toolbar .brand {
+        font-family: var(--font-serif);
+        font-size: 16px;
+        color: var(--ink-7);
+      }
+      .toolbar .meta {
+        color: var(--muted);
+        font-size: 12.5px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: color-mix(in oklch, var(--teal-2) 35%, white 65%);
+        color: var(--teal-5);
+        font-size: 12px;
+        letter-spacing: 0.02em;
+      }
+      .pill::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--teal-4);
+      }
+
+      /* ===== Three-zone layout: PDF / Slip lane / Rail ===== */
+      .workspace {
+        display: grid;
+        grid-template-columns:
+          minmax(0, 1fr) /* PDF */
+          240px /* slip lane */
+          44px; /* rail */
+        gap: 0;
+        height: 760px;
+      }
+
+      .pdf {
+        position: relative;
+        background: var(--reading-bg);
+        padding: 28px 36px 28px 28px;
+        overflow: hidden;
+      }
+      .page-kicker {
+        font-size: 11.5px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .paper-h {
+        font-family: var(--font-serif);
+        font-size: 22px;
+        line-height: 1.3;
+        margin: 0 0 16px;
+        color: var(--ink-7);
+      }
+      .paper-p {
+        font-family: var(--font-serif);
+        font-size: 16.5px;
+        line-height: 1.65;
+        margin: 0 0 14px;
+        color: var(--ink-7);
+      }
+      .hl-amber {
+        background: color-mix(in oklch, var(--amber-1) 70%, white 30%);
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+      .hl-rose {
+        background: color-mix(in oklch, var(--rose-1) 70%, white 30%);
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+      .hl-emerald {
+        background: color-mix(in oklch, var(--emerald-1) 70%, white 30%);
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+      .ul-teal {
+        box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--teal-4) 80%, transparent);
+      }
+
+      /* anchor markers floating at the right edge of each highlighted line —
+         they serve as visual proof that "rail dot ↔ paragraph" is a 1:1
+         mapping. Pure decoration in this static demo. */
+      .pdf-anchor {
+        position: absolute;
+        right: 16px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid var(--paper-bg);
+      }
+      .pdf-anchor.amber {
+        background: var(--amber-4);
+        top: 168px;
+      }
+      .pdf-anchor.rose {
+        background: var(--rose-4);
+        top: 248px;
+      }
+      .pdf-anchor.teal {
+        background: var(--teal-4);
+        top: 388px;
+      }
+
+      /* ===== Slip lane ===== */
+      .slip-lane {
+        position: relative;
+        padding: 24px 12px 24px 18px;
+        background: linear-gradient(
+          to right,
+          color-mix(in oklch, var(--reading-bg) 65%, var(--panel-bg) 35%),
+          var(--panel-bg)
+        );
+      }
+      .slip-lane::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 1px;
+        background: linear-gradient(
+          to bottom,
+          transparent,
+          var(--border) 18%,
+          var(--border) 82%,
+          transparent
+        );
+      }
+
+      .slip {
+        position: absolute;
+        left: 14px;
+        right: 8px;
+        background: var(--paper-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 10px 12px 12px;
+        box-shadow: var(--shadow-sm);
+        cursor: pointer;
+        transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+      }
+      .slip:hover {
+        transform: translateX(-2px);
+        border-color: var(--border-strong);
+        box-shadow: var(--shadow-md);
+      }
+
+      /* Slip with a left edge tint that matches the source color */
+      .slip[data-source="amber"] {
+        border-left: 3px solid var(--amber-4);
+      }
+      .slip[data-source="rose"] {
+        border-left: 3px solid var(--rose-4);
+      }
+      .slip[data-source="teal"] {
+        border-left: 3px solid var(--teal-4);
+      }
+      .slip[data-source="emerald"] {
+        border-left: 3px solid var(--emerald-4);
+      }
+
+      .slip .tags {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        padding: 2px 7px;
+        border-radius: 5px;
+        line-height: 1.5;
+      }
+      .tag.block {
+        background: color-mix(in oklch, var(--teal-2) 45%, white 55%);
+        color: var(--teal-5);
+      }
+      .tag.highlight-amber {
+        background: color-mix(in oklch, var(--amber-1) 75%, white 25%);
+        color: oklch(0.42 0.06 80);
+      }
+      .tag.highlight-rose {
+        background: color-mix(in oklch, var(--rose-1) 80%, white 20%);
+        color: oklch(0.45 0.07 22);
+      }
+      .tag.underline-teal {
+        background: color-mix(in oklch, var(--teal-1) 60%, white 40%);
+        color: var(--teal-5);
+        box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--teal-4) 65%, transparent);
+      }
+
+      .slip .excerpt {
+        font-family: var(--font-serif);
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: var(--ink-7);
+        margin: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      /* The expanded slip — replaces the folded card with the editor in
+         place. Its top stays anchored to the same y as the dot, but it
+         grows downward to hold the editor body. Multiple folded slips
+         can still appear above/below it; they reflow naturally. */
+      .slip.live {
+        background: var(--paper-bg);
+        border-left-width: 3px;
+        box-shadow: var(--shadow-md);
+        z-index: 2;
+        cursor: default;
+      }
+      .slip.live:hover {
+        transform: none;
+      }
+
+      /* Expanded variant: when the user clicks a folded slip, the slip
+         widens to the LEFT into the PDF area (without resizing the
+         document, just floating over the right column of the page) so
+         the editor has room to breathe. The right edge stays glued to
+         the rail dot — the spatial link to the anchor is preserved. */
+      .slip.expanded {
+        background: var(--paper-bg);
+        z-index: 3;
+        cursor: default;
+        box-shadow: 0 24px 64px oklch(0.2 0.01 75 / 0.18);
+        padding: 0;
+        overflow: hidden;
+      }
+      .slip.expanded:hover {
+        transform: none;
+      }
+      .slip.expanded .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px 8px 12px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in oklch, white 70%, var(--ink-1) 30%);
+      }
+      .slip.expanded .head .crumb {
+        font-size: 11.5px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .slip.expanded .head .crumb b {
+        color: var(--ink-7);
+        font-weight: 600;
+      }
+      .slip.expanded .head .head-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .slip.expanded .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        color: var(--muted);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+      .slip.expanded .icon-btn:hover {
+        background: var(--ink-2);
+        color: var(--ink-7);
+      }
+      .slip.expanded .icon-btn.danger:hover {
+        color: var(--rose-4);
+      }
+      .slip.expanded .body {
+        padding: 12px 16px 14px;
+      }
+      .slip.expanded .body .tags {
+        margin: 0 0 10px;
+      }
+      .slip.expanded .editor {
+        border: 0;
+        margin: 0;
+        padding: 0;
+        font-family: var(--font-serif);
+        font-size: 14.5px;
+        line-height: 1.6;
+        color: var(--ink-7);
+      }
+      .slip.expanded .editor h4 {
+        font-family: var(--font-serif);
+        font-size: 15.5px;
+        margin: 0 0 8px;
+        color: var(--ink-7);
+      }
+      .slip.expanded .editor p {
+        margin: 0 0 8px;
+      }
+      .slip.expanded .editor .citation-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: color-mix(in oklch, var(--teal-2) 50%, white 50%);
+        color: var(--teal-5);
+        font-family: var(--font-sans);
+        font-size: 11.5px;
+        font-weight: 600;
+        margin: 0 1px;
+      }
+      .slip.expanded .editor .annotation-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: color-mix(in oklch, var(--rose-1) 80%, white 20%);
+        color: oklch(0.45 0.07 22);
+        font-family: var(--font-sans);
+        font-size: 11.5px;
+        font-weight: 600;
+        margin: 0 1px;
+        box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--rose-4) 60%, transparent);
+      }
+      .slip.expanded .foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-top: 1px dashed var(--border);
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .slip.expanded .foot .saved::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--emerald-4);
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      /* Resize handle in the bottom-LEFT corner — facing the PDF, since
+         expanding the editor should grow toward the document. */
+      .slip.expanded .resize {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 14px;
+        height: 14px;
+        cursor: nesw-resize;
+      }
+      .slip.expanded .resize::after {
+        content: "";
+        position: absolute;
+        bottom: 4px;
+        left: 4px;
+        width: 6px;
+        height: 6px;
+        border-left: 2px solid var(--ink-4);
+        border-bottom: 2px solid var(--ink-4);
+      }
+      /* connector from the expanded slip's right edge back to the rail dot */
+      .slip.expanded .anchor-line {
+        position: absolute;
+        top: 50%;
+        right: -34px;
+        height: 1px;
+        width: 34px;
+        background: color-mix(in oklch, var(--rose-4) 55%, transparent);
+      }
+
+      .slip.live .editor {
+        border-top: 1px solid var(--border);
+        margin-top: 10px;
+        padding-top: 10px;
+        font-family: var(--font-serif);
+        font-size: 13.5px;
+        line-height: 1.55;
+        color: var(--ink-7);
+      }
+      .slip.live .editor p {
+        margin: 0 0 8px;
+      }
+      .slip.live .citation-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: color-mix(in oklch, var(--teal-2) 50%, white 50%);
+        color: var(--teal-5);
+        font-family: var(--font-sans);
+        font-size: 11.5px;
+        font-weight: 600;
+        margin: 0 1px;
+      }
+      .slip.live .editor-meta {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--border);
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .slip.live .editor-meta strong {
+        color: var(--accent);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      /* "ghost" slip = note belonging to a page near (but not in) the
+         current viewport. Faded; click would scroll the PDF first. */
+      .slip.ghost {
+        opacity: 0.45;
+      }
+      .slip.ghost:hover {
+        opacity: 0.85;
+      }
+
+      /* ===== Rail (minimap) =====
+         Visual treatment now mirrors a native browser scrollbar: a pill
+         track running the rail's full height, and a pill-shaped thumb
+         covering the document range that's currently in the PDF
+         viewport. The thumb position is the reader's "you are here";
+         its height tells them how much of the paper is visible at once.
+         Dots sit centered on the same vertical column so the rail
+         simultaneously reads as scrollbar AND minimap. */
+      .rail {
+        position: relative;
+        background: var(--panel-bg);
+      }
+      .rail-track {
+        position: absolute;
+        inset: 24px 18px 24px 0;
+      }
+      .rail-line {
+        /* the scrollbar groove */
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        width: 6px;
+        border-radius: 999px;
+        background: color-mix(in oklch, var(--ink-2) 65%, white 35%);
+        box-shadow: inset 0 0 0 1px oklch(0.2 0.01 75 / 0.05);
+      }
+      /* viewport thumb — sized to the visible range, slid to current scroll */
+      .rail-thumb {
+        position: absolute;
+        right: 0;
+        width: 6px;
+        border-radius: 999px;
+        background: color-mix(in oklch, var(--ink-5) 50%, var(--ink-3) 50%);
+        transition: background-color 160ms ease;
+      }
+      .rail-thumb:hover,
+      .rail:hover .rail-thumb {
+        background: color-mix(in oklch, var(--ink-6) 60%, var(--ink-3) 40%);
+      }
+      /* tiny accent tick on the inner edge of the thumb at the exact y
+         the reader is anchored to — keeps the precise position legible
+         even when the thumb itself spans half a page or more */
+      .rail-pin {
+        position: absolute;
+        right: 6px;
+        height: 2px;
+        width: 8px;
+        background: var(--accent);
+        border-radius: 2px;
+      }
+
+      .dot {
+        position: absolute;
+        /* center the dot horizontally on the scrollbar groove
+           (groove is 6px wide, sits at right:0; its center is right:3px;
+           dot is 16px wide → translateX = -(16 - 6) / 2 = -5px from right) */
+        right: -5px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--ink-4);
+        box-shadow:
+          inset 0 0 0 1px oklch(0.2 0.01 75 / 0.06),
+          0 0 0 3px white,
+          0 0 0 4px oklch(0.2 0.01 75 / 0.16);
+        cursor: pointer;
+      }
+      .dot[data-color="amber"] {
+        background: var(--amber-4);
+      }
+      .dot[data-color="rose"] {
+        background: var(--rose-4);
+      }
+      .dot[data-color="teal"] {
+        background: var(--teal-4);
+      }
+      .dot[data-color="emerald"] {
+        background: var(--emerald-4);
+      }
+      /* Pie-chart dot for a note that cites multiple sources */
+      .dot[data-color="pie"] {
+        background: conic-gradient(
+          var(--amber-4) 0% 33%,
+          var(--rose-4) 33% 66%,
+          var(--teal-4) 66% 100%
+        );
+      }
+      /* active dot — the one whose slip is currently expanded */
+      .dot.active {
+        right: -7px;
+        width: 20px;
+        height: 20px;
+        box-shadow:
+          inset 0 0 0 1px oklch(0.2 0.01 75 / 0.06),
+          0 0 0 4px white,
+          0 0 0 5px oklch(0.2 0.01 75 / 0.18),
+          0 4px 12px oklch(0.2 0.01 75 / 0.22);
+      }
+      /* dimmed for far-away pages */
+      .dot.far {
+        opacity: 0.55;
+        transform: scale(0.85);
+      }
+
+      /* connector line linking the active dot to its slip */
+      .connector {
+        position: absolute;
+        top: 0;
+        left: -100px;
+        height: 2px;
+        width: 100px;
+        background: linear-gradient(
+          to right,
+          transparent,
+          color-mix(in oklch, var(--accent) 50%, transparent)
+        );
+      }
+
+      /* ===== Annotations beside the canvas ===== */
+      .legend {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .legend article {
+        background: var(--panel-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 16px 18px 18px;
+      }
+      .legend article h3 {
+        margin: 0 0 6px;
+        font-family: var(--font-serif);
+        font-size: 16px;
+        color: var(--ink-7);
+      }
+      .legend article p {
+        margin: 4px 0;
+        color: var(--ink-6);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      .legend article strong {
+        color: var(--ink-7);
+      }
+
+      .swatch {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+      .swatch.amber { background: var(--amber-4); }
+      .swatch.rose { background: var(--rose-4); }
+      .swatch.teal { background: var(--teal-4); }
+      .swatch.emerald { background: var(--emerald-4); }
+
+      .legend code {
+        font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+        font-size: 12px;
+        background: color-mix(in oklch, var(--ink-1) 70%, white 30%);
+        border-radius: 4px;
+        padding: 1px 5px;
+        color: var(--ink-7);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div>
+          <div class="eyebrow">Demo · Slip lane + minimap rail</div>
+          <h1>读者一眼能读到边距，扫一眼能看到全篇。</h1>
+          <p class="lede">
+            把右栏拆成两个图层：靠近 PDF 的<strong>滑条 lane</strong> 渲染当前视口附近的笔记摘要（excerpt-first），
+            最右边一条<strong>定长 rail</strong> 是整篇论文的 minimap，远处只剩有色 dots。
+            读者在阅读区抬眼即可看到正在写什么；要跳到别的笔记，点 rail 的远处 dot。
+          </p>
+        </div>
+        <aside>
+          <h2>三层信息密度</h2>
+          <p><strong>读到 (read):</strong> 视口附近的笔记是 excerpt slip，第一句正文就能看见。</p>
+          <p><strong>看到 (scan):</strong> 远处的笔记压成 rail 上的有色 dot，颜色编码来源。</p>
+          <p><strong>写入 (edit):</strong> 点 slip 就地展开成编辑器，连接线指回它在文档里的位置。</p>
+        </aside>
+      </header>
+
+      <section class="stage" aria-label="Marginalia slip lane concept">
+        <header class="toolbar">
+          <div class="brand">Sapientia · Reader</div>
+          <span class="meta">Page 12 / 27 · 5 notes anchored on this view</span>
+          <span class="pill">Live margin</span>
+        </header>
+
+        <div class="workspace">
+          <!-- ============== PDF reading area ============== -->
+          <article class="pdf">
+            <div class="page-kicker">Journal of Interface Thought / 2026</div>
+            <h2 class="paper-h">
+              Reading systems should let commentary accumulate beside the sentence, not above it.
+            </h2>
+            <p class="paper-p">
+              Scholarly notes become more alive when they remain visibly attached to the line that
+              provoked them. A conventional sidebar often treats a note as a database object, while
+              <span class="hl-amber">marginalia behaves like a situated response</span>: an
+              afterthought, a challenge, a synthesis, or a whispered cross-reference.
+            </p>
+            <p class="paper-p">
+              The geometry matters. When the reader can still sense page position,
+              <span class="hl-rose">the note inherits the memory of the source passage</span>,
+              because the thought is recalled together with the visual neighborhood in which it
+              was written.
+            </p>
+            <p class="paper-p">
+              A successful margin does not overwhelm the document. Instead it offers a light
+              structure for response: <span class="ul-teal">one living note in focus, several
+              quieter slips nearby</span>, and just enough metadata to re-enter context without
+              turning the act of reading into project management.
+            </p>
+            <p class="paper-p">
+              <span class="hl-emerald">The page becomes a duet</span>: the document supplies
+              voice, the margin supplies harmony. Neither overwrites the other; instead, they
+              read together as a single layered surface.
+            </p>
+
+            <span class="pdf-anchor amber" aria-hidden="true"></span>
+            <span class="pdf-anchor rose" aria-hidden="true"></span>
+            <span class="pdf-anchor teal" aria-hidden="true"></span>
+          </article>
+
+          <!-- ============== Slip lane: excerpts for visible region ============== -->
+          <aside class="slip-lane" aria-label="Visible-region note slips">
+            <!-- ghost slip from the previous page, faded -->
+            <article class="slip ghost" data-source="emerald" style="top: 16px;">
+              <div class="tags">
+                <span class="tag highlight-rose">highlight 4 p. 11 blk. 4</span>
+              </div>
+              <p class="excerpt">
+                这条来自上一页，说"上下文会随着页面翻动留下"。视口边缘只露一半，提示有更多
+                marginalia 在邻近的页。
+              </p>
+            </article>
+
+            <!-- folded slip near amber highlight -->
+            <article class="slip" data-source="amber" style="top: 132px;">
+              <div class="tags">
+                <span class="tag highlight-amber">highlight 1 p. 12 blk. 7</span>
+              </div>
+              <p class="excerpt">
+                situated response 是关键词。Marginalia 不是数据条目，是对那一句话的就地回应——
+                所以接口必须保住"那一句话"的位置感。
+              </p>
+            </article>
+
+            <!-- expanded slip — the live note for rose highlight -->
+            <article class="slip live" data-source="rose" style="top: 232px;">
+              <div class="tags">
+                <span class="tag highlight-rose">highlight 2 p. 12 blk. 9</span>
+              </div>
+              <p class="excerpt">
+                The interface should help me remember <em>where</em> the thought came from.
+              </p>
+              <div class="editor">
+                <p>
+                  当我引用 <span class="citation-chip">block 9</span> 时，note 还是可读的散文,
+                  但来源 stays as a lightweight tag rather than a raw token.
+                </p>
+                <p>
+                  折叠的 slip 应该露出第一句正文,而不是另起一个"标题"——更像真实的页边批注。
+                </p>
+              </div>
+              <div class="editor-meta">
+                <span>edited 2m ago · 1 cite · 1 anchor</span>
+                <strong>jump to anchor →</strong>
+              </div>
+            </article>
+
+            <!-- folded slip for teal underline -->
+            <article class="slip" data-source="teal" style="top: 460px;">
+              <div class="tags">
+                <span class="tag underline-teal">underline 1 p. 12 blk. 12</span>
+              </div>
+              <p class="excerpt">
+                "one living note, several quieter slips nearby" — 这就是这一栏的 metaphor。把它当成
+                设计原则，而不是装饰。
+              </p>
+            </article>
+
+            <!-- folded slip for emerald highlight (next paragraph) -->
+            <article class="slip" data-source="emerald" style="top: 564px;">
+              <div class="tags">
+                <span class="tag block">block 14</span>
+              </div>
+              <p class="excerpt">
+                document = voice, margin = harmony. 笔记不是站在文档之上的解释,而是和它合奏的另一条声轨。
+              </p>
+            </article>
+          </aside>
+
+          <!-- ============== Rail: scrollbar + minimap ============== -->
+          <div class="rail" aria-label="Document minimap">
+            <div class="rail-track">
+              <!-- scrollbar groove running full rail height -->
+              <div class="rail-line"></div>
+              <!-- thumb: the reader's currently-visible viewport. For a
+                   27-page paper, ~5 pages of context surface as slips,
+                   so the thumb spans ~18% of the rail height starting
+                   at ~32% (top of the visible-region dots). -->
+              <div class="rail-thumb" style="top: 32%; height: 22%;"></div>
+              <!-- precise reading position inside the thumb (page 12,
+                   midway through ≈ 44.4%) -->
+              <div class="rail-pin" style="top: 44.4%;"></div>
+
+              <!-- visible-region dots (correspond to the slips) -->
+              <div class="dot" data-color="emerald" style="top: 5%;"></div>
+              <div class="dot" data-color="amber" style="top: 18%;"></div>
+              <div class="dot active" data-color="rose" style="top: 31%;">
+                <span class="connector"></span>
+              </div>
+              <div class="dot" data-color="teal" style="top: 60%;"></div>
+              <div class="dot" data-color="emerald" style="top: 73%;"></div>
+
+              <!-- far-away dots (other pages) -->
+              <div class="dot far" data-color="amber" style="top: 84%;"></div>
+              <div class="dot far" data-color="pie" style="top: 90%;"></div>
+              <div class="dot far" data-color="rose" style="top: 96%;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== Expanded note showcase ============== -->
+      <header class="hero" style="margin-top: 36px; padding-top: 24px;">
+        <div>
+          <div class="eyebrow">点击之后</div>
+          <h1>展开态：slip 就地变成编辑器，向 PDF 一侧伸展。</h1>
+          <p class="lede">
+            点一条 folded slip 不会弹出独立浮层。这条 slip 自己变高、向左展开到 PDF 的边缘附近 ——
+            得到笔记本一样的写作宽度，同时保留它和 rail 上 dot 的视觉锚点。其它 slip 自然下移。
+          </p>
+        </div>
+        <aside>
+          <h2>展开态做了什么</h2>
+          <p><strong>右侧锁定:</strong> slip 的右边仍然贴着 rail dot——空间锚点不变。</p>
+          <p><strong>向左生长:</strong> 把 PDF 右侧的留白用作"小黑板"，宽度从 ~210px 涨到 ~520px。</p>
+          <p><strong>chrome 完整:</strong> 顶部出现 jump-to-anchor、删除、关闭；底部有保存状态。</p>
+          <p><strong>左下角 resize:</strong> 拖动可调整大小，向 PDF 一侧伸展，不会侵占 rail。</p>
+        </aside>
+      </header>
+
+      <section class="stage" aria-label="Expanded note state">
+        <header class="toolbar">
+          <div class="brand">Sapientia · Reader</div>
+          <span class="meta">同一个 PDF · 同一条 rail · 但 rose slip 已展开</span>
+          <span class="pill">Editing</span>
+        </header>
+
+        <div class="workspace">
+          <article class="pdf">
+            <div class="page-kicker">Journal of Interface Thought / 2026</div>
+            <h2 class="paper-h">
+              Reading systems should let commentary accumulate beside the sentence, not above it.
+            </h2>
+            <p class="paper-p">
+              Scholarly notes become more alive when they remain visibly attached to the line that
+              provoked them. A conventional sidebar often treats a note as a database object, while
+              <span class="hl-amber">marginalia behaves like a situated response</span>: an
+              afterthought, a challenge, a synthesis, or a whispered cross-reference.
+            </p>
+            <p class="paper-p">
+              The geometry matters. When the reader can still sense page position,
+              <span class="hl-rose">the note inherits the memory of the source passage</span>,
+              because the thought is recalled together with the visual neighborhood in which it
+              was written.
+            </p>
+            <p class="paper-p">
+              A successful margin does not overwhelm the document. Instead it offers a light
+              structure for response: <span class="ul-teal">one living note in focus, several
+              quieter slips nearby</span>, and just enough metadata to re-enter context without
+              turning the act of reading into project management.
+            </p>
+
+            <span class="pdf-anchor amber" aria-hidden="true"></span>
+            <span class="pdf-anchor rose" aria-hidden="true"></span>
+            <span class="pdf-anchor teal" aria-hidden="true"></span>
+          </article>
+
+          <aside class="slip-lane" aria-label="Visible-region note slips with one expanded">
+            <!-- folded amber slip — shifted up to make room for the expanded one -->
+            <article class="slip" data-source="amber" style="top: 16px;">
+              <div class="tags">
+                <span class="tag highlight-amber">highlight 1 p. 12 blk. 7</span>
+              </div>
+              <p class="excerpt">
+                situated response 是关键词。Marginalia 不是数据条目，是对那一句话的就地回应。
+              </p>
+            </article>
+
+            <!-- expanded rose slip — pushes left into the PDF area, full chrome -->
+            <article
+              class="slip expanded"
+              data-source="rose"
+              style="top: 116px; left: -340px; right: 8px;"
+            >
+              <span class="anchor-line" aria-hidden="true"></span>
+              <div class="head">
+                <div class="crumb">
+                  Page 12 · <b>memory, not layout</b>
+                </div>
+                <div class="head-actions">
+                  <button class="icon-btn" title="Jump to anchor in the PDF" aria-label="Jump">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+                  </button>
+                  <button class="icon-btn danger" title="Delete note" aria-label="Delete">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6 18 20H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                  </button>
+                  <button class="icon-btn" title="Close" aria-label="Close">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="body">
+                <div class="tags">
+                  <span class="tag highlight-rose">highlight 2 p. 12 blk. 9</span>
+                </div>
+                <div class="editor">
+                  <h4>This sentence is really about memory, not layout.</h4>
+                  <p>
+                    The interface should help me remember <em>where</em> the thought came from.
+                    A plain note card loses that spatial memory. The better metaphor is a
+                    side-gloss that stays attached to its sentence.
+                  </p>
+                  <p>
+                    When I cite <span class="citation-chip">block 9</span> here, the note still
+                    reads as prose, but the source is a lightweight tag rather than a raw token.
+                    Same for the underlying highlight:
+                    <span class="annotation-chip">highlight 2 p. 12 blk. 9</span> — clicking it
+                    would scroll the PDF and flash the markup.
+                  </p>
+                  <p>
+                    Folded slips should lead with the first sentence of the body, not a separate
+                    title. That feels closer to real marginalia, where the writing <em>is</em> the
+                    identity.
+                  </p>
+                </div>
+              </div>
+              <div class="foot">
+                <span class="saved">Saved · edited 2m ago</span>
+                <span>1 cite · 1 anchor</span>
+              </div>
+              <span class="resize" aria-label="Drag to resize"></span>
+            </article>
+
+            <!-- folded teal slip pushed below the expanded card -->
+            <article class="slip" data-source="teal" style="top: 432px;">
+              <div class="tags">
+                <span class="tag underline-teal">underline 1 p. 12 blk. 12</span>
+              </div>
+              <p class="excerpt">
+                "one living note, several quieter slips nearby" —— 这就是这一栏的 metaphor。
+              </p>
+            </article>
+
+            <article class="slip" data-source="emerald" style="top: 540px;">
+              <div class="tags">
+                <span class="tag block">block 14</span>
+              </div>
+              <p class="excerpt">
+                document = voice, margin = harmony. 笔记不是站在文档之上的解释。
+              </p>
+            </article>
+          </aside>
+
+          <div class="rail" aria-label="Document minimap">
+            <div class="rail-track">
+              <div class="rail-line"></div>
+              <div class="rail-thumb" style="top: 32%; height: 22%;"></div>
+              <div class="rail-pin" style="top: 44.4%;"></div>
+
+              <div class="dot" data-color="amber" style="top: 18%;"></div>
+              <div class="dot active" data-color="rose" style="top: 31%;">
+                <span class="connector"></span>
+              </div>
+              <div class="dot" data-color="teal" style="top: 60%;"></div>
+              <div class="dot" data-color="emerald" style="top: 73%;"></div>
+              <div class="dot far" data-color="amber" style="top: 84%;"></div>
+              <div class="dot far" data-color="pie" style="top: 90%;"></div>
+              <div class="dot far" data-color="rose" style="top: 96%;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="legend" aria-label="Behavior notes">
+        <article>
+          <h3>Slip lane（中间一栏）</h3>
+          <p><strong>什么时候出现:</strong> 当前 PDF 视口及上下半页的 anchors。其它页面的 note 不在这一栏出现。</p>
+          <p><strong>折叠态:</strong> source tag + 正文前 1-3 行。读者扫一眼即可读到笔记本身。</p>
+          <p><strong>Source tag 命名:</strong> highlight / underline 用 <code>highlight n p. P blk. B</code>（论文内序号 + 页码 + 所在 block），block-anchored 用 <code>block N</code>。一条 tag 自带全部坐标信息。</p>
+          <p><strong>展开态:</strong> 折叠 slip 不弹独立浮层。它的右边仍贴 rail，向左生长进 PDF 留白区，宽度从 ~210px 涨到 ~520px，露出完整编辑器 chrome（jump / delete / close / 保存状态 / 左下角 resize 把手）。其它 slip 自然下移。</p>
+          <p><strong>边缘 ghost:</strong> 视口外一点的 note 半透明出现，暗示"再滚一点就能看到"。</p>
+        </article>
+
+        <article>
+          <h3>Rail（scrollbar + minimap）</h3>
+          <p><strong>是 scrollbar:</strong> 一条圆角凹槽 + 一颗 thumb。Thumb 的位置和高度 = 当前 PDF 视口在整篇里的位置和占比。拖 thumb 就是滚 PDF。</p>
+          <p><strong>也是 minimap:</strong> 同一条凹槽上叠着每条 note 的 dot——位置 = anchor 在整篇里的位置, 颜色 = 来源 (
+            <span class="swatch amber"></span> /
+            <span class="swatch rose"></span> /
+            <span class="swatch teal"></span> /
+            <span class="swatch emerald"></span> · 多 cite = 饼图)。
+          </p>
+          <p><strong>Thumb 内的 dot:</strong> 全色全大小, 对应 slip lane 里的 excerpt slip。</p>
+          <p><strong>Thumb 外的 dot:</strong> 缩小、淡化。点击 = PDF 跳到那一页, slip lane 重新组装。</p>
+          <p><strong>Active dot:</strong> 当前展开的 note, 一根连接线指向 slip。</p>
+        </article>
+
+        <article>
+          <h3>设计原则</h3>
+          <p><strong>读到 / 看到 / 写入</strong>三个动词三个图层, 信息密度逐级降低。</p>
+          <p><strong>就地展开优于浮层:</strong> editor 嵌在 slip 里, 上下文不消失。</p>
+          <p><strong>不抢 PDF 的位置:</strong> slip lane 和 rail 加起来 ~280px, PDF 仍是主角。</p>
+          <p><strong>Cite ≠ New note:</strong> bbox toolbar 上是两个图标, slip lane 不参与创建 — 创建仅来自 PDF 的 highlight/block。</p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

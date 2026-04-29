@@ -9,7 +9,9 @@ import {
 	type ReaderAnnotationTool,
 } from "@/lib/reader-annotations"
 
-const HIGHLIGHT_MIN_H = 0.018
+// Keep highlight bands slim enough to read like a text marker stroke
+// rather than a full-line block, even on very short drags / clicks.
+const HIGHLIGHT_MIN_H = 0.012
 const HIGHLIGHT_MIN_W = 0.01
 
 export function ReaderAnnotationShape({
@@ -17,12 +19,14 @@ export function ReaderAnnotationShape({
 	flashed,
 	H,
 	onSelect,
+	selected,
 	W,
 }: {
 	annotation: ReaderAnnotation
 	flashed?: boolean
 	H: number
 	onSelect?: (annotationId: string | null) => void
+	selected?: boolean
 	W: number
 }) {
 	// SVG viewBox is "0 0 W H" (pixel coordinates). 0..1-stored values
@@ -56,10 +60,13 @@ export function ReaderAnnotationShape({
 		return (
 			<rect
 				fill={annotation.color}
-				fillOpacity={0.28}
+				fillOpacity={selected ? 0.42 : 0.28}
 				height={rect.h * H}
 				rx={3}
 				ry={3}
+				stroke={selected ? annotation.color : "none"}
+				strokeOpacity={selected ? 0.95 : undefined}
+				strokeWidth={selected ? 1.5 : undefined}
 				width={rect.w * W}
 				x={rect.x * W}
 				y={rect.y * H}
@@ -78,8 +85,8 @@ export function ReaderAnnotationShape({
 					stroke={annotation.color}
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					strokeOpacity={0.95}
-					strokeWidth={3}
+					strokeOpacity={selected ? 1 : 0.95}
+					strokeWidth={selected ? 4.5 : 3}
 					x1={from.x * W}
 					x2={to.x * W}
 					y1={from.y * H}
@@ -111,8 +118,8 @@ export function ReaderAnnotationShape({
 					stroke={annotation.color}
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					strokeOpacity={0.95}
-					strokeWidth={3.5}
+					strokeOpacity={selected ? 1 : 0.95}
+					strokeWidth={selected ? 4.5 : 3.5}
 				>
 					{flashPulse}
 				</path>
@@ -160,13 +167,15 @@ export function ReaderAnnotationSelectionOutline({
 	const h = Math.min(1 - Math.max(0, bbox.y - padY), bbox.h + padY * 2) * H
 	return (
 		<rect
-			fill="none"
+			fill={annotation.color}
+			fillOpacity={0.08}
 			height={h}
 			pointerEvents="none"
 			rx={3}
 			ry={3}
-			stroke="rgba(15, 23, 42, 0.55)"
+			stroke={annotation.color}
 			strokeDasharray="6 4"
+			strokeOpacity={0.9}
 			strokeWidth={1.5}
 			width={w}
 			x={x}

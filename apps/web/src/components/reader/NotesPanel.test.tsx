@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Note } from "@/api/hooks/notes"
@@ -5,9 +6,12 @@ import type { Note } from "@/api/hooks/notes"
 const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
 
 vi.mock("@/components/notes/NoteEditor", () => ({
-	NoteEditor: (props: { onOpenCitationBlock?: (paperId: string, blockId: string) => void }) => (
+	NoteEditor: (props: {
+		noteId: string
+		onOpenCitationBlock?: (paperId: string, blockId: string) => void
+	}) => (
 		<div>
-			Editor
+			<div>{`Editor for ${props.noteId}`}</div>
 			<button onClick={() => props.onOpenCitationBlock?.("paper-1", "block-9")} type="button">
 				Open citation block
 			</button>
@@ -93,13 +97,176 @@ describe("NotesPanel", () => {
 		)
 
 		const top = container.querySelector('[data-note-id="note-top"]') as HTMLElement | null
-		const bottom = container.querySelector(
-			'[data-note-id="note-bottom"]',
-		) as HTMLElement | null
+		const bottom = container.querySelector('[data-note-id="note-bottom"]') as HTMLElement | null
 		// Subtracts DOT_RADIUS (8px) so the dot's center sits exactly on
 		// the rail line at the normalized top position.
 		expect(top?.style.top).toBe("calc(28.75% - 8px)")
 		expect(bottom?.style.top).toBe("calc(44.5% - 8px)")
+	})
+
+	it("groups notes from the same block into one rail dot and lets the user switch between them", async () => {
+		const notes = [
+			makeNote({
+				id: "note-older",
+				title: "Older note",
+				anchorPage: 3,
+				anchorYRatio: 0.18,
+				anchorKind: "block",
+				anchorBlockId: "block-1",
+				updatedAt: "2026-04-27T00:00:00.000Z",
+			}),
+			makeNote({
+				id: "note-newer",
+				title: "Newer note",
+				anchorPage: 3,
+				anchorYRatio: 0.82,
+				anchorKind: "block",
+				anchorBlockId: "block-1",
+				updatedAt: "2026-04-28T00:00:00.000Z",
+			}),
+		]
+
+		const NotesPanel = await importNotesPanel()
+		function Harness() {
+			const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
+			return (
+				<NotesPanel
+					activeCitingNoteIds={new Set()}
+					blockAnchorsById={new Map([["block-1", { page: 3, yRatio: 0.42 }]])}
+					blockNumberByBlockId={new Map([["block-1", 7]])}
+					currentAnchorYRatio={0.5}
+					currentPage={3}
+					expandedNoteId={expandedNoteId}
+					notes={notes}
+					numPages={5}
+					onCreateAtCurrent={() => {}}
+					onExpand={setExpandedNoteId}
+					onJumpToPage={() => {}}
+				/>
+			)
+		}
+		const { container } = render(<Harness />)
+
+		const dots = container.querySelectorAll('[data-note-group-key="block:block-1"]')
+		expect(dots).toHaveLength(1)
+		expect((dots[0] as HTMLElement).style.top).toContain("48.4")
+
+		fireEvent.click(dots[0] as HTMLButtonElement)
+		expect(screen.getByText("Editor for note-older")).toBeInTheDocument()
+
+		fireEvent.click(screen.getByRole("button", { name: "block 7 note 2" }))
+		expect(screen.getByText("Editor for note-newer")).toBeInTheDocument()
+	})
+
+	it("spreads nearby block dots so dense anchors do not collapse into one visual cluster", async () => {
+		const notes = [
+			makeNote({
+				id: "note-a",
+				anchorPage: 1,
+				anchorYRatio: 0.2,
+				anchorKind: "block",
+				anchorBlockId: "block-a",
+			}),
+			makeNote({
+				id: "note-b",
+				anchorPage: 1,
+				anchorYRatio: 0.208,
+				anchorKind: "block",
+				anchorBlockId: "block-b",
+			}),
+			makeNote({
+				id: "note-c",
+				anchorPage: 1,
+				anchorYRatio: 0.216,
+				anchorKind: "block",
+				anchorBlockId: "block-c",
+			}),
+		]
+
+		const NotesPanel = await importNotesPanel()
+		const { container } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.3}
+				currentPage={1}
+				expandedNoteId={null}
+				notes={notes}
+				numPages={1}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		const dotA = container.querySelector('[data-note-id="note-a"]') as HTMLElement | null
+		const dotB = container.querySelector('[data-note-id="note-b"]') as HTMLElement | null
+		const dotC = container.querySelector('[data-note-id="note-c"]') as HTMLElement | null
+
+		expect(dotA?.style.top).not.toBe(dotB?.style.top)
+		expect(dotB?.style.top).not.toBe(dotC?.style.top)
+		expect(dotA?.style.right).not.toBe("")
+	})
+
+	it("magnifies notes near the live PDF viewport and compresses distant ones into a minimap", async () => {
+		const notes = [
+			makeNote({
+				id: "note-near-top",
+				title: "Near viewport",
+				anchorPage: 2,
+				anchorYRatio: 0.4,
+			}),
+			makeNote({
+				id: "note-near-bottom",
+				title: "Just below viewport",
+				anchorPage: 2,
+				anchorYRatio: 0.6,
+			}),
+			makeNote({
+				id: "note-far",
+				title: "Far away",
+				anchorPage: 5,
+				anchorYRatio: 0.7,
+			}),
+		]
+
+		const NotesPanel = await importNotesPanel()
+		const { container } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.5}
+				currentPage={2}
+				expandedNoteId={null}
+				notes={notes}
+				numPages={6}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				pdfRailLayout={{
+					pageMetrics: new Map([
+						[1, { top: 0, height: 200 }],
+						[2, { top: 220, height: 240 }],
+						[3, { top: 500, height: 220 }],
+						[4, { top: 760, height: 220 }],
+						[5, { top: 1020, height: 260 }],
+						[6, { top: 1320, height: 220 }],
+					]),
+					scrollHeight: 1600,
+					scrollTop: 220,
+					viewportHeight: 280,
+					viewportAnchorTop: 360,
+				}}
+			/>,
+		)
+
+		const nearTop = container.querySelector('[data-note-id="note-near-top"]') as HTMLElement | null
+		const nearBottom = container.querySelector(
+			'[data-note-id="note-near-bottom"]',
+		) as HTMLElement | null
+		const far = container.querySelector('[data-note-id="note-far"]') as HTMLElement | null
+
+		expect(Number(nearTop?.dataset.minimapScale)).toBeGreaterThan(Number(far?.dataset.minimapScale))
+		expect(Number(nearBottom?.dataset.minimapScale)).toBeGreaterThan(Number(far?.dataset.minimapScale))
+		expect(Number(nearBottom?.dataset.railTop) - Number(nearTop?.dataset.railTop)).toBeGreaterThan(6)
 	})
 
 	it("surfaces a visual cue for notes citing the selected block", async () => {
@@ -225,6 +392,43 @@ describe("NotesPanel", () => {
 		)
 
 		expect(scrollTo).not.toHaveBeenCalled()
+	})
+
+	it("jumps back through the annotation source when the header source label is clicked", async () => {
+		const note = makeNote({
+			id: "note-1",
+			title: "",
+			anchorPage: 3,
+			anchorYRatio: 0.38,
+			anchorKind: "highlight",
+			anchorBlockId: "block-5",
+			anchorAnnotationId: "annotation-9",
+		})
+		const onOpenCitationAnnotation = vi.fn()
+
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				blockNumberByBlockId={new Map([["block-5", 5]])}
+				currentAnchorYRatio={0.2}
+				currentPage={1}
+				expandedNoteId="note-1"
+				notes={[note]}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				onOpenCitationAnnotation={onOpenCitationAnnotation}
+			/>,
+		)
+
+		fireEvent.click(screen.getByRole("button", { name: "Jump to note anchor" }))
+		expect(onOpenCitationAnnotation).toHaveBeenCalledWith(
+			"paper-1",
+			"annotation-9",
+			3,
+			0.38,
+		)
 	})
 
 	it("does not auto-follow to another page while a note is expanded", async () => {

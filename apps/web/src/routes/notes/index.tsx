@@ -38,6 +38,12 @@ function NotesList() {
 		await navigate({ to: "/notes/$noteId", params: { noteId: created.id } })
 	}
 
+	function noteLabel(note: NonNullable<typeof notes>[number]) {
+		const title = note.title.trim()
+		if (title.length > 0) return title
+		return note.paperId ? "Marginalia note" : "Untitled"
+	}
+
 	return (
 		<div className="mx-auto max-w-[var(--content-default)] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">
 			<div className="mb-6 flex items-center justify-between">
@@ -66,7 +72,7 @@ function NotesList() {
 								params={{ noteId: note.id }}
 								to="/notes/$noteId"
 							>
-								<span className="font-serif text-lg text-text-primary">{note.title}</span>
+								<span className="font-serif text-lg text-text-primary">{noteLabel(note)}</span>
 								<span className="text-xs text-text-tertiary">
 									v{note.currentVersion} · {new Date(note.updatedAt).toLocaleDateString()}
 									{note.paperId ? " · paper" : ""}

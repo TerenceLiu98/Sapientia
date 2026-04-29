@@ -479,7 +479,7 @@ describe("PdfViewer", () => {
 		)
 
 		await screen.findByTestId("pdf-page-1")
-		await user.click(screen.getByRole("button", { name: /markup/i }))
+		await user.click(screen.getByTitle("Enter markup mode"))
 		const layer = await screen.findByLabelText("Reader annotations page 1")
 		// Coordinate math reads the SVG's bounding rect via the ref, so
 		// keep mocking that, even though pointer events now fire on the
@@ -549,6 +549,54 @@ describe("PdfViewer", () => {
 		expect(layer.querySelector("rect")).not.toBeNull()
 	})
 
+	it("fires extra annotation actions from the selection popover", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onExtraAction = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const user = userEvent.setup()
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					paperId="paper-1"
+					readerAnnotations={[
+						{
+							id: "annotation-1",
+							paperId: "paper-1",
+							workspaceId: "workspace-1",
+							userId: "user-1",
+							page: 1,
+							kind: "highlight",
+							color: "#f4c84f",
+							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						},
+					]}
+					renderAnnotationActions={() => (
+						<button aria-label="Add annotation note" onClick={onExtraAction} type="button">
+							Add note
+						</button>
+					)}
+				/>
+			</Wrapper>,
+		)
+
+		const layer = await screen.findByLabelText("Reader annotations page 1")
+		const shape = layer.querySelector("rect")
+		expect(shape).not.toBeNull()
+		fireEvent.pointerDown(shape as Element, { pointerId: 1 })
+
+		await user.click(await screen.findByRole("button", { name: "Add annotation note" }))
+		expect(onExtraAction).toHaveBeenCalledTimes(1)
+	})
+
 	it("hides block overlays while markup mode is active and restores them when markup mode closes", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
@@ -584,11 +632,75 @@ describe("PdfViewer", () => {
 
 		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
 
-		await user.click(screen.getByRole("button", { name: /markup/i }))
+		await user.click(screen.getByTitle("Enter markup mode"))
 		expect(screen.queryByTitle("Appendix E")).not.toBeInTheDocument()
 
 		await user.click(screen.getByTitle("Exit markup mode"))
 		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
+	})
+
+	it("can enter markup mode directly from the block-level floating tools", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Appendix F",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		const { container } = render(
+			<Wrapper>
+				<PdfViewer blocks={blocks} onCreateReaderAnnotation={vi.fn()} paperId="paper-1" />
+			</Wrapper>,
+		)
+		const viewer = container.firstElementChild as HTMLElement | null
+		expect(viewer).not.toBeNull()
+		Object.defineProperty(viewer!, "clientHeight", {
+			configurable: true,
+			value: 700,
+		})
+		vi.spyOn(viewer!, "getBoundingClientRect").mockReturnValue({
+			x: 100,
+			y: 50,
+			top: 50,
+			left: 100,
+			right: 1000,
+			bottom: 750,
+			width: 900,
+			height: 700,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		expect(await screen.findByTitle("Appendix F")).toBeInTheDocument()
+
+		fireEvent.click(screen.getByRole("button", { name: "Enter markup mode from block tools" }), {
+			clientX: 400,
+			clientY: 260,
+		})
+
+		expect(screen.getByTitle("Close markup palette")).toBeInTheDocument()
+		expect(screen.getByTestId("floating-markup-palette")).toHaveStyle({
+			left: "314px",
+			top: "192px",
+		})
+		expect(screen.queryByTitle("Appendix F")).not.toBeInTheDocument()
 	})
 
 	it("uses internal destination coordinates to jump to the target position within a page", async () => {

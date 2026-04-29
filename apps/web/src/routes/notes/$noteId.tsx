@@ -11,10 +11,11 @@ export const Route = createFileRoute("/notes/$noteId")({
 function NoteEditorPage() {
 	const { noteId } = Route.useParams()
 	const { data: note } = useNote(noteId)
+	const title = note?.title?.trim() || (note?.paperId ? "Marginalia note" : "Note")
 
 	return (
 		<ProtectedRoute>
-			<AppShell title={note?.title ?? "Note"}>
+			<AppShell title={title}>
 				<div className="mx-auto h-full max-w-[var(--content-default)] px-4 sm:px-6 lg:px-10">
 					<NoteEditor noteId={noteId} />
 				</div>

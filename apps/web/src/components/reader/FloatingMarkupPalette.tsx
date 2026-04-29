@@ -12,20 +12,23 @@ import {
 
 export function FloatingMarkupPalette({
 	color,
+	initialPos,
 	onChangeColor,
 	onChangeTool,
 	onClose,
 	tool,
 }: {
 	color: string
+	initialPos?: { x: number; y: number }
 	onChangeColor: (color: string) => void
 	onChangeTool: (tool: ReaderAnnotationTool) => void
 	onClose: () => void
 	tool: ReaderAnnotationTool
 }) {
 	// Position is local to the PdfViewer's relative root. Initial position
-	// is top-center of the PDF area; user can drag the handle to relocate.
-	const [pos, setPos] = useState<{ x: number; y: number }>({ x: 24, y: 16 })
+	// now prefers the click origin that opened markup mode; user can drag
+	// the palette afterward to relocate it.
+	const [pos, setPos] = useState<{ x: number; y: number }>(() => initialPos ?? { x: 24, y: 16 })
 	const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number } | null>(
 		null,
 	)
@@ -55,6 +58,11 @@ export function FloatingMarkupPalette({
 		}
 	}, [endDrag, onPointerMove])
 
+	useEffect(() => {
+		if (!initialPos) return
+		setPos(initialPos)
+	}, [initialPos?.x, initialPos?.y])
+
 	const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
 		event.preventDefault()
 		dragRef.current = {
@@ -68,6 +76,7 @@ export function FloatingMarkupPalette({
 	return (
 		<div
 			className="absolute z-[20] flex select-none items-center gap-1 rounded-lg border border-border-subtle bg-bg-overlay/95 px-1.5 py-1 shadow-[var(--shadow-popover)] backdrop-blur"
+			data-testid="floating-markup-palette"
 			style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
 		>
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle */}

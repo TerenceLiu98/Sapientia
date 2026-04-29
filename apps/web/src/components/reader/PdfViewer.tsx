@@ -39,10 +39,23 @@ const FIT_WIDTH_GUTTER_PX = 32
 const BBOX_EPSILON = 0.02
 const VIRTUAL_WINDOW_RADIUS = 2
 const DEFAULT_PAGE_ASPECT_RATIO = 11 / 8.5
+const MARKUP_PALETTE_DEFAULT_POS = { x: 24, y: 16 }
+const MARKUP_PALETTE_OFFSET_X = 14
+const MARKUP_PALETTE_OFFSET_Y = 18
+const MARKUP_PALETTE_MAX_WIDTH_ESTIMATE = 320
+const MARKUP_PALETTE_MAX_HEIGHT_ESTIMATE = 56
 
 // Module-level cache of figure/table image URLs we've already warmed in
 // the browser image cache. See the preload effect in PdfPageWithOverlay.
 const preloadedPreviewImageUrls = new Set<string>()
+
+export interface PdfRailLayout {
+	pageMetrics: Map<number, { top: number; height: number }>
+	scrollHeight: number
+	scrollTop: number
+	viewportHeight: number
+	viewportAnchorTop: number
+}
 
 interface PdfViewerProps {
 	paperId: string
@@ -52,6 +65,7 @@ interface PdfViewerProps {
 	onInteract?: () => void
 	onPageChange?: (page: number) => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
+	onRailLayoutChange?: (layout: PdfRailLayout | null) => void
 	blocks?: Block[]
 	colorByBlock?: Map<string, string>
 	palette?: PaletteEntry[]
@@ -79,6 +93,9 @@ interface PdfViewerProps {
 	// When set, the matching annotation pulses briefly on the page so the
 	// reader can see what a citation chip just jumped them to.
 	flashedAnnotationId?: string | null
+	// When a marginalia note anchored to a highlight/underline becomes
+	// active, keep the matching markup visibly selected in the PDF.
+	previewedAnnotationId?: string | null
 }
 
 interface PdfDocumentLike {
@@ -94,6 +111,7 @@ function PdfViewerInner({
 	onInteract,
 	onPageChange,
 	onViewportAnchorChange,
+	onRailLayoutChange,
 	blocks,
 	colorByBlock,
 	palette,
@@ -109,6 +127,7 @@ function PdfViewerInner({
 	renderAnnotationActions,
 	renderActions,
 	flashedAnnotationId,
+	previewedAnnotationId,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
@@ -124,6 +143,7 @@ function PdfViewerInner({
 	const [annotationMode, setAnnotationMode] = useState(false)
 	const [annotationTool, setAnnotationTool] = useState<ReaderAnnotationTool>("highlight")
 	const [annotationColor, setAnnotationColor] = useState(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
+	const [markupPaletteInitialPos, setMarkupPaletteInitialPos] = useState(MARKUP_PALETTE_DEFAULT_POS)
 	const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
 	const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 	const [pageRefsVersion, setPageRefsVersion] = useState(0)
@@ -154,6 +174,7 @@ function PdfViewerInner({
 		setAnnotationMode(false)
 		setAnnotationTool("highlight")
 		setAnnotationColor(READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
+		setMarkupPaletteInitialPos(MARKUP_PALETTE_DEFAULT_POS)
 		setSelectedAnnotationId(null)
 		setHoveredBlockId(null)
 		setPageRefsVersion(0)
@@ -166,7 +187,8 @@ function PdfViewerInner({
 		intersectionRatiosRef.current.clear()
 		activePageRef.current = 1
 		handledJumpRequestRef.current = null
-	}, [paperId])
+		onRailLayoutChange?.(null)
+	}, [onRailLayoutChange, paperId])
 
 	const blocksByPage = useMemo(() => {
 		const map = new Map<number, Block[]>()
@@ -289,6 +311,34 @@ function PdfViewerInner({
 		setScale(clamp(availableWidth / basePageWidth))
 	}, [basePageWidth])
 
+	const emitRailLayout = useCallback(() => {
+		if (!onRailLayoutChange) return
+		const container = scrollContainerRef.current
+		if (!container) {
+			onRailLayoutChange(null)
+			return
+		}
+		const containerRect = container.getBoundingClientRect()
+		const pageMetrics = new Map<number, { top: number; height: number }>()
+		for (const [page, el] of pageRefs.current.entries()) {
+			const canvas = el.querySelector("canvas")
+			const target = canvas instanceof HTMLCanvasElement ? canvas : el
+			const rect = target.getBoundingClientRect()
+			if (rect.height <= 0) continue
+			pageMetrics.set(page, {
+				top: rect.top - containerRect.top + container.scrollTop,
+				height: rect.height,
+			})
+		}
+		onRailLayoutChange({
+			pageMetrics,
+			scrollHeight: container.scrollHeight,
+			scrollTop: container.scrollTop,
+			viewportHeight: container.clientHeight,
+			viewportAnchorTop: container.scrollTop + container.clientHeight / 2,
+		})
+	}, [onRailLayoutChange])
+
 	useEffect(() => {
 		onPageChange?.(currentPage)
 	}, [currentPage, onPageChange])
@@ -354,6 +404,7 @@ function PdfViewerInner({
 			const viewportMidY = containerRect.top + container.clientHeight / 2
 			const yRatio = clampUnit((viewportMidY - rect.top) / rect.height)
 			onViewportAnchorChange?.(activePage, yRatio)
+			emitRailLayout()
 		}
 
 		if (typeof IntersectionObserver !== "undefined") {
@@ -387,7 +438,7 @@ function PdfViewerInner({
 		fallbackHandleScroll()
 		container.addEventListener("scroll", fallbackHandleScroll, { passive: true })
 		return () => container.removeEventListener("scroll", fallbackHandleScroll)
-	}, [computeTopmostVisiblePage, numPages, onViewportAnchorChange])
+	}, [computeTopmostVisiblePage, emitRailLayout, numPages, onViewportAnchorChange])
 
 	useEffect(() => {
 		const container = scrollContainerRef.current
@@ -410,6 +461,7 @@ function PdfViewerInner({
 				const viewportMidY = containerRect.top + container.clientHeight / 2
 				const yRatio = clampUnit((viewportMidY - rect.top) / rect.height)
 				onViewportAnchorChange?.(activePage, yRatio)
+				emitRailLayout()
 			})
 		}
 		container.addEventListener("scroll", handleScroll, { passive: true })
@@ -420,7 +472,7 @@ function PdfViewerInner({
 				scrollRafRef.current = null
 			}
 		}
-	}, [computeTopmostVisiblePage, onViewportAnchorChange])
+	}, [computeTopmostVisiblePage, emitRailLayout, onViewportAnchorChange])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -478,6 +530,7 @@ function PdfViewerInner({
 
 	const registerPageRef = useCallback((page: number, el: HTMLDivElement | null) => {
 		const prev = pageRefs.current.get(page)
+		if (prev === el) return
 		if (prev && prev !== el) {
 			intersectionObserverRef.current?.unobserve(prev)
 		}
@@ -487,9 +540,8 @@ function PdfViewerInner({
 			setPageRefsVersion((value) => value + 1)
 			return
 		}
-		if (prev) {
-			intersectionObserverRef.current?.unobserve(prev)
-		}
+		if (!prev) return
+		intersectionObserverRef.current?.unobserve(prev)
 		pageRefs.current.delete(page)
 		intersectionRatiosRef.current.delete(page)
 		setPageRefsVersion((value) => value + 1)
@@ -510,6 +562,10 @@ function PdfViewerInner({
 		})
 	}, [])
 
+	useEffect(() => {
+		emitRailLayout()
+	}, [emitRailLayout, numPages, pageCanvasVersion, pageRefsVersion, scale])
+
 	const handleMainPointerDown = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
 			if (!shouldCollapseNotesOnMainClick(event.target)) return
@@ -527,6 +583,33 @@ function PdfViewerInner({
 		},
 		[],
 	)
+
+	const getMarkupPalettePosFromClientPoint = useCallback((clientX: number, clientY: number) => {
+		const viewer = viewerRef.current
+		if (!viewer) return MARKUP_PALETTE_DEFAULT_POS
+		const rect = viewer.getBoundingClientRect()
+		return {
+			x: clientX - rect.left + MARKUP_PALETTE_OFFSET_X,
+			y: clientY - rect.top - MARKUP_PALETTE_OFFSET_Y,
+		}
+	}, [])
+
+	const clampMarkupPalettePos = useCallback((pos: { x: number; y: number }) => {
+		const viewer = viewerRef.current
+		if (!viewer) return pos
+		return {
+			x: Math.max(12, Math.min(Math.max(12, viewer.clientWidth - MARKUP_PALETTE_MAX_WIDTH_ESTIMATE), pos.x)),
+			y: Math.max(12, Math.min(Math.max(12, viewer.clientHeight - MARKUP_PALETTE_MAX_HEIGHT_ESTIMATE), pos.y)),
+		}
+	}, [])
+
+	const handleEnterMarkupMode = useCallback((clientX?: number, clientY?: number) => {
+		if (typeof clientX === "number" && typeof clientY === "number") {
+			setMarkupPaletteInitialPos(clampMarkupPalettePos(getMarkupPalettePosFromClientPoint(clientX, clientY)))
+		}
+		setAnnotationMode(true)
+		setSelectedAnnotationId(null)
+	}, [clampMarkupPalettePos, getMarkupPalettePosFromClientPoint])
 
 	if (isLoading) {
 		return <div className="p-8 text-text-tertiary">Loading PDF…</div>
@@ -574,9 +657,13 @@ function PdfViewerInner({
 									? "bg-accent-600 text-text-inverse hover:bg-accent-700"
 									: "text-text-secondary hover:bg-surface-hover"
 							}`}
-							onClick={() => {
-								setAnnotationMode((value) => !value)
-								setSelectedAnnotationId(null)
+							onClick={(event) => {
+								if (annotationMode) {
+									setAnnotationMode(false)
+									setSelectedAnnotationId(null)
+									return
+								}
+								handleEnterMarkupMode(event.clientX, event.clientY)
 							}}
 							title={annotationMode ? "Exit markup mode" : "Enter markup mode"}
 							type="button"
@@ -642,6 +729,7 @@ function PdfViewerInner({
 										onCreateReaderAnnotation={onCreateReaderAnnotation}
 										onDeleteReaderAnnotation={onDeleteReaderAnnotation}
 										onHoverBlock={setHoveredBlockId}
+										onEnterMarkupMode={canAnnotate ? handleEnterMarkupMode : undefined}
 										onPageCanvasReady={handlePageCanvasReady}
 										onPageDims={handlePageDims}
 										onPageRef={registerPageRef}
@@ -651,14 +739,15 @@ function PdfViewerInner({
 										onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
 										page={page}
 										palette={palette}
+										previewedAnnotationId={previewedAnnotationId}
 										renderAnnotationActions={renderAnnotationActions}
 										renderActions={renderActions}
 										scale={scale}
-									selectedAnnotationId={selectedAnnotationId}
-									selectedBlockId={selectedBlockId}
-									showLayoutBoxes={showLayoutBoxes}
-								/>
-							))
+										selectedAnnotationId={selectedAnnotationId}
+										selectedBlockId={selectedBlockId}
+										showLayoutBoxes={showLayoutBoxes}
+									/>
+								))
 						: null}
 				</Document>
 			</div>
@@ -672,6 +761,7 @@ function PdfViewerInner({
 			{canAnnotate && annotationMode ? (
 				<FloatingMarkupPalette
 					color={annotationColor}
+					initialPos={markupPaletteInitialPos}
 					onChangeColor={setAnnotationColor}
 					onChangeTool={setAnnotationTool}
 					onClose={() => {
@@ -822,6 +912,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
 	onHoverBlock,
+	onEnterMarkupMode,
 	onPageCanvasReady,
 	onPageDims,
 	onPageRef,
@@ -831,6 +922,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onUpdateReaderAnnotationColor,
 	page,
 	palette,
+	previewedAnnotationId,
 	renderAnnotationActions,
 	renderActions,
 	scale,
@@ -859,6 +951,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	}) => Promise<unknown> | unknown
 	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
+	onEnterMarkupMode?: (clientX: number, clientY: number) => void
 	onPageCanvasReady?: (page: number) => void
 	onPageDims?: (page: number, dims: { w: number; h: number }) => void
 	onPageRef?: (page: number, el: HTMLDivElement | null) => void
@@ -871,6 +964,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	) => Promise<unknown> | unknown
 	page: number
 	palette?: PaletteEntry[]
+	previewedAnnotationId?: string | null
 	renderAnnotationActions?: (annotation: ReaderAnnotation) => React.ReactNode
 	renderActions?: (block: Block) => React.ReactNode
 	scale: number
@@ -1065,18 +1159,29 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					H={displayH}
 					key={annotation.id}
 					onSelect={onSelectAnnotation}
+					selected={annotation.id === (previewedAnnotationId ?? selectedAnnotationId)}
 					W={displayW}
 				/>
 			)),
-		[annotations, displayH, displayW, flashedAnnotationId, onSelectAnnotation],
+		[
+			annotations,
+			displayH,
+			displayW,
+			flashedAnnotationId,
+			onSelectAnnotation,
+			previewedAnnotationId,
+			selectedAnnotationId,
+		],
 	)
 
 	const selectedAnnotation = useMemo(
 		() =>
-			selectedAnnotationId
-				? (annotations ?? []).find((a) => a.id === selectedAnnotationId) ?? null
+			previewedAnnotationId ?? selectedAnnotationId
+				? (annotations ?? []).find(
+						(a) => a.id === (previewedAnnotationId ?? selectedAnnotationId),
+					) ?? null
 				: null,
-		[annotations, selectedAnnotationId],
+		[annotations, previewedAnnotationId, selectedAnnotationId],
 	)
 
 	const blocksLayer = useMemo(
@@ -1089,7 +1194,9 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				const showBoxChrome =
 					showLayoutBoxes || isSelected || isHovered || highlightColor !== null
 				const fill = highlightColor ? paletteVisualTokens(palette ?? [], highlightColor) : null
-				const hasToolbar = palette && (onSetHighlight || onClearHighlight || renderActions)
+				const hasToolbar = Boolean(
+					onEnterMarkupMode || renderActions || (palette && (onSetHighlight || onClearHighlight)),
+				)
 
 				return (
 					// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
@@ -1193,6 +1300,20 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 								>
 									<CopyIcon />
 								</button>
+								{onEnterMarkupMode ? (
+									<button
+										aria-label="Enter markup mode from block tools"
+										className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+										onClick={(e) => {
+											e.stopPropagation()
+											onEnterMarkupMode(e.clientX, e.clientY)
+										}}
+										title="Markup"
+										type="button"
+									>
+										<MarkupIcon />
+									</button>
+								) : null}
 								{renderActions ? renderActions(block) : null}
 							</div>
 						) : null}
@@ -1205,6 +1326,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 			hoveredBlockId,
 			onClearHighlight,
 			onHoverBlock,
+			onEnterMarkupMode,
 			onSelectBlock,
 			onSetHighlight,
 			palette,
@@ -1214,13 +1336,18 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		],
 	)
 
+	const handleWrapRef = useCallback(
+		(el: HTMLDivElement | null) => {
+			wrapRef.current = el
+			onPageRef?.(page, el)
+		},
+		[onPageRef, page],
+	)
+
 	return (
 		<div
 			className="relative bg-white shadow-md"
-			ref={(el) => {
-				wrapRef.current = el
-				onPageRef?.(page, el)
-			}}
+			ref={handleWrapRef}
 			data-page-number={page}
 			style={{
 				minHeight: `${placeholderHeight}px`,

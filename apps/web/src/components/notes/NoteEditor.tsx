@@ -44,7 +44,8 @@ import {
 	Underline,
 } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
-import { useNote, useUpdateNote } from "@/api/hooks/notes"
+import { type Block, useBlocks } from "@/api/hooks/blocks"
+import { type NoteWithUrl, useNote, useUpdateNote } from "@/api/hooks/notes"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -218,7 +219,10 @@ const SLASH_MENU_ITEMS = createSuggestionItems([
 				.chain()
 				.focus()
 				.deleteRange(range)
-				.insertContent([{ type: "math", attrs: { latex: "" } }, { type: "text", text: " " }])
+				.insertContent([
+					{ type: "math", attrs: { latex: "" } },
+					{ type: "text", text: " " },
+				])
 				.run()
 		},
 	},
@@ -333,6 +337,13 @@ function normalizeInitialContent(raw: unknown): unknown {
 	return EMPTY_DOC
 }
 
+function blockExcerpt(block: Block | null) {
+	if (!block) return null
+	const raw = (block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim()
+	if (!raw) return null
+	return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw
+}
+
 function NovelEditorHandle({ onEditorReady }: { onEditorReady?: (editor: NoteEditorRef) => void }) {
 	const { editor } = useEditor()
 
@@ -406,17 +417,14 @@ function insertInlineMath(editor: Editor) {
 	editor
 		.chain()
 		.focus()
-		.insertContentAt(
-			{ from, to },
-			[
-				{
-					type: "math",
-					attrs: {
-						latex: empty ? "" : selectedText,
-					},
+		.insertContentAt({ from, to }, [
+			{
+				type: "math",
+				attrs: {
+					latex: empty ? "" : selectedText,
 				},
-			],
-		)
+			},
+		])
 		.run()
 }
 
@@ -440,7 +448,7 @@ function ColorMenuButton({ onOpenChange }: { onOpenChange?: (open: boolean) => v
 						"flex h-8 items-center gap-1 rounded-md px-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
 						currentColor && "bg-surface-selected text-text-accent",
 					)}
-						onMouseDown={(e) => e.preventDefault()}
+					onMouseDown={(e) => e.preventDefault()}
 					onPointerDown={(e) => e.preventDefault()}
 					type="button"
 				>
@@ -581,7 +589,7 @@ function NoteEditorInner({
 	onOpenCitationAnnotation,
 	headerActions,
 }: {
-	note: { id: string; title: string; workspaceId: string }
+	note: NoteWithUrl
 	initialContent: unknown
 	saveStatus: SaveStatus
 	setSaveStatus: (s: SaveStatus) => void
@@ -600,6 +608,62 @@ function NoteEditorInner({
 	headerActions?: ReactNode
 }) {
 	const { palette } = usePalette()
+	const { data: blocks = [] } = useBlocks(note.paperId ?? "")
+	const anchorBlock =
+		note.anchorBlockId != null
+			? (blocks.find((block) => block.blockId === note.anchorBlockId) ?? null)
+			: null
+	const anchorBlockNumber = anchorBlock ? anchorBlock.blockIndex + 1 : null
+	const anchorBlockTag = note.anchorBlockId
+		? anchorBlockNumber
+			? `block ${anchorBlockNumber}`
+			: "block"
+		: null
+	const anchorExcerpt = blockExcerpt(anchorBlock)
+	const isMarginaliaNote = Boolean(
+		note.paperId && (note.anchorBlockId || note.anchorPage || note.anchorAnnotationId),
+	)
+	const anchorLabel =
+		note.anchorKind === "highlight"
+			? "highlight"
+			: note.anchorKind === "underline"
+				? "underline"
+				: null
+	const canJumpToAnchor =
+		(note.anchorKind === "highlight" || note.anchorKind === "underline") &&
+		note.paperId &&
+		note.anchorAnnotationId &&
+		onOpenCitationAnnotation
+			? true
+			: Boolean(note.paperId && note.anchorBlockId && onOpenCitationBlock)
+	const handleOpenAnchor = useCallback(() => {
+		if (!note.paperId) return
+		if (
+			(note.anchorKind === "highlight" || note.anchorKind === "underline") &&
+			note.anchorAnnotationId &&
+			onOpenCitationAnnotation
+		) {
+			onOpenCitationAnnotation(
+				note.paperId,
+				note.anchorAnnotationId,
+				note.anchorPage ?? undefined,
+				note.anchorYRatio ?? undefined,
+			)
+			return
+		}
+		if (note.anchorBlockId && onOpenCitationBlock) {
+			onOpenCitationBlock(note.paperId, note.anchorBlockId)
+		}
+	}, [
+		note.anchorAnnotationId,
+		note.anchorBlockId,
+		note.anchorKind,
+		note.anchorPage,
+		note.anchorYRatio,
+		note.paperId,
+		onOpenCitationAnnotation,
+		onOpenCitationBlock,
+	])
 
 	useEffect(() => {
 		return () => {
@@ -621,20 +685,25 @@ function NoteEditorInner({
 	return (
 		<div className="note-editor flex h-full flex-col bg-[var(--color-reading-bg)]">
 			<div className="flex items-start justify-between gap-3 border-b border-border-subtle/80 px-5 py-2.5 text-sm">
-				<input
-					className="min-w-0 flex-1 bg-transparent font-serif text-lg text-text-primary outline-none"
-					onBlur={commitTitle}
-					onChange={(e) => setTitleDraft(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") {
-							e.preventDefault()
-							commitTitle()
-							e.currentTarget.blur()
-						}
-					}}
-					type="text"
-					value={titleDraft}
-				/>
+				{isMarginaliaNote ? (
+					<div className="flex-1" />
+				) : (
+					<input
+						className="min-w-0 flex-1 bg-transparent font-serif text-lg text-text-primary outline-none"
+						onBlur={commitTitle}
+						onChange={(e) => setTitleDraft(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") {
+								e.preventDefault()
+								commitTitle()
+								e.currentTarget.blur()
+							}
+						}}
+						placeholder="Untitled note"
+						type="text"
+						value={titleDraft}
+					/>
+				)}
 				<div className="flex max-w-[65%] flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
 					{headerActions}
 					<div className="text-xs text-text-tertiary">
@@ -651,6 +720,52 @@ function NoteEditorInner({
 					palette={palette}
 					workspaceId={note.workspaceId}
 				>
+					{isMarginaliaNote ? (
+						<div className="border-b border-border-subtle/70 px-5 py-3">
+							<div
+								className={cn(
+									"rounded-2xl border border-border-subtle/80 bg-bg-primary/75 px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]",
+									canJumpToAnchor && "cursor-pointer transition-colors hover:bg-surface-hover",
+								)}
+								onClick={canJumpToAnchor ? handleOpenAnchor : undefined}
+								onKeyDown={
+									canJumpToAnchor
+										? (event) => {
+												if (event.key === "Enter" || event.key === " ") {
+													event.preventDefault()
+													handleOpenAnchor()
+												}
+											}
+										: undefined
+								}
+								role={canJumpToAnchor ? "button" : undefined}
+								tabIndex={canJumpToAnchor ? 0 : undefined}
+							>
+								<div className="mb-2 flex flex-wrap items-center gap-2">
+									{anchorBlockTag ? (
+										<span className="inline-flex min-h-6 items-center rounded-full bg-accent-700 px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-inverse">
+											{anchorBlockTag}
+										</span>
+									) : null}
+									{note.anchorPage ? (
+										<span className="inline-flex min-h-6 items-center rounded-full bg-surface-hover px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-secondary">
+											{`p.${note.anchorPage}`}
+										</span>
+									) : null}
+									{anchorLabel ? (
+										<span className="inline-flex min-h-6 items-center rounded-full bg-surface-selected px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-accent">
+											{anchorLabel}
+										</span>
+									) : null}
+								</div>
+								{anchorExcerpt ? (
+									<p className="font-serif text-sm leading-6 text-text-primary">{anchorExcerpt}</p>
+								) : (
+									<p className="text-sm text-text-tertiary">Source anchor saved for this note.</p>
+								)}
+							</div>
+						</div>
+					) : null}
 					<EditorRoot>
 						<EditorContent
 							className="note-editor__novel"
@@ -713,11 +828,7 @@ function tryUpgradeMathShortcut(editor: Editor) {
 		.chain()
 		.focus()
 		.command(({ tr }) => {
-			tr.replaceWith(
-				start,
-				end,
-				editor.schema.nodes.mathBlock.create({ latex: "" }),
-			)
+			tr.replaceWith(start, end, editor.schema.nodes.mathBlock.create({ latex: "" }))
 			return true
 		})
 		.run()

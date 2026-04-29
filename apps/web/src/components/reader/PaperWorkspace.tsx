@@ -21,7 +21,7 @@ import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
-import { PdfViewer } from "@/components/reader/PdfViewer"
+import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
 import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
 import {
 	annotationBodyBoundingBox,
@@ -56,7 +56,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
-	const [editor, setEditor] = useState<NoteEditorRef | null>(null)
+	const [optimisticNotes, setOptimisticNotes] = useState<Note[]>([])
+	const [pdfRailLayout, setPdfRailLayout] = useState<PdfRailLayout | null>(null)
+	const editorRef = useRef<NoteEditorRef | null>(null)
+	const [editorReadyVersion, setEditorReadyVersion] = useState(0)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
 	const [pendingCiteAnnotation, setPendingCiteAnnotation] = useState<ReaderAnnotation | null>(null)
 	const [autoFollowLockUntil, setAutoFollowLockUntil] = useState(0)
@@ -79,6 +82,15 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		}
 	}, [viewMode])
 
+	useEffect(() => {
+		setOptimisticNotes([])
+		setPdfRailLayout(null)
+	}, [paperId, workspace?.id])
+
+	const upsertOptimisticNote = useCallback((note: Note) => {
+		setOptimisticNotes((current) => [note, ...current.filter((candidate) => candidate.id !== note.id)])
+	}, [])
+
 	const countsMap = useMemo(() => {
 		const m = new Map<string, number>()
 		for (const row of counts ?? []) m.set(row.blockId, row.count)
@@ -92,7 +104,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 
 	const selectedBlock = useMemo(
 		() =>
-			selectedBlockId ? (blocks ?? []).find((block) => block.blockId === selectedBlockId) ?? null : null,
+			selectedBlockId
+				? ((blocks ?? []).find((block) => block.blockId === selectedBlockId) ?? null)
+				: null,
 		[blocks, selectedBlockId],
 	)
 	const previousViewModeRef = useRef<ViewMode | null>(null)
@@ -174,9 +188,15 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	}, [])
 
 	const handleOpenCitationAnnotation = useCallback(
-		(targetPaperId: string, annotationId: string, fallbackPage?: number, fallbackYRatio?: number) => {
+		(
+			targetPaperId: string,
+			annotationId: string,
+			fallbackPage?: number,
+			fallbackYRatio?: number,
+		) => {
 			if (targetPaperId !== paperId) return
-			const annotation = readerAnnotations.find((candidate) => candidate.id === annotationId) ?? null
+			const annotation =
+				readerAnnotations.find((candidate) => candidate.id === annotationId) ?? null
 			if (!annotation) {
 				if (fallbackPage) {
 					setRequestedPage(fallbackPage)
@@ -227,6 +247,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	// block and retry from a `useEffect`.
 	const insertCitation = useCallback(
 		(block: Block) => {
+			const editor = editorRef.current
 			if (!editor || !expandedNoteId) return false
 			const blockNumber = block.blockIndex + 1
 			// Tiptap's selection always has a position even before first focus.
@@ -247,7 +268,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 							paperId,
 							blockId: block.blockId,
 							blockNumber,
-							snapshot: "",
+							snapshot: blockCitationSnapshot(block),
 						},
 					},
 					{ type: "text", text: " " },
@@ -255,14 +276,18 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				.run()
 			return true
 		},
-		[editor, expandedNoteId, paperId],
+		[expandedNoteId, paperId],
 	)
 
 	const insertAnnotationCitation = useCallback(
 		(annotation: ReaderAnnotation) => {
+			const editor = editorRef.current
 			if (!editor || !expandedNoteId) return false
 			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return false
 			const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+			const overlappingBlock = bbox
+				? findOverlappingBlock(blocks ?? [], annotation.page, bbox)
+				: null
 			if (!editor.isFocused) {
 				editor.chain().focus("end").run()
 			} else {
@@ -280,7 +305,12 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 							page: annotation.page,
 							yRatio: bbox?.y ?? 0.5,
 							color: annotation.color,
-							snapshot: `${annotation.kind} p.${annotation.page}`,
+							snapshot: annotationCitationSnapshot(
+								annotation,
+								overlappingBlock,
+								readerAnnotations,
+								blocks ?? [],
+							),
 						},
 					},
 					{ type: "text", text: " " },
@@ -288,7 +318,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				.run()
 			return true
 		},
-		[editor, expandedNoteId, paperId],
+		[blocks, expandedNoteId, paperId, readerAnnotations],
 	)
 
 	// "Cite or create": if the user already has a note expanded, append the
@@ -316,17 +346,18 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			if (expandedNoteId) setExpandedNoteId(null)
 			const note = await createNote.mutateAsync({
 				paperId,
-				title: `Page ${block.page}`,
 				blocknoteJson: [],
 				anchorPage: block.page,
 				anchorYRatio: block.bbox?.y ?? null,
 				anchorKind: "block",
 				anchorBlockId: block.blockId,
 			})
+			upsertOptimisticNote(note)
 			handleSelectBlock(block)
 			setExpandedNoteId(note.id)
+			setPendingCiteBlock(block)
 		},
-		[createNote, expandedNoteId, handleSelectBlock, paperId, workspace],
+		[createNote, expandedNoteId, handleSelectBlock, paperId, upsertOptimisticNote, workspace],
 	)
 
 	const handleCiteAnnotation = useCallback(
@@ -347,60 +378,48 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			// Resolve the block this annotation visually overlaps so the
 			// note carries a stable structural anchor — block ids survive
 			// re-parse, annotation ids don't.
-			const overlappingBlockId = bbox
-				? findOverlappingBlockId(blocks ?? [], annotation.page, bbox)
+			const overlappingBlock = bbox
+				? findOverlappingBlock(blocks ?? [], annotation.page, bbox)
 				: null
 			const note = await createNote.mutateAsync({
 				paperId,
-				title: `Page ${annotation.page}`,
 				blocknoteJson: [],
 				anchorPage: annotation.page,
 				anchorYRatio: bbox?.y ?? 0.5,
 				anchorKind: annotation.kind,
 				anchorAnnotationId: annotation.id,
-				anchorBlockId: overlappingBlockId,
+				anchorBlockId: overlappingBlock?.blockId ?? null,
 			})
+			upsertOptimisticNote(note)
 			setExpandedNoteId(note.id)
+			setPendingCiteAnnotation(annotation)
 		},
-		[blocks, createNote, expandedNoteId, paperId, workspace],
+		[blocks, createNote, expandedNoteId, paperId, upsertOptimisticNote, workspace],
 	)
 
-	// Two-icon block toolbar:
-	//   • New note  — always creates a fresh note (NoteIcon).
-	//   • Cite      — only enabled when a note is open; inserts the
-	//                 `@[block N]` chip into it (CiteIcon).
-	// Disabled-but-visible cite button keeps the visual rhythm steady
-	// while still telegraphing that the action exists when you have a
-	// note open.
+	// Single action per state so block + markup stay consistent:
+	//   • No note open  -> Add note
+	//   • Note open     -> Cite into that note
 	const renderActions = useCallback(
 		(block: Block) => (
-			<>
-				<button
-					aria-label="Add a new note for this block"
-					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-accent"
-					onClick={(e) => {
-						e.stopPropagation()
-						void handleNewNoteForBlock(block)
-					}}
-					title="New note"
-					type="button"
-				>
-					<NoteIcon />
-				</button>
-				<button
-					aria-label="Cite this block in the open note"
-					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
-					disabled={!expandedNoteId}
-					onClick={(e) => {
-						e.stopPropagation()
+			<button
+				aria-label={
+					expandedNoteId ? "Cite this block in the open note" : "Add a new note for this block"
+				}
+				className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+				onClick={(e) => {
+					e.stopPropagation()
+					if (expandedNoteId) {
 						handleCiteBlock(block)
-					}}
-					title={expandedNoteId ? "Cite in open note" : "Open a note first to cite"}
-					type="button"
-				>
-					<CiteIcon />
-				</button>
-			</>
+						return
+					}
+					void handleNewNoteForBlock(block)
+				}}
+				title={expandedNoteId ? "Cite in open note" : "New note"}
+				type="button"
+			>
+				{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
+			</button>
 		),
 		[expandedNoteId, handleCiteBlock, handleNewNoteForBlock],
 	)
@@ -409,33 +428,26 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		(annotation: ReaderAnnotation) => {
 			if (annotation.kind !== "highlight" && annotation.kind !== "underline") return null
 			return (
-				<>
-					<button
-						aria-label="Add a new note for this annotation"
-						className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
-						onClick={(e) => {
-							e.stopPropagation()
-							void handleNewNoteForAnnotation(annotation)
-						}}
-						title="New note"
-						type="button"
-					>
-						<NoteIcon />
-					</button>
-					<button
-						aria-label="Cite this annotation in the open note"
-						className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
-						disabled={!expandedNoteId}
-						onClick={(e) => {
-							e.stopPropagation()
+				<button
+					aria-label={
+						expandedNoteId
+							? "Cite this annotation in the open note"
+							: "Add a new note for this annotation"
+					}
+					className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+					onClick={(e) => {
+						e.stopPropagation()
+						if (expandedNoteId) {
 							handleCiteAnnotation(annotation)
-						}}
-						title={expandedNoteId ? "Cite in open note" : "Open a note first to cite"}
-						type="button"
-					>
-						<CiteIcon />
-					</button>
-				</>
+							return
+						}
+						void handleNewNoteForAnnotation(annotation)
+					}}
+					title={expandedNoteId ? "Cite in open note" : "New note"}
+					type="button"
+				>
+					{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
+				</button>
 			)
 		},
 		[expandedNoteId, handleCiteAnnotation, handleNewNoteForAnnotation],
@@ -538,6 +550,14 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return map
 	}, [colorByAnnotation, cssColorByBlock, noteCitations])
 
+	const previewedAnnotationId = useMemo(() => {
+		if (!expandedNoteId) return null
+		const expandedNote = paperNotes.find((candidate) => candidate.id === expandedNoteId) ?? null
+		if (!expandedNote) return null
+		if (expandedNote.anchorKind !== "highlight" && expandedNote.anchorKind !== "underline") return null
+		return expandedNote.anchorAnnotationId ?? null
+	}, [expandedNoteId, paperNotes])
+
 	// Total page count for the marginalia rail, so each dot can land at
 	// `((page-1) + yRatio) / numPages` along the rail. Falls back to 1 so
 	// notes still render reasonably while the paper is mid-parse.
@@ -548,6 +568,17 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			if (block.page > max) max = block.page
 		}
 		return max
+	}, [blocks])
+
+	const blockAnchorsById = useMemo(() => {
+		const map = new Map<string, { page: number; yRatio: number }>()
+		for (const block of blocks ?? []) {
+			map.set(block.blockId, {
+				page: block.page,
+				yRatio: block.bbox?.y ?? 0.5,
+			})
+		}
+		return map
 	}, [blocks])
 
 	// blockId → 1-based blockIndex. Drives the marginalia kicker tags so a
@@ -565,17 +596,18 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		if (!workspace) return
 		const note = await createNote.mutateAsync({
 			paperId,
-			title: `Page ${currentPage}`,
 			blocknoteJson: [],
 			anchorPage: currentPage,
 			anchorYRatio: currentAnchorYRatio,
 		})
+		upsertOptimisticNote(note)
 		setExpandedNoteId(note.id)
-	}, [createNote, currentAnchorYRatio, currentPage, paperId, workspace])
+	}, [createNote, currentAnchorYRatio, currentPage, paperId, upsertOptimisticNote, workspace])
 
 	const handleDeleteNote = useCallback(
 		async (noteId: string) => {
 			await deleteNote.mutateAsync(noteId)
+			setOptimisticNotes((current) => current.filter((note) => note.id !== noteId))
 			if (expandedNoteId === noteId) setExpandedNoteId(null)
 		},
 		[deleteNote, expandedNoteId],
@@ -587,26 +619,36 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		setRequestNonce((n) => n + 1)
 	}, [])
 
+	const handleEditorReady = useCallback((editor: NoteEditorRef) => {
+		const shouldSignalReady = editorRef.current == null
+		editorRef.current = editor
+		if (shouldSignalReady) {
+			setEditorReadyVersion((version) => version + 1)
+		}
+	}, [])
+
 	useEffect(() => {
-		if (!expandedNoteId) setEditor(null)
+		editorRef.current = null
 	}, [expandedNoteId])
 
 	// Newly-created notes mount their editor a tick after we set
-	// `expandedNoteId`. Wait for `onEditorReady` to land via `setEditor`,
+	// `expandedNoteId`. Wait for `onEditorReady` to signal readiness,
 	// then drop the queued citation chip.
 	useEffect(() => {
-		if (!expandedNoteId || !editor || !pendingCiteBlock) return
+		if (!expandedNoteId || !editorRef.current || !pendingCiteBlock) return
 		if (insertCitation(pendingCiteBlock)) {
 			setPendingCiteBlock(null)
 		}
-	}, [editor, expandedNoteId, insertCitation, pendingCiteBlock])
+	}, [editorReadyVersion, expandedNoteId, insertCitation, pendingCiteBlock])
 
 	useEffect(() => {
-		if (!expandedNoteId || !editor || !pendingCiteAnnotation) return
+		if (!expandedNoteId || !editorRef.current || !pendingCiteAnnotation) return
 		if (insertAnnotationCitation(pendingCiteAnnotation)) {
 			setPendingCiteAnnotation(null)
 		}
-	}, [editor, expandedNoteId, insertAnnotationCitation, pendingCiteAnnotation])
+	}, [editorReadyVersion, expandedNoteId, insertAnnotationCitation, pendingCiteAnnotation])
+
+	const notes = useMemo(() => notesPaneFor(paperNotes, optimisticNotes), [paperNotes, optimisticNotes])
 
 	const main = (
 		<MainView
@@ -637,6 +679,8 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			handleOpenCitationAnnotation={handleOpenCitationAnnotation}
 			handleUpdateReaderAnnotationColor={handleUpdateReaderAnnotationColor}
 			flashedAnnotationId={flashedAnnotationId}
+			onRailLayoutChange={setPdfRailLayout}
+			previewedAnnotationId={previewedAnnotationId}
 			viewMode={viewMode}
 		/>
 	)
@@ -646,20 +690,22 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			<WorkspaceContent
 				activeCitingNoteIds={activeCitingNoteIds}
 				blockNumberByBlockId={blockNumberByBlockId}
+				blockAnchorsById={blockAnchorsById}
 				colorByAnnotation={colorByAnnotation}
-				colorByBlock={colorByBlock}
+				colorByBlock={cssColorByBlock}
 				dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
+				pdfRailLayout={pdfRailLayout}
 				currentAnchorYRatio={currentAnchorYRatio}
 				currentPage={currentPage}
 				expandedNoteId={expandedNoteId}
 				autoFollowLockUntil={autoFollowLockUntil}
 				isLoading={isLoading}
 				main={main}
-				notes={notesPaneFor(paperNotes)}
+				notes={notes}
 				onCreateAtCurrent={handleCreateAtCurrent}
 				onDeleteNote={handleDeleteNote}
-				onEditorReady={setEditor}
+				onEditorReady={handleEditorReady}
 				onExpand={setExpandedNoteId}
 				onJumpToPage={handleJumpToPage}
 				onOpenCitationBlock={handleOpenCitationBlock}
@@ -672,8 +718,11 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	)
 }
 
-function notesPaneFor(notes: ReturnType<typeof useNotes>["data"]) {
-	return notes ?? []
+function notesPaneFor(notes: ReturnType<typeof useNotes>["data"], optimisticNotes: Note[]) {
+	const persisted = notes ?? []
+	if (optimisticNotes.length === 0) return persisted
+	const persistedIds = new Set(persisted.map((note) => note.id))
+	return [...optimisticNotes.filter((note) => !persistedIds.has(note.id)), ...persisted]
 }
 
 // Pick the block whose bbox the annotation's center falls inside on the
@@ -681,11 +730,11 @@ function notesPaneFor(notes: ReturnType<typeof useNotes>["data"]) {
 // carries the structural block as a secondary anchor — block ids are
 // stable across re-parse, annotation ids aren't, so this is the
 // jump-to-anchor fallback when the user later deletes the markup.
-function findOverlappingBlockId(
+function findOverlappingBlock(
 	blocks: Block[],
 	page: number,
 	bbox: { x: number; y: number; w: number; h: number },
-): string | null {
+): Block | null {
 	const cx = bbox.x + bbox.w / 2
 	const cy = bbox.y + bbox.h / 2
 	const onPage = blocks.filter((block) => block.page === page && block.bbox != null)
@@ -693,20 +742,67 @@ function findOverlappingBlockId(
 		if (!block.bbox) continue
 		const { x, y, w, h } = block.bbox
 		if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
-			return block.blockId
+			return block
 		}
 	}
 	return null
 }
 
+function blockCitationSnapshot(block: Block) {
+	const raw = (block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim()
+	if (!raw) return ""
+	return raw.length > 160 ? `${raw.slice(0, 157)}...` : raw
+}
+
+function annotationCitationSnapshot(
+	annotation: ReaderAnnotation,
+	block: Block | null,
+	annotations: ReaderAnnotation[],
+	blocks: Block[],
+) {
+	const kind = annotation.kind === "underline" ? "underline" : "highlight"
+	const ordinal = annotationOrdinal(annotation, block, annotations, blocks)
+	const prefix: string[] = []
+	if (annotation.page > 0) prefix.push(`p${annotation.page}`)
+	if (block) prefix.push(`blk${block.blockIndex + 1}`)
+	prefix.push(kind)
+	return `${prefix.join(".")} ${ordinal}`
+}
+
+function annotationOrdinal(
+	annotation: ReaderAnnotation,
+	block: Block | null,
+	annotations: ReaderAnnotation[],
+	blocks: Block[],
+) {
+	if (!block) return 1
+	const peers = annotations
+		.filter((candidate) => {
+			if (candidate.kind !== annotation.kind) return false
+			if (candidate.page !== annotation.page) return false
+			const bbox = annotationBodyBoundingBox(candidate.kind, candidate.body)
+			const candidateBlock = bbox ? findOverlappingBlock(blocks, candidate.page, bbox) : null
+			return candidateBlock?.blockId === block.blockId
+		})
+		.sort((a, b) => {
+			const createdDelta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+			if (createdDelta !== 0) return createdDelta
+			return a.id.localeCompare(b.id)
+		})
+	const index = peers.findIndex((candidate) => candidate.id === annotation.id)
+	return index >= 0 ? index + 1 : peers.length + 1
+}
+
 interface WorkspaceContentProps {
 	activeCitingNoteIds: Set<string>
 	autoFollowLockUntil: number
+	blockAnchorsById: Map<string, { page: number; yRatio: number }>
 	blockNumberByBlockId: Map<string, number>
 	colorByAnnotation: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
+	pdfRailLayout: PdfRailLayout | null
 	currentAnchorYRatio: number
 	currentPage: number
 	expandedNoteId: string | null
@@ -733,11 +829,13 @@ interface WorkspaceContentProps {
 function WorkspaceContent({
 	activeCitingNoteIds,
 	autoFollowLockUntil,
+	blockAnchorsById,
 	blockNumberByBlockId,
 	colorByAnnotation,
 	colorByBlock,
 	dotColorsByNote,
 	numPages,
+	pdfRailLayout,
 	currentAnchorYRatio,
 	currentPage,
 	expandedNoteId,
@@ -774,10 +872,12 @@ function WorkspaceContent({
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockNumberByBlockId={blockNumberByBlockId}
+					blockAnchorsById={blockAnchorsById}
 					colorByAnnotation={colorByAnnotation}
 					colorByBlock={colorByBlock}
 					dotColorsByNote={dotColorsByNote}
 					numPages={numPages}
+					pdfRailLayout={pdfRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					expandedNoteId={expandedNoteId}
@@ -882,7 +982,11 @@ function MarkdownIcon() {
 			width="20"
 		>
 			<rect height="120" rx="16" ry="16" width="200" x="4" y="4" />
-			<path d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39H30Z" fill="currentColor" stroke="none" />
+			<path
+				d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39H30Z"
+				fill="currentColor"
+				stroke="none"
+			/>
 			<path d="M150 98V30h20v40h20l-30 33-30-33h20" fill="currentColor" stroke="none" />
 		</svg>
 	)
@@ -918,9 +1022,7 @@ function SidebarIcon({ open }: { open: boolean }) {
 				open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
 			}`}
 		>
-			<span
-				className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`}
-			/>
+			<span className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`} />
 			<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
 			<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
 		</span>
@@ -956,6 +1058,7 @@ interface MainViewProps {
 		annotationId: string,
 		color: string,
 	) => Promise<unknown> | unknown
+	onRailLayoutChange: (layout: PdfRailLayout | null) => void
 	onViewportAnchorChange: (page: number, yRatio: number) => void
 	palette: ReturnType<typeof usePalette>["palette"]
 	paperId: string
@@ -968,6 +1071,7 @@ interface MainViewProps {
 	selectedBlockId: string | null
 	selectedBlockRequestNonce: number
 	flashedAnnotationId: string | null
+	previewedAnnotationId: string | null
 	viewMode: ViewMode
 }
 
@@ -1000,11 +1104,13 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
 						onClearSelectedBlock={props.handleClearSelectedBlock}
 						onInteract={props.handleMainInteract}
+						onRailLayoutChange={props.onRailLayoutChange}
 						onViewportAnchorChange={props.onViewportAnchorChange}
 						onSelectBlock={props.handleSelectBlock}
 						onSetHighlight={props.handleSetBlockHighlight}
 						palette={props.palette}
 						paperId={props.paperId}
+						previewedAnnotationId={props.previewedAnnotationId}
 						readerAnnotations={props.readerAnnotations}
 						renderAnnotationActions={props.renderAnnotationActions}
 						renderActions={props.renderActions}
@@ -1050,11 +1156,13 @@ import type { Note } from "@/api/hooks/notes"
 interface MainNotesSplitProps {
 	activeCitingNoteIds: Set<string>
 	autoFollowLockUntil: number
+	blockAnchorsById: Map<string, { page: number; yRatio: number }>
 	blockNumberByBlockId: Map<string, number>
 	colorByAnnotation: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
+	pdfRailLayout: PdfRailLayout | null
 	main: React.ReactNode
 	notes: Note[]
 	expandedNoteId: string | null
@@ -1077,11 +1185,13 @@ interface MainNotesSplitProps {
 function MainNotesSplit({
 	activeCitingNoteIds,
 	autoFollowLockUntil,
+	blockAnchorsById,
 	blockNumberByBlockId,
 	colorByAnnotation,
 	colorByBlock,
 	dotColorsByNote,
 	numPages,
+	pdfRailLayout,
 	main,
 	notes,
 	expandedNoteId,
@@ -1103,25 +1213,27 @@ function MainNotesSplit({
 		<div className="flex h-full min-h-0 min-w-0">
 			<div className="min-h-0 min-w-0 flex-1">{main}</div>
 			<NotesPanel
-					activeCitingNoteIds={activeCitingNoteIds}
-					blockNumberByBlockId={blockNumberByBlockId}
-					colorByAnnotation={colorByAnnotation}
-					colorByBlock={colorByBlock}
-					dotColorsByNote={dotColorsByNote}
-					numPages={numPages}
-					currentAnchorYRatio={currentAnchorYRatio}
-					currentPage={currentPage}
-					externalFollowLockUntil={autoFollowLockUntil}
-					expandedNoteId={expandedNoteId}
-					notes={notes}
-					onCreateAtCurrent={onCreateAtCurrent}
-					onDelete={onDeleteNote}
-					onEditorReady={onEditorReady}
-					onExpand={onExpand}
-					onJumpToPage={onJumpToPage}
-					onOpenCitationBlock={onOpenCitationBlock}
-					onOpenCitationAnnotation={onOpenCitationAnnotation}
-				/>
+				activeCitingNoteIds={activeCitingNoteIds}
+				blockAnchorsById={blockAnchorsById}
+				blockNumberByBlockId={blockNumberByBlockId}
+				colorByAnnotation={colorByAnnotation}
+				colorByBlock={colorByBlock}
+				dotColorsByNote={dotColorsByNote}
+				numPages={numPages}
+				pdfRailLayout={pdfRailLayout}
+				currentAnchorYRatio={currentAnchorYRatio}
+				currentPage={currentPage}
+				externalFollowLockUntil={autoFollowLockUntil}
+				expandedNoteId={expandedNoteId}
+				notes={notes}
+				onCreateAtCurrent={onCreateAtCurrent}
+				onDelete={onDeleteNote}
+				onEditorReady={onEditorReady}
+				onExpand={onExpand}
+				onJumpToPage={onJumpToPage}
+				onOpenCitationBlock={onOpenCitationBlock}
+				onOpenCitationAnnotation={onOpenCitationAnnotation}
+			/>
 		</div>
 	)
 }
