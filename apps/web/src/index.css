@@ -146,6 +146,108 @@
 	--note-background-text: var(--color-neutral-700);
 }
 
+/* TASK-019.2 Phase A — spacing / radius / motion / shadow / z-index
+   primitives, mirrored from docs/DESIGN_TOKENS.md §4 / §5.3 / §6 / §7
+   / §8. These are additive: no component reads them yet. Phase B–F
+   will progressively migrate components from arbitrary `rounded-2xl`
+   / `duration-200` / inline `cubic-bezier(...)` etc. to these tokens.
+   Defined on plain :root (not inside @theme) so we don't override
+   Tailwind v4's built-in spacing/radius scales — the goal here is
+   stable CSS-var names callable via `var(--radius-md)` /
+   `[border-radius:var(--radius-md)]`, not regenerating Tailwind's
+   utility namespaces.
+
+   Backward-compat: --shadow-focus and --shadow-popover (declared in
+   @theme above) are preserved verbatim, with --shadow-popover now
+   identical in shape to --shadow-md so callers can migrate by simple
+   rename. */
+:root {
+	/* §4.1 Spacing scale (4px base) */
+	--space-0: 0;
+	--space-px: 1px;
+	--space-0_5: 0.125rem; /* 2px */
+	--space-1: 0.25rem; /* 4px */
+	--space-2: 0.5rem; /* 8px */
+	--space-3: 0.75rem; /* 12px */
+	--space-4: 1rem; /* 16px */
+	--space-5: 1.25rem; /* 20px */
+	--space-6: 1.5rem; /* 24px */
+	--space-8: 2rem; /* 32px */
+	--space-10: 2.5rem; /* 40px */
+	--space-12: 3rem; /* 48px */
+	--space-16: 4rem; /* 64px */
+	--space-20: 5rem; /* 80px */
+	--space-24: 6rem; /* 96px */
+
+	/* §4.2 Semantic spacing — components should prefer these over raw scale */
+	--space-inline-tight: var(--space-1);
+	--space-inline: var(--space-2);
+	--space-stack-tight: var(--space-2);
+	--space-stack: var(--space-4);
+	--space-stack-loose: var(--space-6);
+	--space-padding-tight: var(--space-3);
+	--space-padding: var(--space-4);
+	--space-padding-loose: var(--space-6);
+	--space-padding-page: var(--space-8);
+
+	/* §6.1 Border widths */
+	--border-width-default: 1px;
+	--border-width-thick: 2px;
+
+	/* §6.2 Border radius — note: doc bans --radius-2xl and larger */
+	--radius-none: 0;
+	--radius-sm: 4px; /* tags, badges, inline code */
+	--radius-md: 6px; /* buttons, inputs, small cards */
+	--radius-lg: 8px; /* cards, panels */
+	--radius-xl: 12px; /* modals, large containers */
+	--radius-full: 9999px; /* avatars, pills */
+
+	/* §7 Shadow elevation. --shadow-popover (already declared above)
+	   matches --shadow-md by design so existing callers can rename
+	   without value drift. */
+	--shadow-none: none;
+	--shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.04);
+	--shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.06), 0 1px 2px -1px oklch(0 0 0 / 0.04);
+	--shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.05);
+	--shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.1), 0 4px 6px -4px oklch(0 0 0 / 0.06);
+	--shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.12), 0 8px 10px -6px oklch(0 0 0 / 0.06);
+
+	/* §8.1 Motion duration */
+	--duration-instant: 50ms;
+	--duration-fast: 150ms;
+	--duration-base: 250ms;
+	--duration-slow: 400ms;
+	--duration-slower: 600ms;
+
+	/* §8.2 Easing */
+	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+	--ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+
+	/* §5.3 Z-index */
+	--z-base: 0;
+	--z-elevated: 10;
+	--z-overlay: 100;
+	--z-popover: 200;
+	--z-modal: 1000;
+	--z-toast: 2000;
+	--z-debug: 9999;
+
+	/* §5.1 Application shell — collapsed nav width was missing */
+	--shell-nav-width-collapsed: 56px;
+}
+
+/* Dark-theme shadow overrides per docs/DESIGN_TOKENS.md §7. Stronger
+   alpha on dark surfaces so elevation reads against the deep neutral
+   background rather than getting absorbed. */
+[data-theme="dark"] {
+	--shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.3);
+	--shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.4), 0 1px 2px -1px oklch(0 0 0 / 0.3);
+	--shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.4), 0 2px 4px -2px oklch(0 0 0 / 0.3);
+	--shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.5), 0 4px 6px -4px oklch(0 0 0 / 0.4);
+	--shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.55), 0 8px 10px -6px oklch(0 0 0 / 0.4);
+}
+
 /* Dark-theme semantic overrides (TASK-019.1). Toggling
    `<html data-theme="dark">` swaps the runtime values of every
    --color-* / --note-* var; Tailwind utilities + inline `var()` styles
