@@ -16,7 +16,9 @@ import {
 	type SaveStatus,
 	primeNoteEditorContent,
 } from "@/components/notes/NoteEditor"
+import { OverlayNoteCard } from "@/components/reader/OverlayNoteCard"
 import type { PdfRailLayout } from "@/components/reader/PdfViewer"
+import type { GutterMode } from "@/components/reader/use-gutter-mode"
 
 interface NotesPanelProps {
 	activeCitingNoteIds: Set<string>
@@ -76,6 +78,12 @@ interface NotesPanelProps {
 	isSidebarCollapsed?: boolean
 	onRequestExpandSidebar?: () => void
 	pdfRailLayout?: PdfRailLayout | null
+	// Wide / compact / mobile — measured upstream by useGutterMode in
+	// MainNotesSplit. Drives lane width, rail width, folded-slip excerpt
+	// clamp, and (in compact mode) routes "expanded" notes to the
+	// OverlayNoteCard instead of the in-lane ExpandedSlip. Defaults to
+	// "wide" when omitted so existing test mounts behave like Phase A.
+	gutterMode?: GutterMode
 }
 
 // Rail uses normalized 0..1 positions. Each note lands at
@@ -100,22 +108,29 @@ const MINIMAP_FAR_DOT_SCALE = 0.74
 const MINIMAP_VIEWPORT_MIN_SPAN_FRAC = 0.06
 const SIDEBAR_INSET_X = 4
 const SIDEBAR_COLLAPSED_WIDTH = 44
-// TASK-018 Phase A: gutter widens to host 3-line excerpts and lives
-// inside the PDF preview's right whitespace (rather than as a separate
-// column to the right of the reader). See demo/marginalia-responsive.html
-// section 1 ① Wide for the visual target. Phase B will introduce a
-// compact branch (~196px / 36px) below ~1180px content width; for now
-// these values are the wide-mode geometry only.
-const SLIP_LANE_WIDTH = 272
-const RAIL_STRIP_WIDTH = 44
+// TASK-018: gutter geometry per density.
+//   wide    (Phase A) — slip lane 272 + rail 44, 2-line excerpts.
+//   compact (Phase B) — slip lane 196 + rail 36, 1-line excerpts; the
+//                       expanded note pops an OverlayNoteCard instead
+//                       of growing in-place into PDF whitespace.
+//   mobile  (Phase C, not yet wired) — gutter is gone entirely; uses
+//                       inline pills + bottom drawer.
+// Both wide & compact still apply at lg+; below lg the panel still
+// overlays the main pane (Phase C will replace that with the drawer).
+// See demo/marginalia-responsive.html section 1 ① / ② for the visual
+// target.
+const SLIP_LANE_WIDTH_WIDE = 272
+const SLIP_LANE_WIDTH_COMPACT = 196
+const RAIL_STRIP_WIDTH_WIDE = 44
+const RAIL_STRIP_WIDTH_COMPACT = 36
 const RAIL_EDGE_RIGHT = 2
 const RAIL_EDGE_TOP = 4
 const RAIL_EDGE_BOTTOM = 4
-// TASK-018 Phase A: folded slip is taller to host a 2-line excerpt of
-// the anchored block's source text below the source tag (was 56 — just
-// the tag, centered). 88 = 10+10 padding + 22 tag + 6 gap + 40 (~2 lines
-// of 13px serif at 1.45 line-height).
-const FOLDED_SLIP_HEIGHT = 88
+// Folded slip height tracks the excerpt clamp:
+//   wide    88 = 10+10 padding + 22 tag + 6 gap + 40 (~2 lines, 13px@1.45)
+//   compact 64 = 10+10 padding + 22 tag + 4 gap + 18 (~1 line)
+const FOLDED_SLIP_HEIGHT_WIDE = 88
+const FOLDED_SLIP_HEIGHT_COMPACT = 64
 const FOLDED_SLIP_STACK_GAP = 12
 const SLIP_DEFAULT_HEIGHT = 520
 const SLIP_MIN_HEIGHT = 360
@@ -189,6 +204,7 @@ export function NotesPanel({
 	isSidebarCollapsed = false,
 	onRequestExpandSidebar,
 	pdfRailLayout,
+	gutterMode = "wide",
 }: NotesPanelProps) {
 	// `externalFollowLockUntil` no longer drives a local scroll lock —
 	// the rail is fixed-length, nothing scrolls — but we still surface it
@@ -196,6 +212,18 @@ export function NotesPanel({
 	// through the original gating semantics if anything reuses the lock.
 	void externalFollowLockUntil
 	void currentAnchorYRatio
+
+	// Density-driven geometry. Picked once per render and threaded
+	// through laneGroups math + the FoldedSlip / ExpandedSlip subtrees
+	// so a single source of truth governs widths and clamps. Compact
+	// mode shrinks the gutter and the folded card; the expanded note
+	// in compact mode renders as an OverlayNoteCard sibling rather
+	// than the in-lane ExpandedSlip, so its width isn't relevant here.
+	const slipLaneWidth = gutterMode === "compact" ? SLIP_LANE_WIDTH_COMPACT : SLIP_LANE_WIDTH_WIDE
+	const railStripWidth =
+		gutterMode === "compact" ? RAIL_STRIP_WIDTH_COMPACT : RAIL_STRIP_WIDTH_WIDE
+	const foldedSlipHeight =
+		gutterMode === "compact" ? FOLDED_SLIP_HEIGHT_COMPACT : FOLDED_SLIP_HEIGHT_WIDE
 
 	// Track the slip-lane's measured height so the expanded slip can
 	// clamp itself inside it — without this it can drift up under the
@@ -441,7 +469,7 @@ export function NotesPanel({
 			const slipScreenY = halfH + offsetFromCenter * SLIP_PARALLAX_FACTOR
 			const opacity = expanded
 				? 1
-				: foldedSlipOpacityForLane(slipScreenY, laneHeight, viewportHeight)
+				: foldedSlipOpacityForLane(slipScreenY, laneHeight, viewportHeight, foldedSlipHeight)
 			if (opacity < SLIP_OPACITY_RENDER_THRESHOLD && !expanded) continue
 			placed.push({
 				groupKey: group.groupKey,
@@ -468,11 +496,11 @@ export function NotesPanel({
 		}
 		const adjustedTops = spreadTopsWithSpacingPx(
 			foldedTops,
-			FOLDED_SLIP_HEIGHT + FOLDED_SLIP_STACK_GAP,
-			FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD,
+			foldedSlipHeight + FOLDED_SLIP_STACK_GAP,
+			foldedSlipHeight / 2 + SLIP_EXPANDED_EDGE_PAD,
 			Math.max(
-				FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD,
-				laneHeight - FOLDED_SLIP_HEIGHT / 2 - SLIP_EXPANDED_EDGE_PAD,
+				foldedSlipHeight / 2 + SLIP_EXPANDED_EDGE_PAD,
+				laneHeight - foldedSlipHeight / 2 - SLIP_EXPANDED_EDGE_PAD,
 			),
 		)
 		for (let n = 0; n < foldedIndices.length; n += 1) {
@@ -534,7 +562,7 @@ export function NotesPanel({
 	// navigating and editing existing anchored notes.
 	void onCreateAtCurrent
 
-	const expandedSidebarWidth = SLIP_LANE_WIDTH + RAIL_STRIP_WIDTH + SIDEBAR_INSET_X * 2
+	const expandedSidebarWidth = slipLaneWidth + railStripWidth + SIDEBAR_INSET_X * 2
 
 	return (
 		<aside
@@ -553,7 +581,7 @@ export function NotesPanel({
 						{isSidebarCollapsed ? null : (
 				<div
 					className="relative h-full overflow-visible bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-bg-primary)_62%,var(--color-bg-secondary)_38%),var(--color-bg-secondary))]"
-					style={{ width: `${SLIP_LANE_WIDTH}px` }}
+					style={{ width: `${slipLaneWidth}px` }}
 				>
 					<div className="absolute inset-x-0 inset-y-6 overflow-visible" ref={laneInnerRef}>
 						{laneGroups.map((group) => {
@@ -562,6 +590,41 @@ export function NotesPanel({
 								? (group.notes.find((candidate) => candidate.id === expandedNoteId) ?? group.notes[0] ?? null)
 								: group.notes[0] ?? null
 							if (!note) return null
+							// Compact mode: even when this group is "expanded", we
+							// keep a folded placeholder in the lane (35% opacity)
+							// and render the actual editor in an OverlayNoteCard
+							// outside the panel. Wide mode keeps the existing
+							// in-place ExpandedSlip behavior.
+							if (isExpanded && gutterMode === "compact") {
+								return (
+									<FoldedSlip
+										accentColor={group.accentColor}
+										active={true}
+										annotationOrdinal={
+											note.anchorAnnotationId
+												? (annotationOrdinalById?.get(note.anchorAnnotationId) ?? null)
+												: null
+										}
+										blockNumber={
+											group.blockId ? (blockNumberByBlockId?.get(group.blockId) ?? null) : null
+										}
+										excerptLineClamp={1}
+										foldedSlipHeight={foldedSlipHeight}
+										slipLaneWidth={slipLaneWidth}
+										excerpt={
+											group.blockId ? (blockTextById?.get(group.blockId) ?? null) : null
+										}
+										group={group}
+										key={group.groupKey}
+										note={note}
+										// Click on the dimmed placeholder reopens the
+										// overlay (idempotent — same noteId).
+										onOpen={() => handleDotClick(group)}
+										opacity={0.35}
+										topPx={group.topPx}
+									/>
+								)
+							}
 							return isExpanded ? (
 								<ExpandedSlip
 									key={group.groupKey}
@@ -603,6 +666,9 @@ export function NotesPanel({
 									blockNumber={
 										group.blockId ? (blockNumberByBlockId?.get(group.blockId) ?? null) : null
 									}
+									excerptLineClamp={gutterMode === "compact" ? 1 : 2}
+									foldedSlipHeight={foldedSlipHeight}
+									slipLaneWidth={slipLaneWidth}
 									// Source text from the block this group anchors to.
 									// `group.blockId` is set both for direct block anchors
 									// and for highlight/underline anchors (the note remembers
@@ -627,7 +693,7 @@ export function NotesPanel({
 						)}
 				<div
 					className="relative h-full shrink-0"
-					style={{ width: `${RAIL_STRIP_WIDTH}px` }}
+					style={{ width: `${railStripWidth}px` }}
 				>
 					<div
 						className="absolute left-0"
@@ -709,6 +775,49 @@ export function NotesPanel({
 					</div>
 				</div>
 			</div>
+			{/* Compact-mode expand surface. The lane keeps a 35%-opacity
+				FoldedSlip placeholder where the note "lives" so its
+				spatial anchor stays visible; the editor itself happens
+				here, centered above the workspace with a backdrop dim.
+				Rendered at the panel root rather than inside the lane
+				since OverlayNoteCard uses position: fixed. */}
+			{gutterMode === "compact" && expandedGroup && expandedNote ? (
+				<OverlayNoteCard
+					accentColor={expandedGroup.accentColor}
+					annotationBlockIdById={annotationBlockIdById}
+					annotationOrdinalById={annotationOrdinalById}
+					blockNumberByBlockId={blockNumberByBlockId}
+					canJumpToAnchor={
+						expandedAnchorPage != null &&
+						Boolean(
+							expandedNote.paperId &&
+								(expandedNote.anchorAnnotationId || expandedNote.anchorBlockId),
+						)
+					}
+					groupLabel={groupLabelForPopover(
+						expandedGroup.notes,
+						expandedGroup.blockId,
+						blockNumberByBlockId,
+					)}
+					note={expandedNote}
+					onClose={handleCloseExpandedSlip}
+					onEditorReady={onEditorReady}
+					onJumpToAnchor={
+						expandedAnchorPage != null
+							? () =>
+									onJumpToPage(
+										expandedAnchorPage,
+										expandedNote.anchorYRatio ?? undefined,
+									)
+							: undefined
+					}
+					onOpenCitationAnnotation={handleOpenCitationAnnotation}
+					onOpenCitationBlock={handleOpenCitationBlock}
+					pageLabel={
+						expandedAnchorPage != null ? `Page ${expandedAnchorPage}` : "Unanchored"
+					}
+				/>
+			) : null}
 		</aside>
 	)
 }
@@ -1070,14 +1179,19 @@ function spreadTopsWithSpacing(rawTops: number[], minSpacingFrac: number) {
 	return tops
 }
 
-function foldedSlipOpacityForLane(centerY: number, laneHeight: number, viewportHeight: number) {
-	const minCenter = FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD
+function foldedSlipOpacityForLane(
+	centerY: number,
+	laneHeight: number,
+	viewportHeight: number,
+	foldedSlipHeight: number,
+) {
+	const minCenter = foldedSlipHeight / 2 + SLIP_EXPANDED_EDGE_PAD
 	const maxCenter = Math.max(
 		minCenter,
-		laneHeight - FOLDED_SLIP_HEIGHT / 2 - SLIP_EXPANDED_EDGE_PAD,
+		laneHeight - foldedSlipHeight / 2 - SLIP_EXPANDED_EDGE_PAD,
 	)
 	const fadeTailPx = Math.max(
-		FOLDED_SLIP_HEIGHT * 0.7,
+		foldedSlipHeight * 0.7,
 		viewportHeight * Math.max(0.18, SLIP_FADE_TAIL_FRAC * 0.4),
 	)
 	if (centerY < minCenter) {
@@ -1235,21 +1349,25 @@ function FoldedSlip({
 	annotationOrdinal,
 	blockNumber,
 	excerpt,
+	excerptLineClamp,
+	foldedSlipHeight,
 	group,
 	note,
 	onOpen,
 	opacity,
+	slipLaneWidth,
 	topPx,
 }: {
 	accentColor: string
 	active: boolean
 	annotationOrdinal: number | null
 	blockNumber: number | null
-	// Block source text shown below the tag, 2-line clamped. Tells the
-	// reader "what passage am I responding to" at a glance — without
-	// expanding the slip and without scrolling the PDF back. Null when
-	// the note is page-anchored (no block) or block text isn't loaded.
+	// Block source text shown below the tag. Clamped to 2 lines in
+	// wide mode, 1 line in compact (excerptLineClamp). Null when the
+	// note is page-anchored or block text isn't loaded.
 	excerpt: string | null
+	excerptLineClamp: 1 | 2
+	foldedSlipHeight: number
 	group: {
 		groupKey: string
 		notes: Note[]
@@ -1258,6 +1376,7 @@ function FoldedSlip({
 	note: Note
 	onOpen: () => void
 	opacity: number
+	slipLaneWidth: number
 	topPx: number
 }) {
 	const sourceTagLabel = slipSourceTagLabel(note, group.notes, blockNumber, annotationOrdinal)
@@ -1270,15 +1389,15 @@ function FoldedSlip({
 			onClick={onOpen}
 			style={{
 				left: `${SLIP_LANE_INSET_LEFT}px`,
-				top: `${topPx - FOLDED_SLIP_HEIGHT / 2}px`,
-				height: `${FOLDED_SLIP_HEIGHT}px`,
-				maxWidth: `${SLIP_LANE_WIDTH}px`,
+				top: `${topPx - foldedSlipHeight / 2}px`,
+				height: `${foldedSlipHeight}px`,
+				maxWidth: `${slipLaneWidth}px`,
 				borderLeft: `3px solid ${accentColor}`,
 				opacity: effectiveOpacity,
 			}}
 			type="button"
 		>
-			<div className="flex h-full flex-col gap-1.5 px-3 py-2.5">
+			<div className="flex h-full flex-col gap-1.5 px-3 py-2">
 				<div className="flex items-center gap-1.5">
 					<span
 						className="inline-flex items-center rounded-md px-2.5 py-1.5 text-[11px] font-bold tracking-[0.01em]"
@@ -1301,7 +1420,7 @@ function FoldedSlip({
 						className="m-0 overflow-hidden text-[13px] leading-[1.45] text-text-primary"
 						style={{
 							display: "-webkit-box",
-							WebkitLineClamp: 2,
+							WebkitLineClamp: excerptLineClamp,
 							WebkitBoxOrient: "vertical",
 						}}
 					>

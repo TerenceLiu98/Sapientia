@@ -1312,6 +1312,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 MainView.displayName = "MainView"
 
 import type { Note } from "@/api/hooks/notes"
+import { useGutterMode } from "@/components/reader/use-gutter-mode"
 
 interface MainNotesSplitProps {
 	activeCitingNoteIds: Set<string>
@@ -1375,23 +1376,43 @@ function MainNotesSplit({
 	isNotesSidebarCollapsed,
 	onRequestExpandNotesSidebar,
 }: MainNotesSplitProps) {
-	// TASK-018 Phase A — gutter lives inside the PDF preview's right
+	// TASK-018 Phase A/B — gutter lives inside the PDF preview's right
 	// whitespace (rather than as its own column to the right of the
 	// reader). The panel is always absolutely positioned; the main
 	// column reserves matching padding on the right at lg+ so PDF/MD
-	// content stays out from underneath the slip lane. Below lg, the
-	// panel still overlays the main pane — Phase C will replace that
-	// with an inline-pill + bottom-drawer treatment.
-	const lgGutterPadClass = isNotesSidebarCollapsed
-		? "lg:pr-[44px]" // matches NotesPanel SIDEBAR_COLLAPSED_WIDTH
-		: "lg:pr-[324px]" // matches SLIP_LANE_WIDTH + RAIL_STRIP_WIDTH + 2×SIDEBAR_INSET_X
+	// content stays out from underneath the slip lane.
+	//
+	// `gutterMode` is measured from this split's root element (NOT the
+	// viewport — LeftNav / agent panel can shrink the workspace below
+	// the wide threshold even on a 1920px monitor). It drives:
+	//
+	//   - the right padding reserved on the main column (324 wide,
+	//     244 compact, 0 mobile),
+	//   - which widths NotesPanel uses for its slip lane / rail,
+	//   - whether an expanded note renders in-place (wide) or as an
+	//     overlay card with backdrop (compact). Mobile is Phase C.
+	const splitRef = useRef<HTMLDivElement | null>(null)
+	const gutterMode = useGutterMode(splitRef)
+	let lgGutterPadClass: string
+	if (isNotesSidebarCollapsed) {
+		lgGutterPadClass = "lg:pr-[44px]" // matches NotesPanel SIDEBAR_COLLAPSED_WIDTH
+	} else if (gutterMode === "compact") {
+		// SLIP_LANE_WIDTH_COMPACT (196) + RAIL_STRIP_WIDTH_COMPACT (36) + 2×SIDEBAR_INSET_X (8) = 240
+		lgGutterPadClass = "lg:pr-[240px]"
+	} else {
+		// wide & mobile (mobile uses absolute overlay so the padding
+		// is harmless — Phase C will switch to drawer and reset this)
+		// SLIP_LANE_WIDTH_WIDE (272) + RAIL_STRIP_WIDTH_WIDE (44) + 2×SIDEBAR_INSET_X (8) = 324
+		lgGutterPadClass = "lg:pr-[324px]"
+	}
 	return (
-		<div className="relative h-full min-h-0 min-w-0">
+		<div className="relative h-full min-h-0 min-w-0" ref={splitRef}>
 			<div className={`h-full min-h-0 min-w-0 transition-[padding] duration-200 ease-out ${lgGutterPadClass}`}>
 				{main}
 			</div>
 			<div className="absolute inset-y-0 right-0 z-[5]">
 				<NotesPanel
+					gutterMode={gutterMode}
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockAnchorsById={blockAnchorsById}
 					blockNumberByBlockId={blockNumberByBlockId}
