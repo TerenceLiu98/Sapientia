@@ -172,7 +172,16 @@ function PdfViewerInner({
 	const activePageRef = useRef(1)
 	const intersectionObserverRef = useRef<IntersectionObserver | null>(null)
 	const scrollRafRef = useRef<number | null>(null)
-	const handledJumpRequestRef = useRef<string | null>(null)
+	// Separate handled-key trackers for the two jump origins. Sharing a
+	// single ref was a bug: the external (citation / cross-view) jump
+	// keys live in `${nonce}:P:Y` namespace while internal PDF-link jumps
+	// use `internal:N:P:Y`. Once an internal link fires, the shared ref
+	// holds an `internal:` key — which never matches the external
+	// effect's key, so the *next* time the external effect re-runs (e.g.
+	// renderedPages re-derives during scroll) it sees "different" and
+	// re-scrolls to the old requestedPage, fighting the user.
+	const handledExternalJumpRequestRef = useRef<string | null>(null)
+	const handledInternalJumpRequestRef = useRef<string | null>(null)
 
 	useEffect(() => {
 		void paperId
@@ -199,7 +208,8 @@ function PdfViewerInner({
 		pageRefs.current.clear()
 		intersectionRatiosRef.current.clear()
 		activePageRef.current = 1
-		handledJumpRequestRef.current = null
+		handledExternalJumpRequestRef.current = null
+		handledInternalJumpRequestRef.current = null
 		onRailLayoutChange?.(null)
 	}, [onRailLayoutChange, paperId])
 
@@ -365,13 +375,13 @@ function PdfViewerInner({
 		if (numPages == null) return
 		if (!renderedPages.has(requestedPage)) return
 		const requestKey = `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedBlockY ?? "none"}`
-		if (handledJumpRequestRef.current === requestKey) return
+		if (handledExternalJumpRequestRef.current === requestKey) return
 		// Always scroll on a focus request. Self-pane bbox clicks no longer
 		// emit one (the block is visible by definition), so the only callers
 		// here are cross-view toggles and citation chip jumps — both want to
 		// re-center the target even if it's currently in viewport.
 		if (!scrollToPage(requestedPage, requestedBlockY)) return
-		handledJumpRequestRef.current = requestKey
+		handledExternalJumpRequestRef.current = requestKey
 	}, [numPages, pageCanvasVersion, pageRefsVersion, renderedPages, requestedPageNonce, requestedPage, requestedBlockY, scrollToPage])
 
 	useEffect(() => {
@@ -384,9 +394,9 @@ function PdfViewerInner({
 			pagePointDimsByPage.get(internalRequestedPage),
 		)
 		const requestKey = `internal:${internalRequestedPageNonce}:${internalRequestedPage}:${internalRequestedBlockY ?? "none"}`
-		if (handledJumpRequestRef.current === requestKey) return
+		if (handledInternalJumpRequestRef.current === requestKey) return
 		if (!scrollToPage(internalRequestedPage, internalRequestedBlockY)) return
-		handledJumpRequestRef.current = requestKey
+		handledInternalJumpRequestRef.current = requestKey
 	}, [
 		internalRequestedDest,
 		internalRequestedPage,
