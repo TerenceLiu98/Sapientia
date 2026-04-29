@@ -80,7 +80,6 @@ interface NotesPanelProps {
 // circular element.
 const DOT_RADIUS = 8
 const ACTIVE_DOT_RADIUS = 10
-const DOT_CENTER_OFFSET = 9
 // Nearby note anchors should remain readable as distinct stops on the
 // rail. We spread dense clusters vertically, but keep every dot on the
 // same horizontal line so the rail reads as a clean single track.
@@ -130,6 +129,9 @@ const SLIP_EXPANDED_EDGE_PAD = 8
 const SLIP_ANCHOR_DOT = 14
 const PROGRESS_BAR_WIDTH = 8
 const PROGRESS_KNOB_WIDTH = 20
+const RAIL_DOT_GAP = 10
+const RAIL_DOT_CONNECTOR_WIDTH = 16
+const RAIL_DOT_CONNECTOR_HEIGHT = 4
 const NEUTRAL_DOT_COLOR = "var(--color-neutral-400)"
 
 // Right pane is a two-part marginalia surface: a slip lane for notes
@@ -177,6 +179,7 @@ export function NotesPanel({
 	// anchor sits near a viewport edge.
 	const laneInnerRef = useRef<HTMLDivElement | null>(null)
 	const [laneInnerHeight, setLaneInnerHeight] = useState(0)
+	const [pendingExpandNoteId, setPendingExpandNoteId] = useState<string | null>(null)
 	useEffect(() => {
 		const node = laneInnerRef.current
 		if (!node) return
@@ -194,6 +197,30 @@ export function NotesPanel({
 			observer.disconnect()
 		}
 	}, [])
+
+	useEffect(() => {
+		if (isSidebarCollapsed) setLaneInnerHeight(0)
+	}, [isSidebarCollapsed])
+
+	useEffect(() => {
+		if (pendingExpandNoteId == null) return
+		if (expandedNoteId === pendingExpandNoteId) {
+			setPendingExpandNoteId(null)
+		}
+	}, [expandedNoteId, pendingExpandNoteId])
+
+	useEffect(() => {
+		if (isSidebarCollapsed) return
+		if (pendingExpandNoteId == null) return
+		if (laneInnerHeight <= 0) return
+		const frame = window.requestAnimationFrame(() => {
+			onExpand(pendingExpandNoteId)
+			setPendingExpandNoteId(null)
+		})
+		return () => {
+			window.cancelAnimationFrame(frame)
+		}
+	}, [isSidebarCollapsed, laneInnerHeight, onExpand, pendingExpandNoteId])
 
 	// The rail behaves like a minimap rather than a raw progress bar:
 	// anchors near the live viewport are visually magnified, while far
@@ -383,27 +410,14 @@ export function NotesPanel({
 			const anchorAbsolute = pageMetric
 				? pageMetric.top + (group.notes[0]?.anchorYRatio ?? group.focusTop) * pageMetric.height
 				: layout.scrollHeight * group.focusTop
-			let slipScreenY: number
-			let opacity: number
-			if (expanded) {
-				// Expanded slip is locked to the viewport center area —
-				// don't reverse-scroll it out from under the user while
-				// they're typing. Opacity always 1.
-				slipScreenY = clamp(
-					anchorAbsolute - viewportTop,
-					halfH * 0.4,
-					viewportHeight - halfH * 0.4,
-				)
-				opacity = 1
-			} else {
-				// Parallax-coupled position: when the anchor is exactly at
-				// viewport center, slip is at viewport center; otherwise
-				// the slip drifts at SLIP_PARALLAX_FACTOR * the anchor's
-				// own drift rate.
-				const offsetFromCenter = anchorAbsolute - viewportCenter
-				slipScreenY = halfH + offsetFromCenter * SLIP_PARALLAX_FACTOR
-				opacity = foldedSlipOpacityForLane(slipScreenY, laneHeight, viewportHeight)
-			}
+			// Keep folded and expanded slips on the same vertical baseline so
+			// opening a note doesn't "jump" up/down relative to its rail dot.
+			// The only change on open should be size/interaction, not anchor-y.
+			const offsetFromCenter = anchorAbsolute - viewportCenter
+			const slipScreenY = halfH + offsetFromCenter * SLIP_PARALLAX_FACTOR
+			const opacity = expanded
+				? 1
+				: foldedSlipOpacityForLane(slipScreenY, laneHeight, viewportHeight)
 			if (opacity < SLIP_OPACITY_RENDER_THRESHOLD && !expanded) continue
 			placed.push({
 				groupKey: group.groupKey,
@@ -465,15 +479,18 @@ export function NotesPanel({
 				notes: Note[]
 			},
 		) => {
+			const targetNoteId = group.notes[0]?.id ?? null
+			const isGroupExpanded = group.notes.some((note) => note.id === expandedNoteId)
 			if (isSidebarCollapsed) {
 				onRequestExpandSidebar?.()
+				if (!isGroupExpanded) setPendingExpandNoteId(targetNoteId)
+				return
 			}
-			const isGroupExpanded = group.notes.some((note) => note.id === expandedNoteId)
 			if (isGroupExpanded) {
 				onExpand(null)
 				return
 			}
-			onExpand(group.notes[0]?.id ?? null)
+			onExpand(targetNoteId)
 		},
 		[expandedNoteId, isSidebarCollapsed, onExpand, onRequestExpandSidebar],
 	)
@@ -586,38 +603,48 @@ export function NotesPanel({
 							right: `${RAIL_EDGE_RIGHT}px`,
 						}}
 					>
-						{/* Scrollbar groove — a thin pill running the full rail
-							height. Background, no fill from the top. */}
+						{/* Progress groove — the paper's full reading span. */}
 						<div
 							aria-hidden="true"
 							className="pointer-events-none absolute top-0 bottom-0 right-0 rounded-full bg-border-subtle/85"
 							style={{ width: `${PROGRESS_BAR_WIDTH}px` }}
 						/>
-						{/* Scrollbar thumb — sized to the visible viewport
-							(`viewportWindow`), slid to current scroll position.
-							Reads as a native browser scrollbar instead of a
-							media-player progress fill. */}
+						{/* Progress fill — everything above the current anchor
+							is "read"/traversed, so the bar fills from the top
+							down to `progressFrac`. */}
 						<div
 							aria-hidden="true"
-							className="pointer-events-none absolute right-0 rounded-full bg-text-tertiary/55"
+							className="pointer-events-none absolute right-0 top-0 rounded-full bg-text-secondary/36 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.28)]"
+							style={{
+								width: `${PROGRESS_BAR_WIDTH}px`,
+								height: `${progressFrac * 100}%`,
+							}}
+						/>
+						{/* Viewport window — kept as a secondary affordance so
+							you can still sense the visible slice, but it's now
+							a light sleeve over the progress bar rather than the
+							main bar metaphor. */}
+						<div
+							aria-hidden="true"
+							className="pointer-events-none absolute rounded-full border border-text-tertiary/22 bg-white/28 backdrop-blur-[1px]"
 							style={{
 								top: `${viewportWindow.top * 100}%`,
-								width: `${PROGRESS_BAR_WIDTH}px`,
-								height: `${Math.max(2, (viewportWindow.bottom - viewportWindow.top) * 100)}%`,
+								right: "-3px",
+								width: `${PROGRESS_BAR_WIDTH + 6}px`,
+								height: `${Math.max(8, (viewportWindow.bottom - viewportWindow.top) * 100)}%`,
 							}}
 						/>
 						{/* Accent pin marking the precise (page, yRatio) the
-							reader is anchored to — useful when the thumb spans
-							more than a page. Sits on the inner edge of the
-							thumb so it never overlaps the dots column. */}
+							reader is anchored to. Sits on the inner side of the
+							bar so it doesn't collide with the dots. */}
 						<div
 							aria-hidden="true"
-							className="pointer-events-none absolute rounded-sm bg-accent-700"
+							className="pointer-events-none absolute rounded-sm bg-text-secondary/80"
 							style={{
 								top: `calc(${progressFrac * 100}% - 1px)`,
 								right: `${PROGRESS_BAR_WIDTH}px`,
 								width: `${PROGRESS_KNOB_WIDTH / 2}px`,
-								height: `2px`,
+								height: `3px`,
 							}}
 						/>
 						{groupedDots.map((placed) => (
@@ -625,6 +652,7 @@ export function NotesPanel({
 								key={placed.groupKey}
 								active={placed.notes.some((note) => note.id === expandedNoteId)}
 								background={placed.background}
+								connectorColor={placed.accentColor}
 								groupKey={placed.groupKey}
 								isCitingSelectedBlock={placed.notes.some((note) => activeCitingNoteIds.has(note.id))}
 								isCurrentPage={placed.page === currentPage}
@@ -1081,6 +1109,7 @@ function slipHeightBounds() {
 const DotButton = memo(function DotButton({
 	active,
 	background,
+	connectorColor,
 	groupKey,
 	isCitingSelectedBlock,
 	isCurrentPage,
@@ -1095,6 +1124,7 @@ const DotButton = memo(function DotButton({
 }: {
 	active: boolean
 	background: string
+	connectorColor: string
 	groupKey: string
 	isCitingSelectedBlock: boolean
 	isCurrentPage: boolean
@@ -1109,6 +1139,8 @@ const DotButton = memo(function DotButton({
 }) {
 	const radius = (active ? ACTIVE_DOT_RADIUS : DOT_RADIUS) * visualScale
 	const outlineColor = activeOutlineColor ?? "var(--color-accent-600)"
+	const connectorOpacity = active ? 0.7 : isCitingSelectedBlock ? 0.58 : 0.34
+	const connectorOverlap = Math.max(2, radius * 0.16)
 	return (
 		<button
 			aria-label={tooltip}
@@ -1125,7 +1157,7 @@ const DotButton = memo(function DotButton({
 			}}
 			style={{
 				top: `calc(${topPercent}% - ${radius}px)`,
-				right: `calc(${-DOT_CENTER_OFFSET - rightOffset}px - ${radius}px)`,
+				right: `${PROGRESS_BAR_WIDTH + RAIL_DOT_GAP + rightOffset}px`,
 				width: `${radius * 2}px`,
 				height: `${radius * 2}px`,
 				background,
@@ -1143,6 +1175,18 @@ const DotButton = memo(function DotButton({
 			title={tooltip}
 			type="button"
 		>
+			<span
+				aria-hidden="true"
+				className="pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full"
+				style={{
+					left: `calc(100% - ${connectorOverlap.toFixed(2)}px)`,
+					width: `${RAIL_DOT_CONNECTOR_WIDTH}px`,
+					height: `${RAIL_DOT_CONNECTOR_HEIGHT}px`,
+					backgroundColor: connectorColor,
+					opacity: connectorOpacity,
+					boxShadow: "0 0 0 1px rgba(255,255,255,0.9)",
+				}}
+			/>
 			{/* Hidden text so screen readers + tests can match by note title.
 				The visible affordance is the colored dot. */}
 			<span className="sr-only">{srLabel}</span>
@@ -1482,24 +1526,22 @@ function ExpandedSlip({
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/60 px-2.5 py-1.5 text-xs text-text-tertiary">
-				{onJumpToAnchor || (note.paperId && (note.anchorAnnotationId || note.anchorBlockId)) ? (
-					<button
-						aria-label="Jump to note anchor"
-						className="min-w-0 truncate rounded-md px-1.5 py-1 text-left transition-colors hover:bg-surface-hover hover:text-text-accent"
-						onClick={handleJumpToSource}
-						title="Jump to this note's anchor in the reader"
-						type="button"
-					>
-						{anchorPage != null ? `Page ${anchorPage}` : "Unanchored"}
-						{groupLabel ? ` · ${groupLabel}` : ""}
-					</button>
-				) : (
-					<span className="truncate px-1.5 py-1">
-						{anchorPage != null ? `Page ${anchorPage}` : "Unanchored"}
-						{groupLabel ? ` · ${groupLabel}` : ""}
-					</span>
-				)}
+				<span className="truncate px-1.5 py-1">
+					{anchorPage != null ? `Page ${anchorPage}` : "Unanchored"}
+					{groupLabel ? ` · ${groupLabel}` : ""}
+				</span>
 				<div className="flex items-center gap-1">
+					{onJumpToAnchor || (note.paperId && (note.anchorAnnotationId || note.anchorBlockId)) ? (
+						<button
+							aria-label="Jump to note anchor"
+							className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-accent"
+							onClick={handleJumpToSource}
+							title="Jump to this note's anchor in the reader"
+							type="button"
+						>
+							<JumpToSourceIcon />
+						</button>
+					) : null}
 					<button
 						aria-label="Close note"
 						className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
@@ -1691,6 +1733,25 @@ function CloseIcon() {
 			width="14"
 		>
 			<path d="m6 6 12 12M18 6 6 18" />
+		</svg>
+	)
+}
+
+function JumpToSourceIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="15"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.8"
+			viewBox="0 0 24 24"
+			width="15"
+		>
+			<path d="M7 17 17 7" />
+			<path d="M9 7h8v8" />
 		</svg>
 	)
 }

@@ -609,24 +609,32 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return map
 	}, [colorByAnnotation, cssColorByBlock, noteCitations])
 
-	const previewedAnnotationId = useMemo(() => {
+	const expandedNote = useMemo(() => {
 		if (!expandedNoteId) return null
-		const expandedNote = paperNotes.find((candidate) => candidate.id === expandedNoteId) ?? null
+		return (
+			optimisticNotes.find((candidate) => candidate.id === expandedNoteId) ??
+			paperNotes.find((candidate) => candidate.id === expandedNoteId) ??
+			null
+		)
+	}, [expandedNoteId, optimisticNotes, paperNotes])
+
+	const previewedAnnotationId = useMemo(() => {
 		if (!expandedNote) return null
 		if (expandedNote.anchorKind !== "highlight" && expandedNote.anchorKind !== "underline") return null
 		return expandedNote.anchorAnnotationId ?? null
-	}, [expandedNoteId, paperNotes])
+	}, [expandedNote])
 
-	// While a note is open and anchored to a block, suppress the
-	// image/table preview popup for that block — the note panel and the
-	// zoomed image popup compete for the same screen real estate, and
-	// note creation should win. Naturally clears when the note closes.
+	const previewedBlockId = useMemo(() => expandedNote?.anchorBlockId ?? null, [expandedNote])
+
+	// While any note is open, suppress all image/table preview popups.
+	// The expanded note slip already occupies the same right-edge visual
+	// territory as the zoomed figure/table card; letting both appear at
+	// once creates overlapping interaction models (selected block vs
+	// active note) and quickly gets noisy. Naturally clears when the note
+	// closes.
 	const previewSuppressedBlockId = useMemo(() => {
-		if (!expandedNoteId) return null
-		const expandedNote = paperNotes.find((candidate) => candidate.id === expandedNoteId) ?? null
-		if (!expandedNote || expandedNote.anchorKind !== "block") return null
-		return expandedNote.anchorBlockId ?? null
-	}, [expandedNoteId, paperNotes])
+		return expandedNoteId ? "__all__" : null
+	}, [expandedNoteId])
 
 	// Total page count for the marginalia rail, so each dot can land at
 	// `((page-1) + yRatio) / numPages` along the rail. Falls back to 1 so
@@ -750,6 +758,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			handleOpenCitationAnnotation={handleOpenCitationAnnotation}
 			handleUpdateReaderAnnotationColor={handleUpdateReaderAnnotationColor}
 			flashedAnnotationId={flashedAnnotationId}
+			previewedBlockId={previewedBlockId}
 			onRailLayoutChange={setPdfRailLayout}
 			previewedAnnotationId={previewedAnnotationId}
 			previewSuppressedBlockId={previewSuppressedBlockId}
@@ -1198,6 +1207,7 @@ interface MainViewProps {
 	selectedBlockId: string | null
 	selectedBlockRequestNonce: number
 	flashedAnnotationId: string | null
+	previewedBlockId: string | null
 	previewedAnnotationId: string | null
 	previewSuppressedBlockId: string | null
 	viewMode: ViewMode
@@ -1239,6 +1249,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						onSetHighlight={props.handleSetBlockHighlight}
 						palette={props.palette}
 						paperId={props.paperId}
+						previewedBlockId={props.previewedBlockId}
 						previewedAnnotationId={props.previewedAnnotationId}
 						previewSuppressedBlockId={props.previewSuppressedBlockId}
 						readerAnnotations={props.readerAnnotations}
@@ -1266,6 +1277,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						paperId={props.paperId}
 						palette={props.palette}
 						followCurrentPage={props.viewMode === "pdf-only"}
+						previewedBlockId={props.previewedBlockId}
 						requestedAnchorYRatio={props.requestedBlockY}
 						requestedPage={props.requestedPage}
 						requestedPageNonce={props.requestNonce}

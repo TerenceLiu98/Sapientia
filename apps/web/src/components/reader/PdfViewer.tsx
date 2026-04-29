@@ -97,6 +97,10 @@ interface PdfViewerProps {
 	// When a marginalia note anchored to a highlight/underline becomes
 	// active, keep the matching markup visibly selected in the PDF.
 	previewedAnnotationId?: string | null
+	// When a marginalia note opens, softly preview its anchor block so the
+	// reader immediately sees the structural source without needing a
+	// second click inside the note.
+	previewedBlockId?: string | null
 	// While a note is open and anchored to a block, suppress the
 	// image/table preview popup for that block. The note panel and the
 	// zoom popup compete for the same screen real estate; note creation
@@ -134,6 +138,7 @@ function PdfViewerInner({
 	renderAnnotationActions,
 	renderActions,
 	flashedAnnotationId,
+	previewedBlockId,
 	previewedAnnotationId,
 	previewSuppressedBlockId,
 }: PdfViewerProps) {
@@ -748,6 +753,7 @@ function PdfViewerInner({
 										onUpdateReaderAnnotationColor={onUpdateReaderAnnotationColor}
 										page={page}
 										palette={palette}
+										previewedBlockId={previewedBlockId}
 										previewedAnnotationId={previewedAnnotationId}
 										renderAnnotationActions={renderAnnotationActions}
 										renderActions={renderActions}
@@ -763,6 +769,7 @@ function PdfViewerInner({
 			{!annotationMode &&
 			selectedBlock &&
 			isPreviewableBlock(selectedBlock) &&
+			previewSuppressedBlockId !== "__all__" &&
 			selectedBlock.blockId !== previewSuppressedBlockId ? (
 				<SelectedBlockPreview
 					block={selectedBlock}
@@ -935,6 +942,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onUpdateReaderAnnotationColor,
 	page,
 	palette,
+	previewedBlockId,
 	previewedAnnotationId,
 	renderAnnotationActions,
 	renderActions,
@@ -978,6 +986,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	) => Promise<unknown> | unknown
 	page: number
 	palette?: PaletteEntry[]
+	previewedBlockId?: string | null
 	previewedAnnotationId?: string | null
 	renderAnnotationActions?: (annotation: ReaderAnnotation) => React.ReactNode
 	renderActions?: (block: Block) => React.ReactNode
@@ -1203,7 +1212,8 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 			blocks?.map((block) => {
 				if (!isRenderableBbox(block.bbox)) return null
 				const isSelected = selectedBlockId === block.blockId
-				const isHovered = hoveredBlockId === block.blockId
+				const isHovered =
+					hoveredBlockId === block.blockId || previewedBlockId === block.blockId
 				const highlightColor = colorByBlock?.get(block.blockId) ?? null
 				const showBoxChrome =
 					showLayoutBoxes || isSelected || isHovered || highlightColor !== null
@@ -1334,20 +1344,21 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					</div>
 				)
 			}),
-		[
-			blocks,
-			colorByBlock,
-			hoveredBlockId,
-			onClearHighlight,
-			onHoverBlock,
-			onEnterMarkupMode,
-			onSelectBlock,
-			onSetHighlight,
-			palette,
-			renderActions,
-			selectedBlockId,
-			showLayoutBoxes,
-		],
+			[
+				blocks,
+				colorByBlock,
+				hoveredBlockId,
+				onClearHighlight,
+				onHoverBlock,
+				onEnterMarkupMode,
+				onSelectBlock,
+				onSetHighlight,
+				palette,
+				previewedBlockId,
+				renderActions,
+				selectedBlockId,
+				showLayoutBoxes,
+			],
 	)
 
 	const handleWrapRef = useCallback(

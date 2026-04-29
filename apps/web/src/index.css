@@ -209,6 +209,36 @@ kbd {
 	margin: 0.2em 0 0.55em;
 }
 
+.note-editor__novel .ProseMirror ul,
+.note-editor__novel .ProseMirror ol {
+	margin: 0.35em 0 0.75em;
+	padding-left: 1.5em;
+}
+
+.note-editor__novel .ProseMirror ul {
+	list-style: disc;
+}
+
+.note-editor__novel .ProseMirror ol {
+	list-style: decimal;
+}
+
+.note-editor__novel .ProseMirror li {
+	margin: 0.18em 0;
+}
+
+.note-editor__novel .ProseMirror li > p {
+	margin: 0;
+}
+
+.note-editor__novel .ProseMirror ul ul {
+	list-style: circle;
+}
+
+.note-editor__novel .ProseMirror ul ul ul {
+	list-style: square;
+}
+
 .note-editor__novel .ProseMirror .is-editor-empty:first-child::before,
 .note-editor__novel .ProseMirror .is-empty::before {
 	color: var(--color-text-tertiary);

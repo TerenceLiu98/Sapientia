@@ -16,6 +16,7 @@ interface Props {
 	onInteract?: () => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	selectedBlockId?: string | null
+	previewedBlockId?: string | null
 	selectedBlockRequestNonce?: number
 	requestedAnchorYRatio?: number
 	requestedPage?: number
@@ -39,6 +40,7 @@ export function BlocksPanel({
 	onInteract,
 	onViewportAnchorChange,
 	selectedBlockId,
+	previewedBlockId,
 	selectedBlockRequestNonce,
 	requestedAnchorYRatio,
 	requestedPage,
@@ -126,6 +128,7 @@ export function BlocksPanel({
 				requestedAnchorYRatio={requestedAnchorYRatio}
 				requestedPage={requestedPage}
 				requestedPageNonce={requestedPageNonce}
+				previewedBlockId={previewedBlockId}
 				renderActions={renderActions}
 				selectedBlockId={selectedBlockId}
 				selectedBlockRequestNonce={selectedBlockRequestNonce}
@@ -162,6 +165,7 @@ function BlocksPanelScrollBody({
 	requestedAnchorYRatio,
 	requestedPage,
 	requestedPageNonce,
+	previewedBlockId,
 	renderActions,
 	selectedBlockId,
 	selectedBlockRequestNonce,
@@ -188,6 +192,7 @@ function BlocksPanelScrollBody({
 	requestedAnchorYRatio?: number
 	requestedPage?: number
 	requestedPageNonce?: number
+	previewedBlockId?: string | null
 	renderActions?: (block: Block) => React.ReactNode
 	selectedBlockId?: string | null
 	selectedBlockRequestNonce?: number
@@ -559,12 +564,13 @@ function BlocksPanelScrollBody({
 							onSetHighlight={onSetHighlight}
 							onTogglePopover={onTogglePopover}
 							openPopoverFor={openPopoverFor}
-							pageBlocks={pageBlocks}
-							palette={palette}
-							paperId={paperId}
-							renderActions={renderActions}
-							selectedBlockId={selectedBlockId}
-						/>
+								pageBlocks={pageBlocks}
+								palette={palette}
+								paperId={paperId}
+								previewedBlockId={previewedBlockId}
+								renderActions={renderActions}
+								selectedBlockId={selectedBlockId}
+							/>
 					) : (
 						<PageBlockPlaceholder
 							blockCount={pageBlocks.length}
@@ -648,6 +654,7 @@ interface PageBlockBodyProps {
 	pageBlocks: Block[]
 	palette?: PaletteEntry[]
 	paperId: string
+	previewedBlockId?: string | null
 	renderActions?: (block: Block) => React.ReactNode
 	selectedBlockId?: string | null
 }
@@ -668,6 +675,7 @@ const PageBlockBody = memo(function PageBlockBody({
 	pageBlocks,
 	palette,
 	paperId,
+	previewedBlockId,
 	renderActions,
 	selectedBlockId,
 }: PageBlockBodyProps) {
@@ -689,12 +697,12 @@ const PageBlockBody = memo(function PageBlockBody({
 		<div className="space-y-3" ref={bodyRef}>
 			{pageBlocks.map((block) => (
 				<BlockRow
-					block={block}
-					citationCount={citationCounts?.get(block.blockId)}
-					highlightColor={colorByBlock?.get(block.blockId) ?? null}
-					isHovered={hoveredBlockId === block.blockId}
-					isSelected={selectedBlockId === block.blockId}
-					key={block.blockId}
+						block={block}
+						citationCount={citationCounts?.get(block.blockId)}
+						highlightColor={colorByBlock?.get(block.blockId) ?? null}
+						isHovered={hoveredBlockId === block.blockId || previewedBlockId === block.blockId}
+						isSelected={selectedBlockId === block.blockId}
+						key={block.blockId}
 					onClearHighlight={onClearHighlight}
 					onDismissPopover={onDismissPopover}
 					onHoverBlock={onHoverBlock}
