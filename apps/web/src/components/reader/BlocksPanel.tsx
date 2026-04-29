@@ -844,9 +844,20 @@ const BlockRow = memo(function BlockRow({
 	popoverOpen,
 	renderActions,
 }: BlockRowProps) {
-	const setRef = (el: HTMLDivElement | null) => {
-		onRegisterCardRef(block.blockId, el)
-	}
+	// Stable ref callback. An inline `(el) => onRegisterCardRef(...)`
+	// would be a fresh function each render, and React would tear
+	// down + re-attach the ref every time — that calls registerCardRef
+	// twice (null then el), each call ticks cardRefsVersion, and the
+	// selection-scroll effect (deps include cardRefsVersion) fires +
+	// smooth-scrolls back to the selected block, fighting user wheel.
+	// The bug is pre-existing but only visible at scale once TASK-018
+	// Phase D started re-rendering this subtree on every scroll tick.
+	const setRef = useCallback(
+		(el: HTMLDivElement | null) => {
+			onRegisterCardRef(block.blockId, el)
+		},
+		[onRegisterCardRef, block.blockId],
+	)
 
 	const handleCopy = (e: React.MouseEvent) => {
 		e.stopPropagation()
