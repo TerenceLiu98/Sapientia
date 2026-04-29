@@ -36,7 +36,7 @@ Most "AI for papers" tools answer for you. Sapientia is built for the opposite h
 Date: Apr 29, 2026: 
 <center>
     <figure>
-        <img src="https://32cf906.webp.li/2026/04/sapientia-development-example-1.png" width="60%" alt="Sapientia Reading Mode">
+        <img src="https://32cf906.webp.li/2026/04/sapientia-development-example-1.png" width="100%" alt="Sapientia Reading Mode">
     <figure>
 </center>
 
