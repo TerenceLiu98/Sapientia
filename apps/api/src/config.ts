@@ -10,6 +10,7 @@ export const ConfigSchema = z
 		REDIS_URL: z.string().url().default("redis://localhost:6379"),
 
 		S3_ENDPOINT: z.string().url(),
+		S3_PUBLIC_ENDPOINT: z.string().url().optional(),
 		S3_ACCESS_KEY_ID: z.string(),
 		S3_SECRET_ACCESS_KEY: z.string(),
 		S3_BUCKET: z.string().default("sapientia"),
@@ -54,7 +55,9 @@ export const ConfigSchema = z
 		{ message: "Both GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together" },
 	)
 
-export type Config = z.infer<typeof ConfigSchema>
+export type Config = z.infer<typeof ConfigSchema> & {
+	S3_PUBLIC_ENDPOINT: string
+}
 
 export function parseConfig(env: NodeJS.ProcessEnv): Config {
 	const result = ConfigSchema.safeParse(env)
@@ -62,7 +65,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
 		throw result.error
 	}
 
-	return result.data
+	return {
+		...result.data,
+		// API servers often talk to MinIO over an internal service name
+		// (`http://minio:9000`) while browsers need a public ingress host.
+		// Keep one explicit public endpoint for presigned URLs and fall back
+		// to the internal endpoint in local dev where both are the same.
+		S3_PUBLIC_ENDPOINT: result.data.S3_PUBLIC_ENDPOINT ?? result.data.S3_ENDPOINT,
+	}
 }
 
 let parsedConfig: Config
