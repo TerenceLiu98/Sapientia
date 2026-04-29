@@ -10,7 +10,12 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/api/client"
 import type { Note, NoteWithUrl } from "@/api/hooks/notes"
-import { NoteEditor, type NoteEditorRef, primeNoteEditorContent } from "@/components/notes/NoteEditor"
+import {
+	NoteEditor,
+	type NoteEditorRef,
+	type SaveStatus,
+	primeNoteEditorContent,
+} from "@/components/notes/NoteEditor"
 import type { PdfRailLayout } from "@/components/reader/PdfViewer"
 
 interface NotesPanelProps {
@@ -57,6 +62,11 @@ interface NotesPanelProps {
 	// editor surface `blk. N` even though annotations don't store a
 	// block id.
 	annotationBlockIdById?: Map<string, string>
+	// blockId → block source text. Folded slips surface a 2-line excerpt
+	// of this below the source tag so the gutter tells the reader "what
+	// passage am I responding to" before they expand the slip. Optional;
+	// when missing we fall back to tag-only (current Phase A behavior).
+	blockTextById?: Map<string, string>
 	// noteId → CSS colors of every block / reader-annotation cited in
 	// the note's body. A single-color list paints a solid dot; two or
 	// more paint a pie-chart conic gradient so the rail communicates
@@ -90,17 +100,30 @@ const MINIMAP_FAR_DOT_SCALE = 0.74
 const MINIMAP_VIEWPORT_MIN_SPAN_FRAC = 0.06
 const SIDEBAR_INSET_X = 4
 const SIDEBAR_COLLAPSED_WIDTH = 44
-const SLIP_LANE_WIDTH = 188
-const RAIL_STRIP_WIDTH = 30
+// TASK-018 Phase A: gutter widens to host 3-line excerpts and lives
+// inside the PDF preview's right whitespace (rather than as a separate
+// column to the right of the reader). See demo/marginalia-responsive.html
+// section 1 ① Wide for the visual target. Phase B will introduce a
+// compact branch (~196px / 36px) below ~1180px content width; for now
+// these values are the wide-mode geometry only.
+const SLIP_LANE_WIDTH = 272
+const RAIL_STRIP_WIDTH = 44
 const RAIL_EDGE_RIGHT = 2
 const RAIL_EDGE_TOP = 4
 const RAIL_EDGE_BOTTOM = 4
-const FOLDED_SLIP_HEIGHT = 56
+// TASK-018 Phase A: folded slip is taller to host a 2-line excerpt of
+// the anchored block's source text below the source tag (was 56 — just
+// the tag, centered). 88 = 10+10 padding + 22 tag + 6 gap + 40 (~2 lines
+// of 13px serif at 1.45 line-height).
+const FOLDED_SLIP_HEIGHT = 88
 const FOLDED_SLIP_STACK_GAP = 12
 const SLIP_DEFAULT_HEIGHT = 520
 const SLIP_MIN_HEIGHT = 360
 const SLIP_MAX_HEIGHT = 920
-const SLIP_DEFAULT_WIDTH = 420
+// TASK-018 Phase A: expanded slip default width grows leftward from the
+// rail-anchored right edge into the PDF whitespace. 520px gives roughly
+// 60ch comfortable reading at the editor's default size.
+const SLIP_DEFAULT_WIDTH = 520
 const SLIP_MIN_WIDTH = 360
 const SLIP_MAX_WIDTH = 760
 const SLIP_VIEWPORT_MARGIN = 72
@@ -161,6 +184,7 @@ export function NotesPanel({
 	blockNumberByBlockId,
 	annotationOrdinalById,
 	annotationBlockIdById,
+	blockTextById,
 	dotColorsByNote,
 	isSidebarCollapsed = false,
 	onRequestExpandSidebar,
@@ -578,6 +602,16 @@ export function NotesPanel({
 									}
 									blockNumber={
 										group.blockId ? (blockNumberByBlockId?.get(group.blockId) ?? null) : null
+									}
+									// Source text from the block this group anchors to.
+									// `group.blockId` is set both for direct block anchors
+									// and for highlight/underline anchors (the note remembers
+									// its containing block). Page-anchored notes (no block)
+									// fall through to no excerpt.
+									excerpt={
+										group.blockId
+											? (blockTextById?.get(group.blockId) ?? null)
+											: null
 									}
 									group={group}
 									key={group.groupKey}
@@ -1200,6 +1234,7 @@ function FoldedSlip({
 	active,
 	annotationOrdinal,
 	blockNumber,
+	excerpt,
 	group,
 	note,
 	onOpen,
@@ -1210,6 +1245,11 @@ function FoldedSlip({
 	active: boolean
 	annotationOrdinal: number | null
 	blockNumber: number | null
+	// Block source text shown below the tag, 2-line clamped. Tells the
+	// reader "what passage am I responding to" at a glance — without
+	// expanding the slip and without scrolling the PDF back. Null when
+	// the note is page-anchored (no block) or block text isn't loaded.
+	excerpt: string | null
 	group: {
 		groupKey: string
 		notes: Note[]
@@ -1232,13 +1272,13 @@ function FoldedSlip({
 				left: `${SLIP_LANE_INSET_LEFT}px`,
 				top: `${topPx - FOLDED_SLIP_HEIGHT / 2}px`,
 				height: `${FOLDED_SLIP_HEIGHT}px`,
-				maxWidth: "188px",
+				maxWidth: `${SLIP_LANE_WIDTH}px`,
 				borderLeft: `3px solid ${accentColor}`,
 				opacity: effectiveOpacity,
 			}}
 			type="button"
 		>
-			<div className="flex h-full items-center px-3 py-2">
+			<div className="flex h-full flex-col gap-1.5 px-3 py-2.5">
 				<div className="flex items-center gap-1.5">
 					<span
 						className="inline-flex items-center rounded-md px-2.5 py-1.5 text-[11px] font-bold tracking-[0.01em]"
@@ -1256,6 +1296,18 @@ function FoldedSlip({
 						</span>
 					) : null}
 				</div>
+				{excerpt ? (
+					<p
+						className="m-0 overflow-hidden text-[13px] leading-[1.45] text-text-primary"
+						style={{
+							display: "-webkit-box",
+							WebkitLineClamp: 2,
+							WebkitBoxOrient: "vertical",
+						}}
+					>
+						{excerpt}
+					</p>
+				) : null}
 			</div>
 		</button>
 	)
@@ -1318,6 +1370,12 @@ function ExpandedSlip({
 	}
 	const [size, setSize] = useState<{ width: number; height: number }>(() => defaultSlipSize())
 	const [entered, setEntered] = useState(false)
+	// Save-status mirror: NoteEditor reports its current save phase via
+	// onSaveStatusChange so the slip header can render a single icon
+	// alongside Jump / Close (TASK-018 Phase A bonus). When this is wired
+	// up, NoteEditor suppresses its own internal "Saving… / Saved" text
+	// to avoid two indicators competing for attention.
+	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
 	const [viewportSize, setViewportSize] = useState(() => ({
 		width: typeof window === "undefined" ? 0 : window.innerWidth,
 		height: typeof window === "undefined" ? 0 : window.innerHeight,
@@ -1531,6 +1589,7 @@ function ExpandedSlip({
 					{groupLabel ? ` · ${groupLabel}` : ""}
 				</span>
 				<div className="flex items-center gap-1">
+					<SaveStatusIcon status={saveStatus} />
 					{onJumpToAnchor || (note.paperId && (note.anchorAnnotationId || note.anchorBlockId)) ? (
 						<button
 							aria-label="Jump to note anchor"
@@ -1559,6 +1618,7 @@ function ExpandedSlip({
 					onEditorReady={onEditorReady}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
+					onSaveStatusChange={setSaveStatus}
 					beforeEditorContent={
 						stackedNotes.length > 0 ? (
 							<div className="border-b border-border-subtle bg-bg-primary/55 px-3 py-3">
@@ -1753,5 +1813,85 @@ function JumpToSourceIcon() {
 			<path d="M7 17 17 7" />
 			<path d="M9 7h8v8" />
 		</svg>
+	)
+}
+
+// Single-icon save indicator that lives in the slip header alongside
+// Jump / Close. Replaces the old text "Saving… / Saved / Save failed"
+// row inside NoteEditor (which now suppresses its internal indicator
+// when this slot is wired up). Idle = nothing rendered, keeps the row
+// quiet between edits. Color encodes severity: tertiary while saving,
+// accent on success, error on failure.
+function SaveStatusIcon({ status }: { status: SaveStatus }) {
+	if (status === "idle") return null
+	if (status === "saving") {
+		return (
+			<span
+				aria-label="Saving"
+				className="flex h-7 w-7 shrink-0 items-center justify-center text-text-tertiary"
+				title="Saving…"
+			>
+				<svg
+					aria-hidden="true"
+					className="animate-spin"
+					fill="none"
+					height="14"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeWidth="1.8"
+					viewBox="0 0 24 24"
+					width="14"
+				>
+					<path d="M21 12a9 9 0 1 1-6.219-8.56" />
+				</svg>
+			</span>
+		)
+	}
+	if (status === "saved") {
+		return (
+			<span
+				aria-label="Saved"
+				className="flex h-7 w-7 shrink-0 items-center justify-center text-text-accent"
+				title="Saved"
+			>
+				<svg
+					aria-hidden="true"
+					fill="none"
+					height="14"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="2"
+					viewBox="0 0 24 24"
+					width="14"
+				>
+					<path d="m5 12 5 5L19 7" />
+				</svg>
+			</span>
+		)
+	}
+	// status === "failed"
+	return (
+		<span
+			aria-label="Save failed"
+			className="flex h-7 w-7 shrink-0 items-center justify-center text-text-error"
+			title="Save failed — try again"
+		>
+			<svg
+				aria-hidden="true"
+				fill="none"
+				height="14"
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth="1.8"
+				viewBox="0 0 24 24"
+				width="14"
+			>
+				<circle cx="12" cy="12" r="9" />
+				<path d="M12 8v5" />
+				<path d="M12 16.25v.01" />
+			</svg>
+		</span>
 	)
 }

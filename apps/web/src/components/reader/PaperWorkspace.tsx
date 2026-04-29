@@ -668,6 +668,20 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return map
 	}, [blocks])
 
+	// blockId → block source text. Folded slips in the marginalia gutter
+	// surface this as a 2-line excerpt below the source tag, so a glance
+	// at the rail tells the reader which passage the note responds to —
+	// without expanding the slip and without going back to the PDF.
+	// (TASK-018 Phase A bonus: matches the demo wide-mode layout where
+	// each slip card shows tag + excerpt.)
+	const blockTextById = useMemo(() => {
+		const map = new Map<string, string>()
+		for (const block of blocks ?? []) {
+			if (block.text) map.set(block.blockId, block.text)
+		}
+		return map
+	}, [blocks])
+
 	// Toolbar `+ Note` — creates a note anchored to the user's current reading
 	// position in the main pane.
 	const handleCreateAtCurrent = useCallback(async () => {
@@ -775,6 +789,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				colorByAnnotation={colorByAnnotation}
 				annotationOrdinalById={annotationOrdinalById}
 				annotationBlockIdById={annotationBlockIdById}
+				blockTextById={blockTextById}
 				colorByBlock={cssColorByBlock}
 				dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
@@ -884,6 +899,7 @@ interface WorkspaceContentProps {
 	colorByAnnotation: Map<string, string>
 	annotationOrdinalById: Map<string, number>
 	annotationBlockIdById: Map<string, string>
+	blockTextById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
@@ -919,6 +935,7 @@ function WorkspaceContent({
 	colorByAnnotation,
 	annotationOrdinalById,
 	annotationBlockIdById,
+	blockTextById,
 	colorByBlock,
 	dotColorsByNote,
 	numPages,
@@ -977,6 +994,7 @@ function WorkspaceContent({
 					colorByAnnotation={colorByAnnotation}
 					annotationOrdinalById={annotationOrdinalById}
 					annotationBlockIdById={annotationBlockIdById}
+					blockTextById={blockTextById}
 					colorByBlock={colorByBlock}
 					dotColorsByNote={dotColorsByNote}
 					numPages={numPages}
@@ -1303,6 +1321,7 @@ interface MainNotesSplitProps {
 	colorByAnnotation: Map<string, string>
 	annotationOrdinalById: Map<string, number>
 	annotationBlockIdById: Map<string, string>
+	blockTextById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
@@ -1336,6 +1355,7 @@ function MainNotesSplit({
 	colorByAnnotation,
 	annotationOrdinalById,
 	annotationBlockIdById,
+	blockTextById,
 	colorByBlock,
 	dotColorsByNote,
 	numPages,
@@ -1355,14 +1375,22 @@ function MainNotesSplit({
 	isNotesSidebarCollapsed,
 	onRequestExpandNotesSidebar,
 }: MainNotesSplitProps) {
-	// Rail is a fixed-width strip glued to the main pane's right edge —
-	// no draggable splitter, no per-user width, no framed column. The
-	// note popover is portaled and expands left over the PDF, so the
-	// rail itself only needs room for its dots.
+	// TASK-018 Phase A — gutter lives inside the PDF preview's right
+	// whitespace (rather than as its own column to the right of the
+	// reader). The panel is always absolutely positioned; the main
+	// column reserves matching padding on the right at lg+ so PDF/MD
+	// content stays out from underneath the slip lane. Below lg, the
+	// panel still overlays the main pane — Phase C will replace that
+	// with an inline-pill + bottom-drawer treatment.
+	const lgGutterPadClass = isNotesSidebarCollapsed
+		? "lg:pr-[44px]" // matches NotesPanel SIDEBAR_COLLAPSED_WIDTH
+		: "lg:pr-[324px]" // matches SLIP_LANE_WIDTH + RAIL_STRIP_WIDTH + 2×SIDEBAR_INSET_X
 	return (
-		<div className="relative h-full min-h-0 min-w-0 lg:flex">
-			<div className="min-h-0 min-w-0 flex-1">{main}</div>
-			<div className="absolute inset-y-0 right-0 z-[5] lg:static lg:inset-auto lg:z-auto lg:shrink-0">
+		<div className="relative h-full min-h-0 min-w-0">
+			<div className={`h-full min-h-0 min-w-0 transition-[padding] duration-200 ease-out ${lgGutterPadClass}`}>
+				{main}
+			</div>
+			<div className="absolute inset-y-0 right-0 z-[5]">
 				<NotesPanel
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockAnchorsById={blockAnchorsById}
@@ -1370,6 +1398,7 @@ function MainNotesSplit({
 					colorByAnnotation={colorByAnnotation}
 					annotationOrdinalById={annotationOrdinalById}
 					annotationBlockIdById={annotationBlockIdById}
+					blockTextById={blockTextById}
 					colorByBlock={colorByBlock}
 					dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
