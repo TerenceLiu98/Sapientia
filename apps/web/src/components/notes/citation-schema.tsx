@@ -377,12 +377,19 @@ function annotationCitationStyles(
 	color: string,
 ): CSSProperties | undefined {
 	if (!color) {
+		// Fallback path — annotation has no color recorded (legacy data
+		// or in-flight optimistic create). Highlights borrow the
+		// `important` (amber) note tokens; underlines borrow the
+		// `pending` (teal) tokens. Both stay theme-aware via CSS vars.
 		return annotationKind === "highlight"
-			? { backgroundColor: "rgba(244, 200, 79, 0.24)", color: "rgb(120, 53, 15)" }
+			? {
+					backgroundColor: "var(--note-important-bg)",
+					color: "var(--note-important-text)",
+				}
 			: {
-					backgroundColor: "rgba(59, 130, 246, 0.12)",
-					color: "rgb(29, 78, 216)",
-					boxShadow: "inset 0 -2px 0 rgba(59, 130, 246, 0.45)",
+					backgroundColor: "var(--note-pending-bg)",
+					color: "var(--note-pending-text)",
+					boxShadow: "inset 0 -2px 0 var(--note-pending-text)",
 				}
 	}
 	return annotationKind === "highlight"

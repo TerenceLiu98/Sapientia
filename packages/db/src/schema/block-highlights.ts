@@ -11,8 +11,10 @@ import { workspaces } from "./workspaces"
 //
 // `color` is a free-form string. The frontend ships five built-in
 // semantic names (questioning / important / original / pending /
-// conclusion) but users can register custom names + display colors via
-// settings; we don't constrain them at the DB level.
+// background) per docs/DESIGN_TOKENS.md §2.5, but users can register
+// custom names + display colors via settings; we don't constrain them
+// at the DB level. (Older rows from before TASK-019.1 may carry
+// `conclusion` — migration 0018 renames those to `background`.)
 //
 // Unique on `(paperId, blockId, userId, workspaceId)` so a block has at
 // most one highlight per user + workspace; clicking a different color
@@ -76,4 +78,4 @@ export type BuiltinHighlightColor =
 	| "important"
 	| "original"
 	| "pending"
-	| "conclusion"
+	| "background"

@@ -49,6 +49,17 @@ export interface ReaderAnnotationColor {
 	label: string
 }
 
+// Six fixed user-pickable swatches for the highlight / underline / ink
+// tools. These are user-presentation choices the reader picks at the
+// toolbar; the chosen `value` is persisted on the annotation row and
+// later combined with alpha at render time (e.g. ${color}33 to dim a
+// citation chip). That alpha math requires a literal hex, so unlike
+// the rest of the color system these are NOT CSS-var-backed — a
+// yellow highlight looks the same in light and dark mode by intent.
+//
+// AC #4 of TASK-019.1 exempts "documented one-off visualization
+// colors that are first added back to the token source of truth";
+// the canonical values are mirrored in docs/DESIGN_TOKENS.md §2.7.
 export const READER_ANNOTATION_COLORS: ReaderAnnotationColor[] = [
 	{ value: "#f4c84f", label: "Yellow" },
 	{ value: "#ff6b6b", label: "Red" },

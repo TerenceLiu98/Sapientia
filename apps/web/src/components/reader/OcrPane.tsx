@@ -284,7 +284,7 @@ function BlockCard({
 				</div>
 			</div>
 
-			<div className="rounded-sm bg-[color-mix(in_oklch,var(--color-accent-100,#cfe7ea)_42%,white_58%)] p-3 font-serif text-base leading-[1.65] text-text-primary">
+			<div className="rounded-sm bg-accent-50 p-3 font-serif text-base leading-[1.65] text-text-primary">
 				<BlockPreview block={block} />
 			</div>
 		</div>

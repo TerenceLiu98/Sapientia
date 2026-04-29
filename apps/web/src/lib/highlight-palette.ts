@@ -14,12 +14,20 @@ export interface PaletteEntry {
 	textColor?: string
 }
 
+// The five canonical built-ins per docs/DESIGN_TOKENS.md §2.5. Each key
+// matches a `--note-{key}-bg|text` pair in apps/web/src/index.css (light
+// + dark) so paletteVisualTokens() can resolve via CSS var without
+// hardcoding hues here. Earlier versions shipped `conclusion` (purple)
+// as the fifth slot; TASK-019.1 migrated to `background` (the doc's
+// canonical entry — a neutral surface used for context / less-central
+// marks). Existing block_highlights rows with color="conclusion" are
+// remapped to "background" by migration 0018.
 export const BUILTIN_PALETTE: PaletteEntry[] = [
 	{ key: "questioning", label: "Questioning" },
 	{ key: "important", label: "Important" },
 	{ key: "original", label: "Original" },
 	{ key: "pending", label: "Pending" },
-	{ key: "conclusion", label: "Conclusion" },
+	{ key: "background", label: "Background" },
 ]
 
 const BUILTIN_KEYS = new Set(BUILTIN_PALETTE.map((entry) => entry.key))

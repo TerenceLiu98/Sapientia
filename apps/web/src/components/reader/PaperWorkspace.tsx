@@ -1479,7 +1479,7 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 		?.toLowerCase()
 		.includes("mineru api token not configured")
 	return (
-		<div className="shrink-0 border-[oklch(0.45_0.13_25)] border-b bg-[oklch(0.93_0.035_25)] px-6 py-3 text-sm">
+		<div className="shrink-0 border-[var(--color-status-error-text)] border-b bg-[var(--color-status-error-bg)] px-6 py-3 text-sm">
 			<div className="text-text-error">Parsing failed. {paper.parseError ?? "Unknown error."}</div>
 			{needsCredentials ? (
 				<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">

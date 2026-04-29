@@ -118,6 +118,13 @@ const editorExtensions = [
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] } as const
 
+// Tiptap text-color picker swatches. Like reader-annotations they are
+// user-presentation choices (rich-text typography) that get persisted
+// onto the doc tree as inline color style — not theme tokens. Keeping
+// hex literals so existing notes round-trip cleanly; theme-aware
+// version would require migrating every persisted Tiptap textStyle
+// mark, deferred. Documented in docs/DESIGN_TOKENS.md §2.7 alongside
+// the annotation swatches.
 const TEXT_COLORS = [
 	{ label: "Default", value: null },
 	{ label: "Slate", value: "#334155" },

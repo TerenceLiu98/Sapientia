@@ -305,7 +305,7 @@ export function SelectedBlockPreview({
 				)}
 				<button
 					aria-label="Rotate preview"
-					className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-white/96 text-slate-900 shadow-[0_4px_10px_rgba(15,23,42,0.12)] transition-transform hover:scale-110"
+					className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-default/80 bg-surface-default/96 text-text-primary shadow-popover transition-transform hover:scale-110"
 					onClick={(e) => {
 						e.stopPropagation()
 						setRotation((value) => (value + 90) % 360)

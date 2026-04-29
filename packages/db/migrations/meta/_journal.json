@@ -127,6 +127,13 @@
       "when": 1777493428380,
       "tag": "0017_wakeful_pete_wisdom",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1777502400000,
+      "tag": "0018_palette_conclusion_to_background",
+      "breakpoints": true
     }
   ]
 }
