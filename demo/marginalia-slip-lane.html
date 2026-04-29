@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sapientia · Slip Lane + Rail (UX 提案)</title>
+    <title>Sapientia · PDF Gutter Notes + Rail (UX 提案)</title>
     <style>
       :root {
         --ink-0: oklch(0.992 0.003 85);
@@ -162,12 +162,12 @@
         background: var(--teal-4);
       }
 
-      /* ===== Three-zone layout: PDF / Slip lane / Rail ===== */
+      /* ===== Integrated gutter layout: PDF / gutter-overlay / Rail ===== */
       .workspace {
         display: grid;
         grid-template-columns:
           minmax(0, 1fr) /* PDF */
-          240px /* slip lane */
+          0 /* gutter overlay lives here but visually sits on top of the PDF */
           44px; /* rail */
         gap: 0;
         height: 760px;
@@ -176,7 +176,7 @@
       .pdf {
         position: relative;
         background: var(--reading-bg);
-        padding: 28px 36px 28px 28px;
+        padding: 28px 308px 28px 28px;
         overflow: hidden;
       }
       .page-kicker {
@@ -243,20 +243,20 @@
         top: 388px;
       }
 
-      /* ===== Slip lane ===== */
+      /* ===== Gutter notes integrated into the PDF preview ===== */
       .slip-lane {
         position: relative;
-        padding: 24px 12px 24px 18px;
-        background: linear-gradient(
-          to right,
-          color-mix(in oklch, var(--reading-bg) 65%, var(--panel-bg) 35%),
-          var(--panel-bg)
-        );
+        width: 272px;
+        height: 100%;
+        padding-left: 16px;
+        overflow: visible;
+        transform: translateX(-272px);
+        z-index: 2;
       }
       .slip-lane::before {
         content: "";
         position: absolute;
-        inset: 0 auto 0 0;
+        inset: 18px auto 18px 0;
         width: 1px;
         background: linear-gradient(
           to bottom,
@@ -266,11 +266,23 @@
           transparent
         );
       }
+      .slip-lane::after {
+        content: "";
+        position: absolute;
+        inset: 0 0 0 10px;
+        background: linear-gradient(
+          to right,
+          color-mix(in oklch, var(--reading-bg) 42%, transparent),
+          color-mix(in oklch, white 68%, transparent) 18%,
+          color-mix(in oklch, white 90%, transparent)
+        );
+        pointer-events: none;
+      }
 
       .slip {
         position: absolute;
-        left: 14px;
-        right: 8px;
+        left: 16px;
+        right: 6px;
         background: var(--paper-bg);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -280,7 +292,7 @@
         transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
       }
       .slip:hover {
-        transform: translateX(-2px);
+        transform: translateX(-3px);
         border-color: var(--border-strong);
         box-shadow: var(--shadow-md);
       }
@@ -513,7 +525,7 @@
       .slip.expanded .anchor-line {
         position: absolute;
         top: 50%;
-        right: -34px;
+        left: -34px;
         height: 1px;
         width: 34px;
         background: color-mix(in oklch, var(--rose-4) 55%, transparent);
@@ -742,23 +754,23 @@
     <main>
       <header class="hero">
         <div>
-          <div class="eyebrow">Demo · Slip lane + minimap rail</div>
+          <div class="eyebrow">Demo · PDF gutter notes + minimap rail</div>
           <h1>读者一眼能读到边距，扫一眼能看到全篇。</h1>
           <p class="lede">
-            把右栏拆成两个图层：靠近 PDF 的<strong>滑条 lane</strong> 渲染当前视口附近的笔记摘要（excerpt-first），
-            最右边一条<strong>定长 rail</strong> 是整篇论文的 minimap，远处只剩有色 dots。
-            读者在阅读区抬眼即可看到正在写什么；要跳到别的笔记，点 rail 的远处 dot。
+            不再把 note 单独摆进独立第二列，而是让它们贴进 PDF preview 右侧的
+            <strong>gutter</strong>。当前视口附近的笔记像页边批注一样悬在页面旁边，
+            最右边一条<strong>定长 rail</strong> 继续承担全篇 minimap 和远距离跳转。
           </p>
         </div>
         <aside>
           <h2>三层信息密度</h2>
-          <p><strong>读到 (read):</strong> 视口附近的笔记是 excerpt slip，第一句正文就能看见。</p>
-          <p><strong>看到 (scan):</strong> 远处的笔记压成 rail 上的有色 dot，颜色编码来源。</p>
-          <p><strong>写入 (edit):</strong> 点 slip 就地展开成编辑器，连接线指回它在文档里的位置。</p>
+          <p><strong>贴页 (embed):</strong> 视口附近的笔记住进 PDF gutter，仍像 margin note。</p>
+          <p><strong>扫篇 (scan):</strong> 远处的笔记压成 rail 上的有色 dot，颜色编码来源。</p>
+          <p><strong>写入 (edit):</strong> 点 gutter slip 就地展开成编辑器，连接线仍指回锚点。</p>
         </aside>
       </header>
 
-      <section class="stage" aria-label="Marginalia slip lane concept">
+      <section class="stage" aria-label="Marginalia gutter notes concept">
         <header class="toolbar">
           <div class="brand">Sapientia · Reader</div>
           <span class="meta">Page 12 / 27 · 5 notes anchored on this view</span>
@@ -801,7 +813,7 @@
             <span class="pdf-anchor teal" aria-hidden="true"></span>
           </article>
 
-          <!-- ============== Slip lane: excerpts for visible region ============== -->
+          <!-- ============== Gutter notes: excerpts for visible region ============== -->
           <aside class="slip-lane" aria-label="Visible-region note slips">
             <!-- ghost slip from the previous page, faded -->
             <article class="slip ghost" data-source="emerald" style="top: 16px;">
@@ -854,7 +866,7 @@
                 <span class="tag underline-teal">underline 1 p. 12 blk. 12</span>
               </div>
               <p class="excerpt">
-                "one living note, several quieter slips nearby" — 这就是这一栏的 metaphor。把它当成
+                "one living note, several quieter slips nearby" — 这就是页侧 gutter 的 metaphor。把它当成
                 设计原则，而不是装饰。
               </p>
             </article>
@@ -1030,7 +1042,7 @@
                 <span class="tag underline-teal">underline 1 p. 12 blk. 12</span>
               </div>
               <p class="excerpt">
-                "one living note, several quieter slips nearby" —— 这就是这一栏的 metaphor。
+                "one living note, several quieter slips nearby" —— 这就是页侧 gutter 的 metaphor。
               </p>
             </article>
 
@@ -1066,8 +1078,8 @@
 
       <section class="legend" aria-label="Behavior notes">
         <article>
-          <h3>Slip lane（中间一栏）</h3>
-          <p><strong>什么时候出现:</strong> 当前 PDF 视口及上下半页的 anchors。其它页面的 note 不在这一栏出现。</p>
+          <h3>PDF gutter（页侧批注）</h3>
+          <p><strong>什么时候出现:</strong> 当前 PDF 视口及上下半页的 anchors。其它页面的 note 不在 gutter 出现。</p>
           <p><strong>折叠态:</strong> source tag + 正文前 1-3 行。读者扫一眼即可读到笔记本身。</p>
           <p><strong>Source tag 命名:</strong> highlight / underline 用 <code>highlight n p. P blk. B</code>（论文内序号 + 页码 + 所在 block），block-anchored 用 <code>block N</code>。一条 tag 自带全部坐标信息。</p>
           <p><strong>展开态:</strong> 折叠 slip 不弹独立浮层。它的右边仍贴 rail，向左生长进 PDF 留白区，宽度从 ~210px 涨到 ~520px，露出完整编辑器 chrome（jump / delete / close / 保存状态 / 左下角 resize 把手）。其它 slip 自然下移。</p>
@@ -1083,8 +1095,8 @@
             <span class="swatch teal"></span> /
             <span class="swatch emerald"></span> · 多 cite = 饼图)。
           </p>
-          <p><strong>Thumb 内的 dot:</strong> 全色全大小, 对应 slip lane 里的 excerpt slip。</p>
-          <p><strong>Thumb 外的 dot:</strong> 缩小、淡化。点击 = PDF 跳到那一页, slip lane 重新组装。</p>
+          <p><strong>Thumb 内的 dot:</strong> 全色全大小, 对应 gutter 里的 excerpt slip。</p>
+          <p><strong>Thumb 外的 dot:</strong> 缩小、淡化。点击 = PDF 跳到那一页, gutter 重新组装。</p>
           <p><strong>Active dot:</strong> 当前展开的 note, 一根连接线指向 slip。</p>
         </article>
 
@@ -1092,8 +1104,8 @@
           <h3>设计原则</h3>
           <p><strong>读到 / 看到 / 写入</strong>三个动词三个图层, 信息密度逐级降低。</p>
           <p><strong>就地展开优于浮层:</strong> editor 嵌在 slip 里, 上下文不消失。</p>
-          <p><strong>不抢 PDF 的位置:</strong> slip lane 和 rail 加起来 ~280px, PDF 仍是主角。</p>
-          <p><strong>Cite ≠ New note:</strong> bbox toolbar 上是两个图标, slip lane 不参与创建 — 创建仅来自 PDF 的 highlight/block。</p>
+          <p><strong>不抢 PDF 的位置:</strong> gutter 和 rail 加起来 ~280px, PDF 仍是主角。</p>
+          <p><strong>Cite ≠ New note:</strong> bbox toolbar 上是两个图标, gutter 不参与创建 — 创建仅来自 PDF 的 highlight/block。</p>
         </article>
       </section>
     </main>
