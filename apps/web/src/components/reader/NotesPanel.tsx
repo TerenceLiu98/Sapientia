@@ -16,6 +16,7 @@ import {
 	type SaveStatus,
 	primeNoteEditorContent,
 } from "@/components/notes/NoteEditor"
+import type { BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { OverlayNoteCard } from "@/components/reader/OverlayNoteCard"
 import type { PdfRailLayout } from "@/components/reader/PdfViewer"
 import type { GutterMode } from "@/components/reader/use-gutter-mode"
@@ -78,6 +79,13 @@ interface NotesPanelProps {
 	isSidebarCollapsed?: boolean
 	onRequestExpandSidebar?: () => void
 	pdfRailLayout?: PdfRailLayout | null
+	// TASK-018 Phase D — markdown-view rail layout. When non-null and
+	// non-empty, NotesPanel resolves slip y / progress / minimap from
+	// block card metrics instead of PDF page metrics. Both layouts may
+	// be present simultaneously (we cache the last each view emitted);
+	// `blocksRailLayout` wins whenever the user is currently in markdown
+	// mode (i.e. its block metrics are populated by an active scroll).
+	blocksRailLayout?: BlocksRailLayout | null
 	// Wide / compact / mobile — measured upstream by useGutterMode in
 	// MainNotesSplit. Drives lane width, rail width, folded-slip excerpt
 	// clamp, and (in compact mode) routes "expanded" notes to the
@@ -204,6 +212,7 @@ export function NotesPanel({
 	isSidebarCollapsed = false,
 	onRequestExpandSidebar,
 	pdfRailLayout,
+	blocksRailLayout,
 	gutterMode = "wide",
 }: NotesPanelProps) {
 	// `externalFollowLockUntil` no longer drives a local scroll lock —
@@ -277,11 +286,27 @@ export function NotesPanel({
 	// The rail behaves like a minimap rather than a raw progress bar:
 	// anchors near the live viewport are visually magnified, while far
 	// regions get compressed so local structure reads more clearly.
-	const minimapActive = (pdfRailLayout?.scrollHeight ?? 0) > 0
-	const progressFrac = railProgressForViewport(currentPage, currentAnchorYRatio, pdfRailLayout, numPages)
+	//
+	// In markdown view (BlocksPanel mounted) we read scroll metrics from
+	// blocksRailLayout instead of pdfRailLayout — the panel that's
+	// actually scrolling owns the source of truth. Both PdfViewer and
+	// BlocksPanel keep emitting their last-known layout even when
+	// hidden, so we pick whichever one has populated metrics for the
+	// currently visible pane.
+	const activeRailScroll: RailScrollMetrics | null =
+		blocksRailLayout && blocksRailLayout.scrollHeight > 0 && blocksRailLayout.blockMetrics.size > 0
+			? blocksRailLayout
+			: pdfRailLayout ?? null
+	const minimapActive = (activeRailScroll?.scrollHeight ?? 0) > 0
+	const progressFrac = railProgressForViewport(
+		currentPage,
+		currentAnchorYRatio,
+		activeRailScroll,
+		numPages,
+	)
 	const viewportWindow = useMemo(
-		() => minimapViewportWindow(progressFrac, pdfRailLayout, minimapActive),
-		[progressFrac, pdfRailLayout, minimapActive],
+		() => minimapViewportWindow(progressFrac, activeRailScroll, minimapActive),
+		[progressFrac, activeRailScroll, minimapActive],
 	)
 
 	// Layout each dot at its normalized rail position (0..1), but group
@@ -318,18 +343,33 @@ export function NotesPanel({
 				yRatio,
 			})
 		}
+		// In markdown view, prefer the block-card position over the PDF
+		// page-relative anchor: the user is looking at *block cards*, so
+		// the rail dot should align with where the block actually sits in
+		// the BlocksPanel scroll. Block-anchored notes resolve directly;
+		// highlight/underline-anchored notes resolve via their containing
+		// block (annotationBlockIdById). When neither path resolves, fall
+		// back to the page+yRatio estimate so dots still appear.
 		const groupedWithTop = [...grouped.values()]
-			.map((group) => ({
-				...group,
-				notes: [...group.notes].sort(compareNotesByAnchor),
-				rawTop: railTopForAnchor(group.page, group.yRatio, pdfRailLayout, numPages),
-				focusTop: minimapActive
-					? minimapTopForRail(
-							railTopForAnchor(group.page, group.yRatio, pdfRailLayout, numPages),
-							progressFrac,
-						)
-					: railTopForAnchor(group.page, group.yRatio, pdfRailLayout, numPages),
-			}))
+			.map((group) => {
+				const blockIdForBlocks =
+					group.blockId ??
+					(group.notes[0]?.anchorAnnotationId
+						? (annotationBlockIdById?.get(group.notes[0].anchorAnnotationId) ?? null)
+						: null)
+				const blockTop =
+					blockIdForBlocks
+						? railTopForBlockAnchor(blockIdForBlocks, blocksRailLayout)
+						: null
+				const rawTop =
+					blockTop ?? railTopForAnchor(group.page, group.yRatio, pdfRailLayout, numPages)
+				return {
+					...group,
+					notes: [...group.notes].sort(compareNotesByAnchor),
+					rawTop,
+					focusTop: minimapActive ? minimapTopForRail(rawTop, progressFrac) : rawTop,
+				}
+			})
 			.sort((a, b) => a.focusTop - b.focusTop)
 		const adjustedTops = spreadDotTops(groupedWithTop.map((group) => group.focusTop))
 		const placed: Array<{
@@ -381,8 +421,10 @@ export function NotesPanel({
 		}
 		return placed
 	}, [
+		annotationBlockIdById,
 		blockAnchorsById,
 		blockNumberByBlockId,
+		blocksRailLayout,
 		colorByAnnotation,
 		colorByBlock,
 		dotColorsByNote,
@@ -417,9 +459,20 @@ export function NotesPanel({
 	// "fold" into a smaller card. The fish-eye / ghost / near-window
 	// machinery only powers the rail dots now.
 	const laneGroups = useMemo(() => {
-		const layout = pdfRailLayout
+		// Markdown view (BlocksPanel scrolling) wins when its layout is
+		// populated; otherwise fall back to PDF metrics. Anchor → content-y
+		// resolution branches the same way: blocks give us per-block top +
+		// height, PDF gives us per-page top + height.
+		const usingBlocks = !!(
+			blocksRailLayout &&
+			blocksRailLayout.scrollHeight > 0 &&
+			blocksRailLayout.blockMetrics.size > 0
+		)
+		const layout: RailScrollMetrics | null = usingBlocks
+			? (blocksRailLayout as BlocksRailLayout)
+			: pdfRailLayout ?? null
 		const fallbackOnly = !layout || layout.scrollHeight <= 0 || layout.viewportHeight <= 0
-		// Without a measured PDF viewport we can't compute parallax-coupled
+		// Without a measured viewport we can't compute parallax-coupled
 		// positions. Surface only the expanded slip in that case, parked
 		// at a sensible default y, so cite-chip flows and tests still get
 		// a rendered editor; the rail dots still navigate as usual.
@@ -458,10 +511,26 @@ export function NotesPanel({
 		}> = []
 		for (const group of groupedDots) {
 			const expanded = group.notes.some((note) => note.id === expandedNoteId)
-			const pageMetric = layout.pageMetrics.get(group.page)
-			const anchorAbsolute = pageMetric
-				? pageMetric.top + (group.notes[0]?.anchorYRatio ?? group.focusTop) * pageMetric.height
-				: layout.scrollHeight * group.focusTop
+			let anchorAbsolute: number
+			if (usingBlocks) {
+				const blockId =
+					group.blockId ??
+					(group.notes[0]?.anchorAnnotationId
+						? (annotationBlockIdById?.get(group.notes[0].anchorAnnotationId) ?? null)
+						: null)
+				const blockMetric = blockId
+					? (blocksRailLayout as BlocksRailLayout).blockMetrics.get(blockId)
+					: undefined
+				anchorAbsolute = blockMetric
+					? blockMetric.top + blockMetric.height / 2
+					: layout.scrollHeight * group.focusTop
+			} else {
+				const pageMetric = (pdfRailLayout as PdfRailLayout).pageMetrics.get(group.page)
+				anchorAbsolute = pageMetric
+					? pageMetric.top +
+						(group.notes[0]?.anchorYRatio ?? group.focusTop) * pageMetric.height
+					: layout.scrollHeight * group.focusTop
+			}
 			// Keep folded and expanded slips on the same vertical baseline so
 			// opening a note doesn't "jump" up/down relative to its rail dot.
 			// The only change on open should be size/interaction, not anchor-y.
@@ -508,7 +577,14 @@ export function NotesPanel({
 			placed[idx] = { ...placed[idx], topPx: adjustedTops[n] ?? placed[idx].topPx } as (typeof placed)[number]
 		}
 		return placed
-	}, [expandedNoteId, groupedDots, laneInnerHeight, pdfRailLayout])
+	}, [
+		annotationBlockIdById,
+		blocksRailLayout,
+		expandedNoteId,
+		groupedDots,
+		laneInnerHeight,
+		pdfRailLayout,
+	])
 
 	const handleOpenCitationBlock = useCallback(
 		(paperId: string, blockId: string) => {
@@ -1024,6 +1100,19 @@ function dotBackgroundForColors(colors: string[]) {
 		.join(", ")})`
 }
 
+// TASK-018 Phase D — both PdfRailLayout and BlocksRailLayout share
+// the same scroll-shape fields (scrollHeight, scrollTop, viewportHeight,
+// viewportAnchorTop). The minimap progress / viewport-window math only
+// needs those, so we type the helpers against a structural subset and
+// pass either layout in. Anchor → rail-top resolution stays specific
+// to each layout shape (page/yRatio for PDF, blockId for markdown).
+interface RailScrollMetrics {
+	scrollHeight: number
+	scrollTop: number
+	viewportHeight: number
+	viewportAnchorTop: number
+}
+
 function railTopForAnchor(
 	page: number,
 	yRatio: number,
@@ -1039,15 +1128,29 @@ function railTopForAnchor(
 	return clamp((page - 1 + yRatio) / total, 0, 1)
 }
 
+// Markdown analog: blocks live in the scroll content at known
+// content-y / height. The anchor is the block's vertical center.
+// Returns null when the block isn't measured yet so callers can fall
+// back to the PDF-based estimate.
+function railTopForBlockAnchor(
+	blockId: string,
+	blocksRailLayout: BlocksRailLayout | null | undefined,
+): number | null {
+	if (!blocksRailLayout) return null
+	const metric = blocksRailLayout.blockMetrics.get(blockId)
+	if (!metric || blocksRailLayout.scrollHeight <= 0) return null
+	return clamp((metric.top + metric.height / 2) / blocksRailLayout.scrollHeight, 0, 1)
+}
+
 function railProgressForViewport(
 	currentPage: number,
 	currentAnchorYRatio: number,
-	pdfRailLayout: PdfRailLayout | null | undefined,
+	metrics: RailScrollMetrics | null | undefined,
 	numPages: number,
 ) {
-	const scrollHeight = pdfRailLayout?.scrollHeight ?? 0
+	const scrollHeight = metrics?.scrollHeight ?? 0
 	if (scrollHeight > 0) {
-		return clamp((pdfRailLayout?.viewportAnchorTop ?? 0) / scrollHeight, 0, 1)
+		return clamp((metrics?.viewportAnchorTop ?? 0) / scrollHeight, 0, 1)
 	}
 	const total = Math.max(numPages, 1)
 	return clamp((currentPage - 1 + currentAnchorYRatio) / total, 0, 1)
@@ -1088,7 +1191,7 @@ function minimapDotScaleForRail(rawTop: number, focusTop: number, active: boolea
 
 function minimapViewportWindow(
 	progressTop: number,
-	pdfRailLayout: PdfRailLayout | null | undefined,
+	metrics: RailScrollMetrics | null | undefined,
 	minimapActive: boolean,
 ) {
 	if (!minimapActive) {
@@ -1097,16 +1200,16 @@ function minimapViewportWindow(
 			bottom: clamp(progressTop + MINIMAP_VIEWPORT_MIN_SPAN_FRAC / 2, 0, 1),
 		}
 	}
-	const scrollHeight = pdfRailLayout?.scrollHeight ?? 0
+	const scrollHeight = metrics?.scrollHeight ?? 0
 	if (scrollHeight <= 0) {
 		return {
 			top: clamp(progressTop - MINIMAP_VIEWPORT_MIN_SPAN_FRAC / 2, 0, 1),
 			bottom: clamp(progressTop + MINIMAP_VIEWPORT_MIN_SPAN_FRAC / 2, 0, 1),
 		}
 	}
-	const rawTop = clamp((pdfRailLayout?.scrollTop ?? 0) / scrollHeight, 0, 1)
+	const rawTop = clamp((metrics?.scrollTop ?? 0) / scrollHeight, 0, 1)
 	const rawBottom = clamp(
-		((pdfRailLayout?.scrollTop ?? 0) + (pdfRailLayout?.viewportHeight ?? 0)) / scrollHeight,
+		((metrics?.scrollTop ?? 0) + (metrics?.viewportHeight ?? 0)) / scrollHeight,
 		0,
 		1,
 	)

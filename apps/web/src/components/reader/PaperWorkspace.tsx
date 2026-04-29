@@ -20,7 +20,7 @@ import {
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
-import { BlocksPanel } from "@/components/reader/BlocksPanel"
+import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
 import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
@@ -65,6 +65,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [optimisticNotes, setOptimisticNotes] = useState<Note[]>([])
 	const [pdfRailLayout, setPdfRailLayout] = useState<PdfRailLayout | null>(null)
+	const [blocksRailLayout, setBlocksRailLayout] = useState<BlocksRailLayout | null>(null)
 	const editorRef = useRef<NoteEditorRef | null>(null)
 	const [editorReadyVersion, setEditorReadyVersion] = useState(0)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
@@ -93,6 +94,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	useEffect(() => {
 		setOptimisticNotes([])
 		setPdfRailLayout(null)
+		setBlocksRailLayout(null)
 	}, [paperId, workspace?.id])
 
 	const upsertOptimisticNote = useCallback((note: Note) => {
@@ -774,6 +776,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			flashedAnnotationId={flashedAnnotationId}
 			previewedBlockId={previewedBlockId}
 			onRailLayoutChange={setPdfRailLayout}
+			onBlocksRailLayoutChange={setBlocksRailLayout}
 			previewedAnnotationId={previewedAnnotationId}
 			previewSuppressedBlockId={previewSuppressedBlockId}
 			viewMode={viewMode}
@@ -794,6 +797,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
+				blocksRailLayout={blocksRailLayout}
 				currentAnchorYRatio={currentAnchorYRatio}
 				currentPage={currentPage}
 				expandedNoteId={expandedNoteId}
@@ -904,6 +908,7 @@ interface WorkspaceContentProps {
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
+	blocksRailLayout: BlocksRailLayout | null
 	currentAnchorYRatio: number
 	currentPage: number
 	expandedNoteId: string | null
@@ -940,6 +945,7 @@ function WorkspaceContent({
 	dotColorsByNote,
 	numPages,
 	pdfRailLayout,
+	blocksRailLayout,
 	currentAnchorYRatio,
 	currentPage,
 	expandedNoteId,
@@ -999,6 +1005,7 @@ function WorkspaceContent({
 					dotColorsByNote={dotColorsByNote}
 					numPages={numPages}
 					pdfRailLayout={pdfRailLayout}
+					blocksRailLayout={blocksRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					expandedNoteId={expandedNoteId}
@@ -1213,6 +1220,7 @@ interface MainViewProps {
 		color: string,
 	) => Promise<unknown> | unknown
 	onRailLayoutChange: (layout: PdfRailLayout | null) => void
+	onBlocksRailLayoutChange: (layout: BlocksRailLayout | null) => void
 	onViewportAnchorChange: (page: number, yRatio: number) => void
 	palette: ReturnType<typeof usePalette>["palette"]
 	paperId: string
@@ -1289,6 +1297,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						externalFollowLockUntil={props.autoFollowLockUntil}
 						onClearHighlight={props.handleClearBlockHighlight}
 						onInteract={props.handleMainInteract}
+						onRailLayoutChange={props.onBlocksRailLayoutChange}
 						onViewportAnchorChange={props.onViewportAnchorChange}
 						onSelectBlock={props.handleSelectBlockFromPane}
 						onSetHighlight={props.handleSetBlockHighlight}
@@ -1327,6 +1336,7 @@ interface MainNotesSplitProps {
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
+	blocksRailLayout: BlocksRailLayout | null
 	main: React.ReactNode
 	notes: Note[]
 	expandedNoteId: string | null
@@ -1361,6 +1371,7 @@ function MainNotesSplit({
 	dotColorsByNote,
 	numPages,
 	pdfRailLayout,
+	blocksRailLayout,
 	main,
 	notes,
 	expandedNoteId,
@@ -1424,6 +1435,7 @@ function MainNotesSplit({
 					dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
+				blocksRailLayout={blocksRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					externalFollowLockUntil={autoFollowLockUntil}

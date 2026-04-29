@@ -8,6 +8,27 @@ import { BlockHighlightPicker } from "./BlockHighlightPicker"
 
 const BLOCKS_WINDOW_RADIUS = 1
 
+// TASK-018 Phase D — markdown view's analog to PdfRailLayout. The
+// marginalia gutter+rail (NotesPanel) is view-agnostic at the layout
+// level (sibling of main, not child of PdfViewer), but it needs to
+// resolve "where on the rail does this anchor sit" differently per
+// view: PDF math uses (page, yRatio) × pageMetrics; markdown math
+// uses blockId × blockMetrics. Each block card in BlocksPanel
+// registers a ref, so we just walk those refs after layout settles
+// and report content-relative top/height for each.
+//
+// Coordinate convention matches PdfRailLayout: top is in scroll
+// container's content space (NOT viewport), so it's stable across
+// scroll. Only `scrollTop` / `viewportAnchorTop` change while the
+// user scrolls; `blockMetrics` only changes on resize / refs version.
+export interface BlocksRailLayout {
+	blockMetrics: Map<string, { top: number; height: number; page: number }>
+	scrollHeight: number
+	scrollTop: number
+	viewportHeight: number
+	viewportAnchorTop: number
+}
+
 interface Props {
 	paperId: string
 	currentPage?: number
@@ -15,6 +36,10 @@ interface Props {
 	externalFollowLockUntil?: number
 	onInteract?: () => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
+	// TASK-018 Phase D: emits BlocksRailLayout so the marginalia rail
+	// can position dots/slips relative to actual block card y rather
+	// than PDF page coordinates.
+	onRailLayoutChange?: (layout: BlocksRailLayout | null) => void
 	selectedBlockId?: string | null
 	previewedBlockId?: string | null
 	selectedBlockRequestNonce?: number
@@ -45,6 +70,7 @@ export function BlocksPanel({
 	requestedAnchorYRatio,
 	requestedPage,
 	requestedPageNonce,
+	onRailLayoutChange,
 	onSelectBlock,
 	colorByBlock,
 	palette,
@@ -118,6 +144,7 @@ export function BlocksPanel({
 					onDismissPopover={() => setOpenPopoverFor(null)}
 					onHoverBlock={setHoveredBlockId}
 				onInteract={onInteract}
+				onRailLayoutChange={onRailLayoutChange}
 				onViewportAnchorChange={onViewportAnchorChange}
 				onSelect={onSelectBlock}
 				onSetHighlight={onSetHighlight}
@@ -155,6 +182,7 @@ function BlocksPanelScrollBody({
 	onDismissPopover,
 	onHoverBlock,
 	onInteract,
+	onRailLayoutChange,
 	onViewportAnchorChange,
 	onSelect,
 	onSetHighlight,
@@ -182,6 +210,7 @@ function BlocksPanelScrollBody({
 	onDismissPopover: () => void
 	onHoverBlock?: (blockId: string | null) => void
 	onInteract?: () => void
+	onRailLayoutChange?: (layout: BlocksRailLayout | null) => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	onSelect?: (block: Block) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
@@ -394,10 +423,52 @@ function BlocksPanelScrollBody({
 		}
 
 		const last = lastReportedViewportRef.current
-		if (last && last.page === activePage && Math.abs(last.yRatio - anchorYRatio) < 0.04) return
-		lastReportedViewportRef.current = { page: activePage, yRatio: anchorYRatio }
-		onViewportAnchorChange?.(activePage, anchorYRatio)
-	}, [computeTopmostVisiblePage, grouped, onActivePageChange, onViewportAnchorChange])
+		if (!last || last.page !== activePage || Math.abs(last.yRatio - anchorYRatio) >= 0.04) {
+			lastReportedViewportRef.current = { page: activePage, yRatio: anchorYRatio }
+			onViewportAnchorChange?.(activePage, anchorYRatio)
+		}
+
+		// TASK-018 Phase D — emit BlocksRailLayout for the marginalia
+		// rail. Block top/height are content-relative (stable across
+		// scroll); container metrics carry the scroll/viewport delta.
+		// We rebuild the metric map on every tick because the cost is
+		// O(N cards) of getBoundingClientRect, and N is small (typical
+		// papers have <200 blocks). If perf shows up later, memoize on
+		// `cardRefsVersion` and only update the scroll fields here.
+		if (onRailLayoutChange) {
+			const blockMetrics = new Map<
+				string,
+				{ top: number; height: number; page: number }
+			>()
+			for (const [page, blocksOnPage] of grouped) {
+				for (const block of blocksOnPage) {
+					const card = cardRefs.current.get(block.blockId)
+					if (!card) continue
+					const rect = card.getBoundingClientRect()
+					blockMetrics.set(block.blockId, {
+						top: rect.top - containerRect.top + container.scrollTop,
+						height: rect.height,
+						page,
+					})
+				}
+			}
+			const viewportAnchorTop =
+				container.scrollTop + container.clientHeight / 2
+			onRailLayoutChange({
+				blockMetrics,
+				scrollHeight: container.scrollHeight,
+				scrollTop: container.scrollTop,
+				viewportHeight: container.clientHeight,
+				viewportAnchorTop,
+			})
+		}
+	}, [
+		computeTopmostVisiblePage,
+		grouped,
+		onActivePageChange,
+		onRailLayoutChange,
+		onViewportAnchorChange,
+	])
 
 	const scheduleViewportMeasure = useCallback(() => {
 		if (scrollMeasureFrameRef.current != null) return
