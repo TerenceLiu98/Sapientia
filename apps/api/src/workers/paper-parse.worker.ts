@@ -11,6 +11,7 @@ import {
 	type PaperParseJobData,
 	type PaperParseJobResult,
 } from "../queues/paper-parse"
+import { enqueuePaperSummarize } from "../queues/paper-summarize"
 import { parseContentList } from "../services/block-parser"
 import { getMineruToken } from "../services/credentials"
 import {
@@ -189,6 +190,21 @@ async function processPaperParse(
 		.where(eq(papers.id, paperId))
 
 	log.info({ blocksKey, blockCount: parsedBlocks.length }, "paper_parse_job_completed")
+
+	// TASK-019: enqueue source-summary now that blocks are persisted.
+	// Best-effort — a failure here doesn't roll back the parse-done
+	// status. The summary is only consumed by the agent (TASK-022)
+	// and isn't load-bearing for marginalia / highlights / notes,
+	// so a missing one is recoverable: re-enqueue manually or wait
+	// for the next time the user triggers something that uses it.
+	try {
+		await enqueuePaperSummarize({ paperId, userId })
+	} catch (err) {
+		log.warn(
+			{ err: err instanceof Error ? err.message : String(err) },
+			"paper_summarize_enqueue_failed",
+		)
+	}
 
 	return {
 		paperId,
