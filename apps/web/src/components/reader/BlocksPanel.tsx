@@ -752,17 +752,30 @@ const PageBlockBody = memo(function PageBlockBody({
 }: PageBlockBodyProps) {
 	const bodyRef = useRef<HTMLDivElement | null>(null)
 
+	// Latest-callback ref so the ResizeObserver effect doesn't re-run
+	// every time the parent passes a fresh inline closure. Without this,
+	// frequent parent re-renders (e.g. TASK-019 Phase D's blocksRailLayout
+	// state updates on every scroll tick) tear down + rebuild the
+	// observer on each render → the rebuilt observer fires synchronously
+	// on observe() → setPageBodyHeights → re-render → loop. The effect
+	// now depends only on pageBlocks (which only changes when blocks
+	// materially change), and reads the freshest onMeasureHeight via ref.
+	const onMeasureHeightRef = useRef(onMeasureHeight)
+	useEffect(() => {
+		onMeasureHeightRef.current = onMeasureHeight
+	})
+
 	useEffect(() => {
 		const el = bodyRef.current
 		if (!el) return
-		onMeasureHeight(el.offsetHeight)
+		onMeasureHeightRef.current(el.offsetHeight)
 		if (typeof ResizeObserver === "undefined") return
 		const observer = new ResizeObserver(() => {
-			onMeasureHeight(el.offsetHeight)
+			onMeasureHeightRef.current(el.offsetHeight)
 		})
 		observer.observe(el)
 		return () => observer.disconnect()
-	}, [onMeasureHeight, pageBlocks])
+	}, [pageBlocks])
 
 	return (
 		<div className="space-y-3" ref={bodyRef}>
