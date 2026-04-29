@@ -23,11 +23,23 @@ const NoteCitationThemeContext = createContext<{
 		| null
 	workspaceId: string | null
 	palette: PaletteEntry[]
+	// annotationId → 1-based ordinal among the paper's same-kind
+	// annotations (highlight or underline), sorted by reading order.
+	// Drives the canonical chip label `highlight 2 p. 12 blk. 9`.
+	annotationOrdinalById: Map<string, number> | null
+	// annotationId → blockId of the block whose bbox the annotation
+	// visually overlaps. Lets the chip show the structural anchor too.
+	annotationBlockIdById: Map<string, string> | null
+	// blockId → 1-based blockIndex in the paper.
+	blockNumberByBlockId: Map<string, number> | null
 }>({
 	onOpenBlock: null,
 	onOpenAnnotation: null,
 	workspaceId: null,
 	palette: [],
+	annotationOrdinalById: null,
+	annotationBlockIdById: null,
+	blockNumberByBlockId: null,
 })
 
 export function NoteCitationThemeProvider({
@@ -36,12 +48,18 @@ export function NoteCitationThemeProvider({
 	onOpenAnnotation,
 	palette,
 	workspaceId,
+	annotationOrdinalById,
+	annotationBlockIdById,
+	blockNumberByBlockId,
 }: {
 	children: React.ReactNode
 	onOpenBlock?: (paperId: string, blockId: string) => void
 	onOpenAnnotation?: (paperId: string, annotationId: string, page?: number, yRatio?: number) => void
 	palette: PaletteEntry[]
 	workspaceId: string | null
+	annotationOrdinalById?: Map<string, number>
+	annotationBlockIdById?: Map<string, string>
+	blockNumberByBlockId?: Map<string, number>
 }) {
 	return (
 		<NoteCitationThemeContext.Provider
@@ -50,6 +68,9 @@ export function NoteCitationThemeProvider({
 				onOpenAnnotation: onOpenAnnotation ?? null,
 				workspaceId,
 				palette,
+				annotationOrdinalById: annotationOrdinalById ?? null,
+				annotationBlockIdById: annotationBlockIdById ?? null,
+				blockNumberByBlockId: blockNumberByBlockId ?? null,
 			}}
 		>
 			{children}
@@ -250,7 +271,13 @@ export function AnnotationCitationChip({
 	color: string
 	snapshot: string
 }) {
-	const { onOpenAnnotation, workspaceId } = useContext(NoteCitationThemeContext)
+	const {
+		onOpenAnnotation,
+		workspaceId,
+		annotationOrdinalById,
+		annotationBlockIdById,
+		blockNumberByBlockId,
+	} = useContext(NoteCitationThemeContext)
 	const { data: annotations = [] } = useReaderAnnotations(paperId, workspaceId ?? undefined)
 	const liveAnnotation = annotations.find((annotation) => annotation.id === annotationId) ?? null
 	const effectiveKind =
@@ -259,11 +286,28 @@ export function AnnotationCitationChip({
 			: annotationKind
 	const effectivePage = liveAnnotation?.page ?? page
 	const effectiveColor = liveAnnotation?.color ?? color
-	const isStale = liveAnnotation === null
-	const label =
-		snapshot.trim().length > 0
-			? snapshot
-			: `${effectiveKind === "highlight" ? "highlight" : "underline"}${effectivePage > 0 ? ` p.${effectivePage}` : ""}`
+	// "Stale" now covers both flavors of missing live data:
+	//   1. The annotation row is gone entirely (migrated away, hard-deleted).
+	//   2. The annotation is soft-deleted (deletedAt set). The reader still
+	//      renders a faint ghost rect, so the chip stays jumpable and lets
+	//      the user visit the original neighborhood.
+	const isStale = liveAnnotation === null || liveAnnotation.deletedAt != null
+	// Canonical label `highlight 2 p. 12 blk. 9`. Falls back to the
+	// snapshot text when the chip predates the lookup maps, then to a
+	// minimal `kind p.P` form so a stale chip without a snapshot still
+	// reads.
+	const ordinal = annotationOrdinalById?.get(annotationId) ?? null
+	const blockId = annotationBlockIdById?.get(annotationId) ?? null
+	const blockNumber = blockId ? (blockNumberByBlockId?.get(blockId) ?? null) : null
+	const canonicalLabel = (() => {
+		const parts: string[] = [
+			ordinal != null && ordinal > 0 ? `${effectiveKind} ${ordinal}` : effectiveKind,
+		]
+		if (effectivePage > 0) parts.push(`p. ${effectivePage}`)
+		if (blockNumber) parts.push(`blk. ${blockNumber}`)
+		return parts.join(" ")
+	})()
+	const label = canonicalLabel || snapshot.trim() || effectiveKind
 
 	// Stale: the source annotation has been deleted. Render as a quiet
 	// historical trace — no underline color cue, no jump-to behavior, just

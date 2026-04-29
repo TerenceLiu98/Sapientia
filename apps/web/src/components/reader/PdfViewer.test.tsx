@@ -539,6 +539,7 @@ describe("PdfViewer", () => {
 							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
 							createdAt: new Date().toISOString(),
 							updatedAt: new Date().toISOString(),
+							deletedAt: null,
 						},
 					]}
 				/>
@@ -577,6 +578,7 @@ describe("PdfViewer", () => {
 							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
 							createdAt: new Date().toISOString(),
 							updatedAt: new Date().toISOString(),
+							deletedAt: null,
 						},
 					]}
 					renderAnnotationActions={() => (

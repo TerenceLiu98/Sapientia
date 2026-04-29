@@ -91,6 +91,7 @@ describe("AnnotationCitationChip", () => {
 				body: { rect: { x: 0.1, y: 0.22, w: 0.3, h: 0.08 } },
 				createdAt: "2026-04-27T00:00:00.000Z",
 				updatedAt: "2026-04-27T00:00:00.000Z",
+				deletedAt: null,
 			},
 		]
 		useReaderAnnotationsMock.mockReturnValue({ data: annotations })
@@ -115,7 +116,9 @@ describe("AnnotationCitationChip", () => {
 			</NoteCitationThemeProvider>,
 		)
 
-		const chip = screen.getByRole("button", { name: /highlight p\.12/i })
+		// New canonical chip label: `highlight p. 12` (no ordinal here
+		// because the test doesn't supply `annotationOrdinalById`).
+		const chip = screen.getByRole("button", { name: /highlight p\. 12/i })
 		expect(chip.style.backgroundColor).toBe("rgba(244, 200, 79, 0.2)")
 		fireEvent.click(chip)
 		expect(onOpenAnnotation).toHaveBeenCalledWith("paper-1", "annotation-1", 12, 0.22)

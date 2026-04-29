@@ -262,6 +262,12 @@ interface Props {
 		yRatio?: number,
 	) => void
 	headerActions?: ReactNode
+	// Lookup maps surfaced via NoteCitationThemeContext so chips inside
+	// the editor can render the canonical `highlight K p. P blk. B`
+	// label. Optional — chips fall back to the snapshot when absent.
+	annotationOrdinalById?: Map<string, number>
+	annotationBlockIdById?: Map<string, string>
+	blockNumberByBlockId?: Map<string, number>
 }
 
 export function NoteEditor({
@@ -270,6 +276,9 @@ export function NoteEditor({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	headerActions,
+	annotationOrdinalById,
+	annotationBlockIdById,
+	blockNumberByBlockId,
 }: Props) {
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
@@ -322,6 +331,9 @@ export function NoteEditor({
 			onOpenCitationBlock={onOpenCitationBlock}
 			onOpenCitationAnnotation={onOpenCitationAnnotation}
 			headerActions={headerActions}
+			annotationOrdinalById={annotationOrdinalById}
+			annotationBlockIdById={annotationBlockIdById}
+			blockNumberByBlockId={blockNumberByBlockId}
 		/>
 	)
 }
@@ -588,6 +600,9 @@ function NoteEditorInner({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	headerActions,
+	annotationOrdinalById,
+	annotationBlockIdById,
+	blockNumberByBlockId,
 }: {
 	note: NoteWithUrl
 	initialContent: unknown
@@ -606,6 +621,9 @@ function NoteEditorInner({
 		yRatio?: number,
 	) => void
 	headerActions?: ReactNode
+	annotationOrdinalById?: Map<string, number>
+	annotationBlockIdById?: Map<string, string>
+	blockNumberByBlockId?: Map<string, number>
 }) {
 	const { palette } = usePalette()
 	const { data: blocks = [] } = useBlocks(note.paperId ?? "")
@@ -719,6 +737,9 @@ function NoteEditorInner({
 					onOpenAnnotation={onOpenCitationAnnotation}
 					palette={palette}
 					workspaceId={note.workspaceId}
+					annotationOrdinalById={annotationOrdinalById}
+					annotationBlockIdById={annotationBlockIdById}
+					blockNumberByBlockId={blockNumberByBlockId}
 				>
 					{isMarginaliaNote ? (
 						<div className="border-b border-border-subtle/70 px-5 py-3">

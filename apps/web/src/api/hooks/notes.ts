@@ -23,6 +23,11 @@ export interface Note {
 	anchorKind: NoteAnchorKind | null
 	anchorBlockId: string | null
 	anchorAnnotationId: string | null
+	// Lossy excerpt of the note body (first ~200 chars of the agent
+	// markdown cache, citation tokens stripped). Used by the marginalia
+	// rail to show "what this note says" without a per-row MinIO fetch.
+	// Optional — older API responses may omit it.
+	excerpt?: string
 	createdAt: string
 	updatedAt: string
 }

@@ -55,8 +55,34 @@ export function ReaderAnnotationShape({
 			values="1;0.35;1;0.35;1"
 		/>
 	) : null
+	// Ghost variant: the annotation is soft-deleted (a note still cites
+	// it). We render a much fainter dashed outline so the user sees
+	// "something used to live here" but it doesn't visually compete with
+	// live markup. Selection still works so the popover can offer Restore.
+	const isGhost = annotation.deletedAt != null
 	if (annotation.kind === "highlight" && "rect" in annotation.body) {
 		const { rect } = annotation.body
+		if (isGhost) {
+			return (
+				<rect
+					fill={annotation.color}
+					fillOpacity={selected ? 0.18 : 0.07}
+					height={rect.h * H}
+					rx={3}
+					ry={3}
+					stroke={annotation.color}
+					strokeDasharray="4 3"
+					strokeOpacity={selected ? 0.85 : 0.5}
+					strokeWidth={selected ? 1.5 : 1}
+					width={rect.w * W}
+					x={rect.x * W}
+					y={rect.y * H}
+					{...stopAndSelect}
+				>
+					{flashPulse}
+				</rect>
+			)
+		}
 		return (
 			<rect
 				fill={annotation.color}
@@ -83,10 +109,11 @@ export function ReaderAnnotationShape({
 				<line
 					pointerEvents="none"
 					stroke={annotation.color}
+					strokeDasharray={isGhost ? "5 4" : undefined}
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					strokeOpacity={selected ? 1 : 0.95}
-					strokeWidth={selected ? 4.5 : 3}
+					strokeOpacity={isGhost ? (selected ? 0.7 : 0.4) : selected ? 1 : 0.95}
+					strokeWidth={isGhost ? (selected ? 3 : 2) : selected ? 4.5 : 3}
 					x1={from.x * W}
 					x2={to.x * W}
 					y1={from.y * H}
@@ -116,10 +143,11 @@ export function ReaderAnnotationShape({
 					fill="none"
 					pointerEvents="none"
 					stroke={annotation.color}
+					strokeDasharray={isGhost ? "5 4" : undefined}
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					strokeOpacity={selected ? 1 : 0.95}
-					strokeWidth={selected ? 4.5 : 3.5}
+					strokeOpacity={isGhost ? (selected ? 0.7 : 0.4) : selected ? 1 : 0.95}
+					strokeWidth={isGhost ? (selected ? 3 : 2.5) : selected ? 4.5 : 3.5}
 				>
 					{flashPulse}
 				</path>
@@ -190,6 +218,7 @@ export function ReaderAnnotationActionsPopover({
 	H,
 	onChangeColor,
 	onDelete,
+	onRestore,
 	W,
 }: {
 	annotation: ReaderAnnotation
@@ -197,6 +226,10 @@ export function ReaderAnnotationActionsPopover({
 	H: number
 	onChangeColor: (color: string) => void
 	onDelete: () => void
+	// Optional — only relevant for soft-deleted annotations. When the
+	// selected annotation is a ghost, the popover swaps its color picker +
+	// delete button for a single Restore action so the user can re-activate.
+	onRestore?: () => void
 	W: number
 }) {
 	const bbox = annotationBoundingBox(annotation)
@@ -208,6 +241,7 @@ export function ReaderAnnotationActionsPopover({
 	const topAbove = bbox.y * H - POPOVER_HEIGHT - GAP
 	const showBelow = topAbove < 0
 	const top = showBelow ? (bbox.y + bbox.h) * H + GAP : topAbove
+	const isGhost = annotation.deletedAt != null
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: presentational; clicks within shouldn't bubble to the SVG and clear selection
 		<div
@@ -217,35 +251,57 @@ export function ReaderAnnotationActionsPopover({
 			onPointerDown={(e) => e.stopPropagation()}
 			style={{ left: `${centerX}px`, top: `${top}px` }}
 		>
-			{READER_ANNOTATION_COLORS.map((entry) => (
-				<button
-					aria-label={`Set ${entry.label}`}
-					aria-pressed={annotation.color === entry.value}
-					className={`h-5 w-5 rounded-full border transition-transform hover:scale-110 ${
-						annotation.color === entry.value
-							? "border-text-primary ring-2 ring-accent-600/35"
-							: "border-border-default"
-					}`}
-					key={entry.value}
-					onClick={() => {
-						if (annotation.color !== entry.value) onChangeColor(entry.value)
-					}}
-					style={{ backgroundColor: entry.value }}
-					type="button"
-				/>
-			))}
-			<div className="mx-1 h-4 w-px bg-border-subtle" />
-			{extraActions}
-			{extraActions ? <div className="mx-1 h-4 w-px bg-border-subtle" /> : null}
-			<button
-				aria-label="Delete annotation"
-				className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-error"
-				onClick={onDelete}
-				title="Delete"
-				type="button"
-			>
-				<TrashIcon />
-			</button>
+			{isGhost ? (
+				<>
+					<span className="px-1.5 text-[11px] uppercase tracking-[0.12em] text-text-tertiary">
+						deleted
+					</span>
+					{onRestore ? (
+						<button
+							aria-label="Restore annotation"
+							className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+							onClick={onRestore}
+							title="Restore"
+							type="button"
+						>
+							<RestoreIcon />
+							<span>Restore</span>
+						</button>
+					) : null}
+				</>
+			) : (
+				<>
+					{READER_ANNOTATION_COLORS.map((entry) => (
+						<button
+							aria-label={`Set ${entry.label}`}
+							aria-pressed={annotation.color === entry.value}
+							className={`h-5 w-5 rounded-full border transition-transform hover:scale-110 ${
+								annotation.color === entry.value
+									? "border-text-primary ring-2 ring-accent-600/35"
+									: "border-border-default"
+							}`}
+							key={entry.value}
+							onClick={() => {
+								if (annotation.color !== entry.value) onChangeColor(entry.value)
+							}}
+							style={{ backgroundColor: entry.value }}
+							type="button"
+						/>
+					))}
+					<div className="mx-1 h-4 w-px bg-border-subtle" />
+					{extraActions}
+					{extraActions ? <div className="mx-1 h-4 w-px bg-border-subtle" /> : null}
+					<button
+						aria-label="Delete annotation"
+						className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-error"
+						onClick={onDelete}
+						title="Delete"
+						type="button"
+					>
+						<TrashIcon />
+					</button>
+				</>
+			)}
 		</div>
 	)
 }
@@ -337,6 +393,25 @@ export function padHighlightRect(rect: { x: number; y: number; w: number; h: num
 	const x = Math.max(0, Math.min(1 - w, cx - w / 2))
 	const y = Math.max(0, Math.min(1 - h, cy - h / 2))
 	return { x, y, w, h }
+}
+
+function RestoreIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.7"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M3 12a9 9 0 1 0 3-6.7" />
+			<path d="M3 4v5h5" />
+		</svg>
+	)
 }
 
 function TrashIcon() {

@@ -43,6 +43,7 @@ function makeNote(overrides: Partial<Note>): Note {
 }
 
 beforeEach(() => {
+	window.localStorage.removeItem("paperWorkspace.notesSidebarCollapsed")
 	Object.defineProperty(HTMLElement.prototype, "clientHeight", {
 		configurable: true,
 		get() {
@@ -267,6 +268,124 @@ describe("NotesPanel", () => {
 		expect(Number(nearTop?.dataset.minimapScale)).toBeGreaterThan(Number(far?.dataset.minimapScale))
 		expect(Number(nearBottom?.dataset.minimapScale)).toBeGreaterThan(Number(far?.dataset.minimapScale))
 		expect(Number(nearBottom?.dataset.railTop) - Number(nearTop?.dataset.railTop)).toBeGreaterThan(6)
+	})
+
+	it("surfaces nearby notes in the slip lane while keeping far notes on the rail only", async () => {
+		const notes = [
+			makeNote({
+				id: "note-near",
+				title: "Viewport note",
+				anchorPage: 2,
+				anchorYRatio: 0.48,
+			}),
+			makeNote({
+				id: "note-far",
+				title: "Far note",
+				anchorPage: 6,
+				anchorYRatio: 0.82,
+			}),
+		]
+
+		const NotesPanel = await importNotesPanel()
+		const { container } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				blockNumberByBlockId={new Map([["block-near", 12]])}
+				colorByBlock={new Map([["block-near", "#f4c84f"]])}
+				currentAnchorYRatio={0.5}
+				currentPage={2}
+				expandedNoteId={null}
+				notes={[
+					{ ...notes[0], anchorKind: "block", anchorBlockId: "block-near" },
+					notes[1],
+				]}
+				numPages={6}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				pdfRailLayout={{
+					pageMetrics: new Map([
+						[1, { top: 0, height: 200 }],
+						[2, { top: 220, height: 240 }],
+						[3, { top: 500, height: 220 }],
+						[4, { top: 760, height: 220 }],
+						[5, { top: 1020, height: 260 }],
+						[6, { top: 1320, height: 220 }],
+					]),
+					scrollHeight: 1600,
+					scrollTop: 220,
+					viewportHeight: 280,
+					viewportAnchorTop: 360,
+				}}
+				sourceExcerptByNote={
+					new Map([
+						[
+							"note-near",
+							"Situated response is the keyword. Marginalia should help the reader remember where the thought came from.",
+						],
+					])
+				}
+			/>,
+		)
+
+		expect(container.querySelector('[data-slip-group-key="block:block-near"]')).not.toBeNull()
+		expect(container.querySelector('[data-slip-group-key="note:note-far"]')).toBeNull()
+		expect(container.querySelector('[data-note-id="note-far"]')).not.toBeNull()
+		expect(screen.getByText(/Situated response is the keyword/i)).toBeInTheDocument()
+		expect(screen.getAllByText("block 12").length).toBeGreaterThan(0)
+	})
+
+	it("can collapse the sidebar and re-expand it from a rail dot click", async () => {
+		const NotesPanel = await importNotesPanel()
+		function Harness() {
+			const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
+			const [collapsed, setCollapsed] = useState(false)
+			return (
+				<>
+					<button onClick={() => setCollapsed((value) => !value)} type="button">
+						Toggle notes sidebar
+					</button>
+					<NotesPanel
+						activeCitingNoteIds={new Set()}
+						currentAnchorYRatio={0.5}
+						currentPage={2}
+						expandedNoteId={expandedNoteId}
+						isSidebarCollapsed={collapsed}
+						notes={[makeNote({ id: "note-1", title: "Viewport note", anchorPage: 2, anchorYRatio: 0.48 })]}
+						numPages={4}
+						onCreateAtCurrent={() => {}}
+						onExpand={setExpandedNoteId}
+						onJumpToPage={() => {}}
+						onRequestExpandSidebar={() => setCollapsed(false)}
+						pdfRailLayout={{
+							pageMetrics: new Map([
+								[1, { top: 0, height: 200 }],
+								[2, { top: 220, height: 240 }],
+								[3, { top: 500, height: 220 }],
+								[4, { top: 760, height: 220 }],
+							]),
+							scrollHeight: 1100,
+							scrollTop: 220,
+							viewportHeight: 280,
+							viewportAnchorTop: 360,
+						}}
+						sourceExcerptByNote={
+							new Map([["note-1", "The folded slip should stay reachable even after the sidebar collapses."]])
+						}
+					/>
+				</>
+			)
+		}
+
+		const { container } = render(<Harness />)
+		expect(container.querySelector('[data-slip-group-key="note:note-1"]')).not.toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: "Toggle notes sidebar" }))
+		expect(container.querySelector('[data-sidebar-collapsed="true"]')).not.toBeNull()
+		expect(container.querySelector('[data-slip-group-key="note:note-1"]')).toBeNull()
+
+		fireEvent.click(container.querySelector('[data-note-id="note-1"]') as HTMLButtonElement)
+		expect(container.querySelector('[data-sidebar-collapsed="false"]')).not.toBeNull()
 	})
 
 	it("surfaces a visual cue for notes citing the selected block", async () => {

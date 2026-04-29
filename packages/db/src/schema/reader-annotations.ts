@@ -49,6 +49,13 @@ export const readerAnnotations = pgTable(
 			.notNull()
 			.defaultNow()
 			.$onUpdate(() => new Date()),
+		// Soft-delete timestamp. Set when the annotation is "deleted" but
+		// still referenced by a note's citation chip or anchor — we keep the
+		// row so the chip can resolve the original page/y/snapshot and the
+		// reader can render a faint ghost rect instead of a dead reference.
+		// If no note references the annotation at delete time, the row is
+		// hard-deleted and this column never matters.
+		deletedAt: timestamp("deleted_at", { withTimezone: true }),
 	},
 	(table) => [
 		index("idx_reader_annotations_paper_user_workspace").on(

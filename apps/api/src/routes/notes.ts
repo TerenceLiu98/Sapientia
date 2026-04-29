@@ -38,7 +38,12 @@ const UpdateNoteBodySchema = z.object({
 })
 
 // Strip server-only columns (object keys, agent cache, tsvector) before
-// returning a note over the wire.
+// returning a note over the wire. The lossy `agent_markdown_cache` is
+// surfaced as a short `excerpt` so the marginalia rail can show the
+// note's first sentence in the folded slip without a per-row MinIO
+// round-trip.
+const NOTE_EXCERPT_MAX_CHARS = 220
+
 function publicNote(note: Note) {
 	return {
 		id: note.id,
@@ -52,9 +57,31 @@ function publicNote(note: Note) {
 		anchorKind: note.anchorKind,
 		anchorBlockId: note.anchorBlockId,
 		anchorAnnotationId: note.anchorAnnotationId,
+		excerpt: deriveNoteExcerpt(note.agentMarkdownCache),
 		createdAt: note.createdAt,
 		updatedAt: note.updatedAt,
 	}
+}
+
+// Derive the slip excerpt from the agent markdown cache: drop citation
+// tokens (`[[block N · paperId#blockId]]` and the underline/highlight
+// variants), drop heading markers + bullet syntax, collapse whitespace,
+// truncate to one short paragraph. Leaves room for the surrounding UI
+// chrome on the folded slip without spilling into a wall of text.
+function deriveNoteExcerpt(markdownCache: string | null | undefined): string {
+	if (!markdownCache) return ""
+	const stripped = markdownCache
+		.replace(/\[\[[^\]]+\]\]/g, "") // citation tokens
+		.replace(/^\s*#{1,6}\s+/gm, "") // heading markers
+		.replace(/^\s*[-*+]\s+/gm, "") // bullet markers
+		.replace(/^\s*\d+\.\s+/gm, "") // ordered-list markers
+		.replace(/`([^`]+)`/g, "$1") // inline code → plain
+		.replace(/\*\*([^*]+)\*\*/g, "$1") // bold
+		.replace(/\*([^*]+)\*/g, "$1") // italic
+		.replace(/\s+/g, " ")
+		.trim()
+	if (stripped.length <= NOTE_EXCERPT_MAX_CHARS) return stripped
+	return `${stripped.slice(0, NOTE_EXCERPT_MAX_CHARS - 1).trimEnd()}…`
 }
 
 noteRoutes.get(

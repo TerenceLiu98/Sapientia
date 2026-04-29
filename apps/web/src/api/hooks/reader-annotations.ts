@@ -13,6 +13,10 @@ export interface ReaderAnnotation {
 	body: ReaderAnnotationBody
 	createdAt: string
 	updatedAt: string
+	// Set when the annotation has been deleted but a note still cites it.
+	// The reader renders these as faint ghost rects; the citation chip uses
+	// them to resolve a page/y position so jumps still work.
+	deletedAt: string | null
 }
 
 export interface CreateReaderAnnotationInput {
@@ -61,6 +65,7 @@ export function useCreateReaderAnnotation(paperId: string) {
 				body: variables.body,
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
+				deletedAt: null,
 			}
 			qc.setQueryData<ReaderAnnotation[]>(key, [...previous, optimistic])
 			return { key, previous, optimisticId: optimistic.id }
@@ -135,11 +140,58 @@ export function useUpdateReaderAnnotationColor(
 	})
 }
 
+// The server returns 204 (hard delete) or { softDeleted: true } when a note
+// still references the annotation. We mirror both outcomes in cache: hard
+// delete drops the row; soft delete leaves it in place but stamps deletedAt
+// so the reader renders a ghost rect.
+interface DeleteReaderAnnotationResponse {
+	softDeleted?: boolean
+}
+
 export function useDeleteReaderAnnotation(paperId: string, workspaceId: string | undefined) {
 	const qc = useQueryClient()
 	return useMutation({
 		mutationFn: (annotationId: string) =>
-			apiFetch<void>(`/api/v1/reader-annotations/${annotationId}`, { method: "DELETE" }),
+			apiFetch<DeleteReaderAnnotationResponse | null>(
+				`/api/v1/reader-annotations/${annotationId}`,
+				{ method: "DELETE" },
+			),
+		onMutate: async (annotationId) => {
+			if (!workspaceId) return
+			const key = readerAnnotationsKey(paperId, workspaceId)
+			await qc.cancelQueries({ queryKey: key })
+			const previous = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			// Optimistically stamp deletedAt — if the server hard-deletes,
+			// onSettled invalidates and the row drops out anyway.
+			const stampedAt = new Date().toISOString()
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				previous.map((annotation) =>
+					annotation.id === annotationId ? { ...annotation, deletedAt: stampedAt } : annotation,
+				),
+			)
+			return { key, previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (!context) return
+			qc.setQueryData(context.key, context.previous)
+		},
+		onSettled: () => {
+			if (!workspaceId) return
+			void qc.invalidateQueries({
+				queryKey: readerAnnotationsKey(paperId, workspaceId),
+			})
+		},
+	})
+}
+
+export function useRestoreReaderAnnotation(paperId: string, workspaceId: string | undefined) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (annotationId: string) =>
+			apiFetch<ReaderAnnotation>(`/api/v1/reader-annotations/${annotationId}/restore`, {
+				method: "POST",
+			}),
 		onMutate: async (annotationId) => {
 			if (!workspaceId) return
 			const key = readerAnnotationsKey(paperId, workspaceId)
@@ -147,13 +199,24 @@ export function useDeleteReaderAnnotation(paperId: string, workspaceId: string |
 			const previous = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
 			qc.setQueryData<ReaderAnnotation[]>(
 				key,
-				previous.filter((annotation) => annotation.id !== annotationId),
+				previous.map((annotation) =>
+					annotation.id === annotationId ? { ...annotation, deletedAt: null } : annotation,
+				),
 			)
 			return { key, previous }
 		},
 		onError: (_error, _variables, context) => {
 			if (!context) return
 			qc.setQueryData(context.key, context.previous)
+		},
+		onSuccess: (saved) => {
+			if (!workspaceId) return
+			const key = readerAnnotationsKey(paperId, workspaceId)
+			const current = qc.getQueryData<ReaderAnnotation[]>(key) ?? []
+			qc.setQueryData<ReaderAnnotation[]>(
+				key,
+				current.map((annotation) => (annotation.id === saved.id ? saved : annotation)),
+			)
 		},
 		onSettled: () => {
 			if (!workspaceId) return

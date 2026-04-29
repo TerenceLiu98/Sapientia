@@ -86,6 +86,7 @@ interface PdfViewerProps {
 		annotationId: string,
 		color: string,
 	) => Promise<unknown> | unknown
+	onRestoreReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	renderAnnotationActions?: (annotation: ReaderAnnotation) => React.ReactNode
 	// Mirrors BlocksPanel's renderActions slot — caller emits the
 	// cite/add-note button so the PDF toolbar matches the parsed-blocks pane.
@@ -96,6 +97,11 @@ interface PdfViewerProps {
 	// When a marginalia note anchored to a highlight/underline becomes
 	// active, keep the matching markup visibly selected in the PDF.
 	previewedAnnotationId?: string | null
+	// While a note is open and anchored to a block, suppress the
+	// image/table preview popup for that block. The note panel and the
+	// zoom popup compete for the same screen real estate; note creation
+	// wins.
+	previewSuppressedBlockId?: string | null
 }
 
 interface PdfDocumentLike {
@@ -123,11 +129,13 @@ function PdfViewerInner({
 	readerAnnotations,
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
+	onRestoreReaderAnnotation,
 	onUpdateReaderAnnotationColor,
 	renderAnnotationActions,
 	renderActions,
 	flashedAnnotationId,
 	previewedAnnotationId,
+	previewSuppressedBlockId,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
@@ -728,6 +736,7 @@ function PdfViewerInner({
 										onClearSelectedBlock={onClearSelectedBlock}
 										onCreateReaderAnnotation={onCreateReaderAnnotation}
 										onDeleteReaderAnnotation={onDeleteReaderAnnotation}
+										onRestoreReaderAnnotation={onRestoreReaderAnnotation}
 										onHoverBlock={setHoveredBlockId}
 										onEnterMarkupMode={canAnnotate ? handleEnterMarkupMode : undefined}
 										onPageCanvasReady={handlePageCanvasReady}
@@ -751,7 +760,10 @@ function PdfViewerInner({
 						: null}
 				</Document>
 			</div>
-			{!annotationMode && selectedBlock && isPreviewableBlock(selectedBlock) ? (
+			{!annotationMode &&
+			selectedBlock &&
+			isPreviewableBlock(selectedBlock) &&
+			selectedBlock.blockId !== previewSuppressedBlockId ? (
 				<SelectedBlockPreview
 					block={selectedBlock}
 					key={selectedBlock.blockId}
@@ -911,6 +923,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 	onClearSelectedBlock,
 	onCreateReaderAnnotation,
 	onDeleteReaderAnnotation,
+	onRestoreReaderAnnotation,
 	onHoverBlock,
 	onEnterMarkupMode,
 	onPageCanvasReady,
@@ -950,6 +963,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 		body: ReaderAnnotationBody
 	}) => Promise<unknown> | unknown
 	onDeleteReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
+	onRestoreReaderAnnotation?: (annotationId: string) => Promise<unknown> | unknown
 	onHoverBlock?: (blockId: string | null) => void
 	onEnterMarkupMode?: (clientX: number, clientY: number) => void
 	onPageCanvasReady?: (page: number) => void
@@ -1501,6 +1515,14 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 								void onDeleteReaderAnnotation?.(selectedAnnotation.id)
 								onSelectAnnotation?.(null)
 							}}
+							onRestore={
+								onRestoreReaderAnnotation
+									? () => {
+											void onRestoreReaderAnnotation(selectedAnnotation.id)
+											onSelectAnnotation?.(null)
+										}
+									: undefined
+							}
 							W={displayW}
 						/>
 					) : null}

@@ -7,7 +7,6 @@ import {
 	useRef,
 	useState,
 } from "react"
-import { createPortal } from "react-dom"
 import type { Note } from "@/api/hooks/notes"
 import { NoteEditor, type NoteEditorRef } from "@/components/notes/NoteEditor"
 import type { PdfRailLayout } from "@/components/reader/PdfViewer"
@@ -46,12 +45,29 @@ interface NotesPanelProps {
 	// blockId → 1-based blockIndex. Surfaces "block 7" labels in the dot
 	// tooltip; falls back to bare "block" when unknown.
 	blockNumberByBlockId?: Map<string, number>
+	// annotationId → 1-based ordinal among the paper's highlights /
+	// underlines (per kind). Drives the canonical source label
+	// `highlight 1 p. 12 blk. 7`. Optional — when missing the label
+	// drops the ordinal.
+	annotationOrdinalById?: Map<string, number>
+	// annotationId → blockId of the structural block whose bbox the
+	// annotation visually overlaps. Lets citation chips inside the
+	// editor surface `blk. N` even though annotations don't store a
+	// block id.
+	annotationBlockIdById?: Map<string, string>
 	// noteId → CSS colors of every block / reader-annotation cited in
 	// the note's body. A single-color list paints a solid dot; two or
 	// more paint a pie-chart conic gradient so the rail communicates
 	// "this note pulls from these N highlights" at a glance. Falls
 	// back to the anchor color when empty / missing.
 	dotColorsByNote?: Map<string, string[]>
+	// noteId → anchor-source excerpt shown in folded slips. This comes
+	// from the anchored block / markup source, not from the note title,
+	// so slips can preview the original PDF text even when notes are
+	// untitled.
+	sourceExcerptByNote?: Map<string, string>
+	isSidebarCollapsed?: boolean
+	onRequestExpandSidebar?: () => void
 	pdfRailLayout?: PdfRailLayout | null
 }
 
@@ -76,36 +92,54 @@ const MINIMAP_FOCUS_STRENGTH = 5
 const MINIMAP_NEAR_DOT_SCALE = 1.15
 const MINIMAP_FAR_DOT_SCALE = 0.74
 const MINIMAP_VIEWPORT_MIN_SPAN_FRAC = 0.06
+const SIDEBAR_INSET_X = 4
+const SIDEBAR_COLLAPSED_WIDTH = 56
+const SLIP_LANE_WIDTH = 248
+const RAIL_STRIP_WIDTH = 40
+const RAIL_EDGE_RIGHT = 2
+const RAIL_EDGE_TOP = 4
+const RAIL_EDGE_BOTTOM = 4
+const FOLDED_SLIP_HEIGHT = 92
+const FOLDED_SLIP_HEADER_HEIGHT = 12
+const SLIP_DEFAULT_HEIGHT = 520
+const SLIP_MIN_HEIGHT = 360
+const SLIP_MAX_HEIGHT = 920
+const SLIP_DEFAULT_WIDTH = 420
+const SLIP_MIN_WIDTH = 360
+const SLIP_MAX_WIDTH = 760
+const SLIP_LANE_INSET_LEFT = 18
+const SLIP_LANE_INSET_RIGHT = 14
+// Slip vertical position couples to the PDF's actual scroll position
+// (true marginalia: each slip stays near the line that provoked it).
+// The parallax factor lets us soften that coupling so slips don't fly
+// off-screen instantly. 1.0 = locked to anchor, 0.0 = ignores scroll.
+// 0.85 keeps slips near their source while drifting slightly slower
+// than the underlying PDF, which preserves spatial memory across short
+// scrolls and gives the lane a subtle layered feel.
+const SLIP_PARALLAX_FACTOR = 0.85
+// Half-viewport's worth of fade past the viewport edge before a slip
+// fully disappears. 0.5 means a slip fades to 0 when its screen-y is
+// half a viewport beyond the visible area. Slips beyond that are
+// unmounted entirely.
+const SLIP_FADE_TAIL_FRAC = 0.5
+const SLIP_OPACITY_RENDER_THRESHOLD = 0.05
+const SLIP_EXPANDED_ANCHOR_RIGHT = 18
+const SLIP_ANCHOR_LINE_SPAN = 34
+// Safety pad between the expanded slip and the lane edges. Prevents the
+// slip from sliding under the page header (top) or off the bottom of
+// the workspace pane when the anchor is close to a viewport edge.
+const SLIP_EXPANDED_EDGE_PAD = 8
+const SLIP_ANCHOR_DOT = 14
 const PROGRESS_BAR_WIDTH = 8
 const PROGRESS_KNOB_WIDTH = 20
-const PROGRESS_KNOB_HEIGHT = 6
-// Default popover proportions should feel like a side-gloss, not a
-// floating workspace. Keep it narrow enough that the PDF still carries
-// the layout, with height doing most of the work.
-const POPOVER_DEFAULT_WIDTH = 360
-const POPOVER_DEFAULT_HEIGHT = 680
-const POPOVER_MIN_WIDTH = 340
-const POPOVER_MAX_WIDTH = 720
-const POPOVER_MIN_HEIGHT = 420
-const POPOVER_MAX_HEIGHT = 960
-const POPOVER_GAP = 12
-const POPOVER_VIEWPORT_WIDTH_FRACTION = 0.28
-const POPOVER_VIEWPORT_HEIGHT_FRACTION = 0.78
-const POPOVER_ANCHOR_MARGIN = 28
-const POPOVER_CONNECTOR_SPAN = 72
-const POPOVER_CONNECTOR_DOT = 14
 const NEUTRAL_DOT_COLOR = "var(--color-neutral-400)"
 
-// Right pane is no longer a stack of cards — it's a vertical rail that
-// echoes the document's spine. Each note becomes a colored dot at its
-// anchor's `(page, yRatio)`; clicking the dot summons the editor as an
-// inline popover anchored to that dot. The pane stays mostly empty, the
-// way real margin annotations stay quiet until the reader looks at them.
+// Right pane is a two-part marginalia surface: a slip lane for notes
+// near the live PDF viewport, plus the thin rail on the outside edge
+// that still represents every note in the paper.
 //
-// `expandedNoteId` is repurposed as "popover open for this note" — we no
-// longer auto-expand on page change because popping up a floating
-// editor every time the reader turns a page is intrusive. The rail's
-// active-page band gives the spatial cue instead.
+// `expandedNoteId` is the live expanded slip. We keep expansion fully
+// user-driven; page turns merely change which folded slips are surfaced.
 export function NotesPanel({
 	activeCitingNoteIds,
 	notes,
@@ -125,19 +159,44 @@ export function NotesPanel({
 	colorByBlock,
 	colorByAnnotation,
 	blockNumberByBlockId,
+	annotationOrdinalById,
+	annotationBlockIdById,
 	dotColorsByNote,
+	sourceExcerptByNote,
+	isSidebarCollapsed = false,
+	onRequestExpandSidebar,
 	pdfRailLayout,
 }: NotesPanelProps) {
-	// Anchor element for the popover. Captured on click so we can place
-	// the popover relative to the exact dot the user activated.
-	const [popoverAnchor, setPopoverAnchor] = useState<HTMLButtonElement | null>(null)
-
 	// `externalFollowLockUntil` no longer drives a local scroll lock —
 	// the rail is fixed-length, nothing scrolls — but we still surface it
 	// to the cite-chip handlers below so cross-pane jumps still chain
 	// through the original gating semantics if anything reuses the lock.
 	void externalFollowLockUntil
 	void currentAnchorYRatio
+
+	// Track the slip-lane's measured height so the expanded slip can
+	// clamp itself inside it — without this it can drift up under the
+	// page header (or off the bottom of the workspace pane) when the
+	// anchor sits near a viewport edge.
+	const laneInnerRef = useRef<HTMLDivElement | null>(null)
+	const [laneInnerHeight, setLaneInnerHeight] = useState(0)
+	useEffect(() => {
+		const node = laneInnerRef.current
+		if (!node) return
+		setLaneInnerHeight(node.clientHeight)
+		// jsdom doesn't ship ResizeObserver; the height fallback above
+		// keeps the slip rendering at its ideal top in tests.
+		if (typeof ResizeObserver === "undefined") return
+		const observer = new ResizeObserver((entries) => {
+			const entry = entries[0]
+			if (!entry) return
+			setLaneInnerHeight(entry.contentRect.height)
+		})
+		observer.observe(node)
+		return () => {
+			observer.disconnect()
+		}
+	}, [])
 
 	// The rail behaves like a minimap rather than a raw progress bar:
 	// anchors near the live viewport are visually magnified, while far
@@ -203,8 +262,11 @@ export function NotesPanel({
 			notes: Note[]
 			page: number
 			top: number // 0..1
+			rawTop: number
+			focusTop: number
 			rightOffset: number
 			background: string
+			accentColor: string
 			tooltip: string
 			srLabel: string
 			visualScale: number
@@ -231,8 +293,11 @@ export function NotesPanel({
 				notes: group.notes,
 				page: group.page,
 				top,
+				rawTop: group.rawTop,
+				focusTop: group.focusTop,
 				rightOffset: 0,
 				background: dotBackgroundForColors(colors),
+				accentColor: colors[0] ?? NEUTRAL_DOT_COLOR,
 				tooltip,
 				srLabel,
 				visualScale,
@@ -268,6 +333,119 @@ export function NotesPanel({
 	)
 	const expandedAnchorPage = expandedNote?.anchorPage ?? expandedGroup?.page ?? null
 
+	// Slips are positioned on a different coordinate system from the rail
+	// dots: instead of a normalized 0..1 minimap, each slip's `top` is a
+	// pixel y inside the lane that tracks the PDF's actual scroll
+	// position. As the user scrolls the document, a slip drifts past the
+	// viewport (with a slight parallax lag) and fades out — it doesn't
+	// "fold" into a smaller card. The fish-eye / ghost / near-window
+	// machinery only powers the rail dots now.
+	const laneGroups = useMemo(() => {
+		const layout = pdfRailLayout
+		const fallbackOnly = !layout || layout.scrollHeight <= 0 || layout.viewportHeight <= 0
+		// Without a measured PDF viewport we can't compute parallax-coupled
+		// positions. Surface only the expanded slip in that case, parked
+		// at a sensible default y, so cite-chip flows and tests still get
+		// a rendered editor; the rail dots still navigate as usual.
+		if (fallbackOnly) {
+			const expandedGroupOnly = groupedDots.find((group) =>
+				group.notes.some((note) => note.id === expandedNoteId),
+			)
+			if (!expandedGroupOnly) return []
+			return [
+				{
+					groupKey: expandedGroupOnly.groupKey,
+					blockId: expandedGroupOnly.blockId,
+					notes: expandedGroupOnly.notes,
+					page: expandedGroupOnly.page,
+					expanded: true,
+					topPx: SLIP_DEFAULT_HEIGHT / 2 + 24,
+					opacity: 1,
+					accentColor: expandedGroupOnly.accentColor,
+				},
+			]
+		}
+		const viewportTop = layout.scrollTop
+		const viewportHeight = layout.viewportHeight
+		const viewportCenter = viewportTop + viewportHeight / 2
+		const halfH = viewportHeight / 2
+		const fadeTailPx = halfH * (1 + SLIP_FADE_TAIL_FRAC * 2)
+		const placed: Array<{
+			groupKey: string
+			blockId: string | null
+			notes: Note[]
+			page: number
+			expanded: boolean
+			topPx: number
+			opacity: number
+			accentColor: string
+		}> = []
+		for (const group of groupedDots) {
+			const expanded = group.notes.some((note) => note.id === expandedNoteId)
+			const pageMetric = layout.pageMetrics.get(group.page)
+			const anchorAbsolute = pageMetric
+				? pageMetric.top + (group.notes[0]?.anchorYRatio ?? group.focusTop) * pageMetric.height
+				: layout.scrollHeight * group.focusTop
+			let slipScreenY: number
+			let opacity: number
+			if (expanded) {
+				// Expanded slip is locked to the viewport center area —
+				// don't reverse-scroll it out from under the user while
+				// they're typing. Opacity always 1.
+				slipScreenY = clamp(
+					anchorAbsolute - viewportTop,
+					halfH * 0.4,
+					viewportHeight - halfH * 0.4,
+				)
+				opacity = 1
+			} else {
+				// Parallax-coupled position: when the anchor is exactly at
+				// viewport center, slip is at viewport center; otherwise
+				// the slip drifts at SLIP_PARALLAX_FACTOR * the anchor's
+				// own drift rate.
+				const offsetFromCenter = anchorAbsolute - viewportCenter
+				slipScreenY = halfH + offsetFromCenter * SLIP_PARALLAX_FACTOR
+				const distFromCenter = Math.abs(slipScreenY - halfH)
+				if (distFromCenter <= halfH) {
+					opacity = 1
+				} else if (distFromCenter >= fadeTailPx) {
+					opacity = 0
+				} else {
+					opacity = 1 - (distFromCenter - halfH) / (fadeTailPx - halfH)
+				}
+			}
+			if (opacity < SLIP_OPACITY_RENDER_THRESHOLD && !expanded) continue
+			placed.push({
+				groupKey: group.groupKey,
+				blockId: group.blockId,
+				notes: group.notes,
+				page: group.page,
+				expanded,
+				topPx: slipScreenY,
+				opacity,
+				accentColor: group.accentColor,
+			})
+		}
+		// Spread overlapping slips vertically — distinct anchors at nearly
+		// the same y still need clickable lanes. Skip the expanded slip
+		// because we want it locked to its computed top.
+		placed.sort((a, b) => a.topPx - b.topPx)
+		const foldedIndices: number[] = []
+		const foldedTops: number[] = []
+		for (let i = 0; i < placed.length; i += 1) {
+			const entry = placed[i]
+			if (entry.expanded) continue
+			foldedIndices.push(i)
+			foldedTops.push(entry.topPx)
+		}
+		const adjustedTops = spreadTopsWithSpacingPx(foldedTops, FOLDED_SLIP_HEIGHT + 12)
+		for (let n = 0; n < foldedIndices.length; n += 1) {
+			const idx = foldedIndices[n] as number
+			placed[idx] = { ...placed[idx], topPx: adjustedTops[n] ?? placed[idx].topPx } as (typeof placed)[number]
+		}
+		return placed
+	}, [expandedNoteId, groupedDots, pdfRailLayout])
+
 	const handleOpenCitationBlock = useCallback(
 		(paperId: string, blockId: string) => {
 			onOpenCitationBlock?.(paperId, blockId)
@@ -288,23 +466,22 @@ export function NotesPanel({
 				groupKey: string
 				notes: Note[]
 			},
-			el: HTMLButtonElement,
 		) => {
+			if (isSidebarCollapsed) {
+				onRequestExpandSidebar?.()
+			}
 			const isGroupExpanded = group.notes.some((note) => note.id === expandedNoteId)
 			if (isGroupExpanded) {
 				onExpand(null)
-				setPopoverAnchor(null)
 				return
 			}
-			setPopoverAnchor(el)
 			onExpand(group.notes[0]?.id ?? null)
 		},
-		[expandedNoteId, onExpand],
+		[expandedNoteId, isSidebarCollapsed, onExpand, onRequestExpandSidebar],
 	)
 
-	const handleClosePopover = useCallback(() => {
+	const handleCloseExpandedSlip = useCallback(() => {
 		onExpand(null)
-		setPopoverAnchor(null)
 	}, [onExpand])
 
 	const handleSelectGroupedNote = useCallback(
@@ -314,131 +491,165 @@ export function NotesPanel({
 		[onExpand],
 	)
 
-	// Resolve the popover anchor element from the current group key. Runs
-	// on `notes` change too so a freshly-created note's grouped dot —
-	// which mounts only after the TanStack Query invalidation refetches —
-	// gets picked up.
-	useEffect(() => {
-		if (!expandedGroup) {
-			setPopoverAnchor(null)
-			return
-		}
-		if (typeof document === "undefined") return
-		const escapedKey =
-			typeof CSS !== "undefined" && CSS.escape
-				? CSS.escape(expandedGroup.groupKey)
-				: expandedGroup.groupKey
-		const el = document.querySelector(`[data-note-group-key="${escapedKey}"]`)
-		if (el instanceof HTMLButtonElement) {
-			setPopoverAnchor((prev) => (prev === el ? prev : el))
-		}
-	}, [expandedGroup, notes])
-
-	// `onJumpToPage` and `onCreateAtCurrent` are no longer surfaced on
-	// the rail itself — note creation flows through cite-on-highlight /
-	// cite-on-block, and page navigation is left to the PDF's own scroll.
-	// Kept in the prop bag for now in case a future affordance reuses
-	// them.
+	// Note creation still lives elsewhere; the lane is strictly for
+	// navigating and editing existing anchored notes.
 	void onCreateAtCurrent
-	void onJumpToPage
+
+	const expandedSidebarWidth = SLIP_LANE_WIDTH + RAIL_STRIP_WIDTH + SIDEBAR_INSET_X * 2
 
 	return (
-		// 28px-wide strip glued to the main pane's right edge: line +
-		// dots only, no card / border / header / button.
-		<aside aria-label="Marginalia rail" className="relative h-full w-9 shrink-0">
-			<div className="absolute inset-y-6 right-4 left-0">
-				{/* Background rail line. */}
+		<aside
+			aria-label="Marginalia sidebar"
+			className="relative h-full shrink-0 overflow-visible transition-[width] duration-200"
+			data-sidebar-collapsed={isSidebarCollapsed ? "true" : "false"}
+			style={{ width: `${isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : expandedSidebarWidth}px` }}
+		>
+			<div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-border-subtle/80 to-transparent" />
+			<div className="relative flex h-full overflow-visible">
 				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute top-0 bottom-0 right-0 w-1 rounded-full bg-border-default/65"
-				/>
-				{/* Progress fill — this behaves like a media-player progress
-					bar: the track fills from the top down to the current reader
-					position. */}
+					className="absolute inset-y-0 right-0 flex overflow-visible pb-[4px] pt-[4px]"
+					style={{ left: `${SIDEBAR_INSET_X}px` }}
+				>
+					<div className="relative flex h-full overflow-visible">
+						{isSidebarCollapsed ? null : (
 				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute right-0 top-0 rounded-full bg-accent-800/92"
-					style={{
-						width: `${PROGRESS_BAR_WIDTH}px`,
-						height: `${progressFrac * 100}%`,
-					}}
-				/>
-				{/* Viewport lens — a subtle local window inside the progress
-					bar so the rail still hints at the visible PDF span. */}
+					className="relative h-full overflow-visible bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-bg-primary)_62%,var(--color-bg-secondary)_38%),var(--color-bg-secondary))]"
+					style={{ width: `${SLIP_LANE_WIDTH}px` }}
+				>
+					<div className="absolute inset-x-0 inset-y-6 overflow-visible" ref={laneInnerRef}>
+						{laneGroups.map((group) => {
+							const isExpanded = group.expanded
+							const note = isExpanded
+								? (group.notes.find((candidate) => candidate.id === expandedNoteId) ?? group.notes[0] ?? null)
+								: group.notes[0] ?? null
+							if (!note) return null
+							return isExpanded ? (
+								<ExpandedSlip
+									key={group.groupKey}
+									anchorPage={expandedAnchorPage}
+									annotationBlockIdById={annotationBlockIdById}
+									annotationOrdinalById={annotationOrdinalById}
+									blockNumber={
+										group.blockId ? (blockNumberByBlockId?.get(group.blockId) ?? null) : null
+									}
+									blockNumberByBlockId={blockNumberByBlockId}
+									colorByAnnotation={colorByAnnotation}
+									colorByBlock={colorByBlock}
+									groupLabel={groupLabelForPopover(group.notes, group.blockId, blockNumberByBlockId)}
+									note={note}
+									notes={group.notes}
+									onClose={handleCloseExpandedSlip}
+									onDelete={onDelete}
+									onEditorReady={onEditorReady}
+									onJumpToAnchor={
+										expandedAnchorPage != null
+											? () => onJumpToPage(expandedAnchorPage, note.anchorYRatio ?? undefined)
+											: undefined
+									}
+									onOpenCitationAnnotation={handleOpenCitationAnnotation}
+									onOpenCitationBlock={handleOpenCitationBlock}
+									onSelectNote={handleSelectGroupedNote}
+									laneAvailableHeight={laneInnerHeight}
+									topPx={group.topPx}
+								/>
+							) : (
+								<FoldedSlip
+									accentColor={group.accentColor}
+									active={group.notes.some((candidate) => candidate.id === expandedNoteId)}
+									annotationOrdinal={
+										note.anchorAnnotationId
+											? (annotationOrdinalById?.get(note.anchorAnnotationId) ?? null)
+											: null
+									}
+									blockNumber={
+										group.blockId ? (blockNumberByBlockId?.get(group.blockId) ?? null) : null
+									}
+									group={group}
+									key={group.groupKey}
+									note={note}
+									onOpen={() => handleDotClick(group)}
+									opacity={group.opacity}
+									sourceExcerpt={sourceExcerptByNote?.get(note.id) ?? ""}
+									topPx={group.topPx}
+								/>
+							)
+						})}
+					</div>
+				</div>
+						)}
 				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute right-[1px] rounded-full bg-white/20"
-					style={{
-						top: `${viewportWindow.top * 100}%`,
-						width: `${Math.max(2, PROGRESS_BAR_WIDTH - 2)}px`,
-						height: `${Math.max(0.8, (viewportWindow.bottom - viewportWindow.top) * 100)}%`,
-					}}
-				/>
-				{/* Progress knob at the live viewport anchor. */}
-				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute rounded-full bg-accent-800"
-					style={{
-						top: `calc(${progressFrac * 100}% - ${PROGRESS_KNOB_HEIGHT / 2}px)`,
-						right: `${-(PROGRESS_KNOB_WIDTH - PROGRESS_BAR_WIDTH) / 2}px`,
-						width: `${PROGRESS_KNOB_WIDTH}px`,
-						height: `${PROGRESS_KNOB_HEIGHT}px`,
-					}}
-				/>
-				{groupedDots.map((placed) => (
-					<DotButton
-						key={placed.groupKey}
-						active={placed.notes.some((note) => note.id === expandedNoteId)}
-						background={placed.background}
-						groupKey={placed.groupKey}
-						isCitingSelectedBlock={placed.notes.some((note) => activeCitingNoteIds.has(note.id))}
-						isCurrentPage={placed.page === currentPage}
-						onClick={(el) => handleDotClick(placed, el)}
-						primaryNoteId={placed.notes[0]?.id ?? placed.groupKey}
-						rightOffset={placed.rightOffset}
-						srLabel={placed.srLabel}
-						topPercent={placed.top * 100}
-						tooltip={placed.tooltip}
-						visualScale={placed.visualScale}
-						activeOutlineColor={
-							placed.notes.some((candidate) => candidate.id === expandedNoteId) && expandedNote
-								? (dotColorFor(expandedNote, colorByBlock, colorByAnnotation) ?? undefined)
-								: undefined
-						}
-					/>
-				))}
+					className="relative h-full shrink-0"
+					style={{ width: `${RAIL_STRIP_WIDTH}px` }}
+				>
+					<div
+						className="absolute left-0"
+						style={{
+							top: `${RAIL_EDGE_TOP}px`,
+							bottom: `${RAIL_EDGE_BOTTOM}px`,
+							right: `${RAIL_EDGE_RIGHT}px`,
+						}}
+					>
+						{/* Scrollbar groove — a thin pill running the full rail
+							height. Background, no fill from the top. */}
+						<div
+							aria-hidden="true"
+							className="pointer-events-none absolute top-0 bottom-0 right-0 rounded-full bg-border-subtle/85"
+							style={{ width: `${PROGRESS_BAR_WIDTH}px` }}
+						/>
+						{/* Scrollbar thumb — sized to the visible viewport
+							(`viewportWindow`), slid to current scroll position.
+							Reads as a native browser scrollbar instead of a
+							media-player progress fill. */}
+						<div
+							aria-hidden="true"
+							className="pointer-events-none absolute right-0 rounded-full bg-text-tertiary/55"
+							style={{
+								top: `${viewportWindow.top * 100}%`,
+								width: `${PROGRESS_BAR_WIDTH}px`,
+								height: `${Math.max(2, (viewportWindow.bottom - viewportWindow.top) * 100)}%`,
+							}}
+						/>
+						{/* Accent pin marking the precise (page, yRatio) the
+							reader is anchored to — useful when the thumb spans
+							more than a page. Sits on the inner edge of the
+							thumb so it never overlaps the dots column. */}
+						<div
+							aria-hidden="true"
+							className="pointer-events-none absolute rounded-sm bg-accent-700"
+							style={{
+								top: `calc(${progressFrac * 100}% - 1px)`,
+								right: `${PROGRESS_BAR_WIDTH}px`,
+								width: `${PROGRESS_KNOB_WIDTH / 2}px`,
+								height: `2px`,
+							}}
+						/>
+						{groupedDots.map((placed) => (
+							<DotButton
+								key={placed.groupKey}
+								active={placed.notes.some((note) => note.id === expandedNoteId)}
+								background={placed.background}
+								groupKey={placed.groupKey}
+								isCitingSelectedBlock={placed.notes.some((note) => activeCitingNoteIds.has(note.id))}
+								isCurrentPage={placed.page === currentPage}
+								onClick={() => handleDotClick(placed)}
+								primaryNoteId={placed.notes[0]?.id ?? placed.groupKey}
+								rightOffset={placed.rightOffset}
+								srLabel={placed.srLabel}
+								topPercent={placed.top * 100}
+								tooltip={placed.tooltip}
+								visualScale={placed.visualScale}
+								activeOutlineColor={
+									placed.notes.some((candidate) => candidate.id === expandedNoteId) && expandedNote
+										? (dotColorFor(expandedNote, colorByBlock, colorByAnnotation) ?? undefined)
+										: undefined
+								}
+							/>
+						))}
+					</div>
+				</div>
+					</div>
+				</div>
 			</div>
-			{expandedNote && expandedGroup && popoverAnchor ? (
-				<NotePopover
-					anchor={popoverAnchor}
-					anchorPage={expandedAnchorPage}
-					blockNumber={
-						expandedGroup.blockId
-							? (blockNumberByBlockId?.get(expandedGroup.blockId) ?? null)
-							: null
-					}
-					groupLabel={groupLabelForPopover(
-						expandedGroup.notes,
-						expandedGroup.blockId,
-						blockNumberByBlockId,
-					)}
-					colorByAnnotation={colorByAnnotation}
-					colorByBlock={colorByBlock}
-					note={expandedNote}
-					notes={expandedGroup.notes}
-					onClose={handleClosePopover}
-					onDelete={onDelete}
-					onEditorReady={onEditorReady}
-					onSelectNote={handleSelectGroupedNote}
-					onJumpToAnchor={
-						expandedAnchorPage != null
-							? () => onJumpToPage(expandedAnchorPage, expandedNote.anchorYRatio ?? undefined)
-							: undefined
-					}
-					onOpenCitationBlock={handleOpenCitationBlock}
-					onOpenCitationAnnotation={handleOpenCitationAnnotation}
-				/>
-			) : null}
 		</aside>
 	)
 }
@@ -457,32 +668,24 @@ function dotColorFor(
 	return null
 }
 
-function tooltipFor(note: Note, blockNumberByBlockId?: Map<string, number>): string {
+function tooltipFor(
+	note: Note,
+	blockNumberByBlockId?: Map<string, number>,
+	annotationOrdinalById?: Map<string, number>,
+): string {
 	const parts: string[] = []
 	if (note.title) parts.push(note.title)
-	const sourceTag = (() => {
-		switch (note.anchorKind) {
-			case "highlight":
-				return "highlight"
-			case "underline":
-				return "underline"
-			case "block":
-				if (note.anchorBlockId) {
-					const n = blockNumberByBlockId?.get(note.anchorBlockId)
-					return n ? `block ${n}` : "block"
-				}
-				return null
-			default:
-				if (note.anchorBlockId) {
-					const n = blockNumberByBlockId?.get(note.anchorBlockId)
-					return n ? `block ${n}` : "block"
-				}
-				return null
-		}
-	})()
-	const pageTag = note.anchorPage ? `p.${note.anchorPage}` : null
-	const meta = [sourceTag, pageTag].filter(Boolean).join(" · ")
-	if (meta) parts.push(meta)
+	const blockNumber = note.anchorBlockId ? (blockNumberByBlockId?.get(note.anchorBlockId) ?? null) : null
+	const annotationOrdinal = note.anchorAnnotationId
+		? (annotationOrdinalById?.get(note.anchorAnnotationId) ?? null)
+		: null
+	const meta = formatSourceLabel({
+		kind: note.anchorKind,
+		page: note.anchorPage,
+		blockNumber,
+		annotationOrdinal,
+	})
+	if (meta && meta !== "Untitled") parts.push(meta)
 	return parts.join(" — ")
 }
 
@@ -491,10 +694,11 @@ function tooltipForGroup(
 	page: number,
 	blockId: string | null,
 	blockNumberByBlockId?: Map<string, number>,
+	annotationOrdinalById?: Map<string, number>,
 ): string {
-	if (notes.length === 1) return tooltipFor(notes[0], blockNumberByBlockId)
+	if (notes.length === 1) return tooltipFor(notes[0], blockNumberByBlockId, annotationOrdinalById)
 	const blockTag = blockLabelFor(blockId, blockNumberByBlockId)
-	const parts = [blockTag, `p.${page}`, `${notes.length} notes`].filter(Boolean)
+	const parts = [blockTag, `p. ${page}`, `${notes.length} notes`].filter(Boolean)
 	return parts.join(" · ")
 }
 
@@ -511,13 +715,9 @@ function groupLabelForPopover(
 }
 
 function blockLabelFor(blockId: string | null, blockNumberByBlockId?: Map<string, number>) {
-	const blockTag = blockId
-		? (() => {
-				const n = blockNumberByBlockId?.get(blockId)
-				return n ? `block ${n}` : "block"
-			})()
-		: null
-	return blockTag
+	if (!blockId) return null
+	const n = blockNumberByBlockId?.get(blockId)
+	return n ? `block ${n}` : "block"
 }
 
 function noteAnchorRank(note: Note) {
@@ -536,26 +736,102 @@ function compareNotesByAnchor(a: Note, b: Note) {
 	return a.id.localeCompare(b.id)
 }
 
-function sourceLabelForNote(note: Note, notes: Note[], blockNumber: number | null) {
+// Canonical source label, shared across slip kicker tags, dot tooltips,
+// and the popover crumb so reader sees one consistent identifier:
+//   highlight 1 p. 12 blk. 7
+//   underline 3 p. 4 blk. 9
+//   block 12
+//   block 12 note 2  (multiple notes anchored to the same block)
+//
+// `annotationOrdinal` is paper-wide for highlight/underline (the user's
+// spec — "highlight 1" is the first highlight in the paper, not within a
+// group). When the ordinal isn't available we drop the number rather
+// than make one up from group-local position.
+function formatSourceLabel(args: {
+	kind: Note["anchorKind"]
+	page: number | null
+	blockNumber: number | null
+	annotationOrdinal: number | null
+	noteIndexInBlockGroup?: number | null
+}): string {
+	const { kind, page, blockNumber, annotationOrdinal, noteIndexInBlockGroup } = args
+	if (kind === "highlight" || kind === "underline") {
+		const ordinal = annotationOrdinal != null && annotationOrdinal > 0 ? ` ${annotationOrdinal}` : ""
+		const parts = [`${kind}${ordinal}`]
+		if (page) parts.push(`p. ${page}`)
+		if (blockNumber) parts.push(`blk. ${blockNumber}`)
+		return parts.join(" ")
+	}
+	// Block-anchored or page-only.
+	if (blockNumber) {
+		const base = `block ${blockNumber}`
+		if (noteIndexInBlockGroup != null && noteIndexInBlockGroup > 0) {
+			return `${base} note ${noteIndexInBlockGroup}`
+		}
+		return base
+	}
+	if (page) return `p. ${page}`
+	return "Untitled"
+}
+
+function sourceLabelForNote(
+	note: Note,
+	notes: Note[],
+	blockNumber: number | null,
+	annotationOrdinal: number | null = null,
+) {
 	if (note.anchorKind === "block") {
-		const blockLabel = blockNumber ? `block ${blockNumber}` : "block"
 		const blockNotes = notes
 			.filter((candidate) => candidate.anchorKind === "block")
 			.sort(compareNotesByAnchor)
-		if (blockNotes.length <= 1) return blockLabel
-		const index = blockNotes.findIndex((candidate) => candidate.id === note.id)
-		return `${blockLabel} note ${index + 1}`
+		const noteIndex =
+			blockNotes.length > 1
+				? blockNotes.findIndex((candidate) => candidate.id === note.id) + 1
+				: null
+		return formatSourceLabel({
+			kind: "block",
+			page: note.anchorPage,
+			blockNumber,
+			annotationOrdinal: null,
+			noteIndexInBlockGroup: noteIndex,
+		})
 	}
-	const type = note.anchorKind === "underline" ? "underline" : "highlight"
-	const typeNotes = notes
-		.filter((candidate) => candidate.anchorKind === note.anchorKind)
-		.sort(compareNotesByAnchor)
-	const ordinal = Math.max(1, typeNotes.findIndex((candidate) => candidate.id === note.id) + 1)
-	const prefix: string[] = []
-	if (note.anchorPage) prefix.push(`p${note.anchorPage}`)
-	if (blockNumber) prefix.push(`blk${blockNumber}`)
-	prefix.push(type)
-	return `${prefix.join(".")} ${ordinal}`
+	return formatSourceLabel({
+		kind: note.anchorKind,
+		page: note.anchorPage,
+		blockNumber,
+		annotationOrdinal,
+	})
+}
+
+// Folded slip body. Precedence:
+//   1. The note's own body excerpt (`note.excerpt`) — what the user
+//      *wrote* about this anchor, the most marginalia-true preview.
+//   2. The source text excerpt (the underlying block / annotation),
+//      passed in from PaperWorkspace — useful when the note is empty.
+//   3. The user-set title (skips the default "Untitled").
+//   4. A neutral "{N} notes" or "Source preview unavailable" fallback.
+function foldedSlipExcerpt(note: Note, sourceExcerpt: string, noteCount: number) {
+	const noteExcerpt = (note.excerpt ?? "").trim()
+	if (noteExcerpt.length > 0) return noteExcerpt
+	const sourceText = sourceExcerpt.trim()
+	if (sourceText.length > 0) return sourceText
+	const title = note.title.trim()
+	if (title.length > 0 && title.toLowerCase() !== "untitled") return title
+	return noteCount > 1 ? `${noteCount} notes anchored here` : "Source preview unavailable"
+}
+
+function slipSourceTagLabel(
+	note: Note,
+	notes: Note[],
+	blockNumber: number | null,
+	annotationOrdinal: number | null,
+) {
+	const label = sourceLabelForNote(note, notes, blockNumber, annotationOrdinal)
+	if (label === "Untitled") {
+		return note.anchorPage ? `p. ${note.anchorPage}` : "anchor"
+	}
+	return label
 }
 
 function dotColorsForGroup(
@@ -696,16 +972,34 @@ function minimapViewportWindow(
 }
 
 function spreadDotTops(rawTops: number[]) {
+	return spreadTopsWithSpacing(rawTops, MIN_DOT_SPACING_FRAC)
+}
+
+// Pixel-space variant of `spreadTopsWithSpacing`. Slips that share a
+// near-identical PDF anchor will end up at near-identical screen y in
+// parallax mode; this nudges later entries down so each slip remains
+// individually clickable. Order in / order out is preserved (callers
+// rely on it to map back to the original list).
+function spreadTopsWithSpacingPx(rawTops: number[], minSpacingPx: number) {
 	if (rawTops.length === 0) return rawTops
 	const tops = [...rawTops]
 	for (let i = 1; i < tops.length; i += 1) {
-		tops[i] = Math.max(tops[i], tops[i - 1]! + MIN_DOT_SPACING_FRAC)
+		tops[i] = Math.max(tops[i] as number, (tops[i - 1] as number) + minSpacingPx)
+	}
+	return tops
+}
+
+function spreadTopsWithSpacing(rawTops: number[], minSpacingFrac: number) {
+	if (rawTops.length === 0) return rawTops
+	const tops = [...rawTops]
+	for (let i = 1; i < tops.length; i += 1) {
+		tops[i] = Math.max(tops[i], tops[i - 1]! + minSpacingFrac)
 	}
 	const maxTop = 1
 	if (tops[tops.length - 1]! > maxTop) {
 		tops[tops.length - 1] = maxTop
 		for (let i = tops.length - 2; i >= 0; i -= 1) {
-			tops[i] = Math.min(tops[i]!, tops[i + 1]! - MIN_DOT_SPACING_FRAC)
+			tops[i] = Math.min(tops[i]!, tops[i + 1]! - minSpacingFrac)
 		}
 	}
 	for (let i = 0; i < tops.length; i += 1) {
@@ -714,25 +1008,25 @@ function spreadDotTops(rawTops: number[]) {
 	return tops
 }
 
-function defaultPopoverSize() {
+function defaultSlipSize() {
 	if (typeof window === "undefined") {
 		return {
-			width: POPOVER_DEFAULT_WIDTH,
-			height: POPOVER_DEFAULT_HEIGHT,
+			width: SLIP_DEFAULT_WIDTH,
+			height: SLIP_DEFAULT_HEIGHT,
 		}
 	}
-	const maxViewportWidth = Math.max(POPOVER_MIN_WIDTH, window.innerWidth - 48)
-	const maxViewportHeight = Math.max(POPOVER_MIN_HEIGHT, window.innerHeight - 48)
+	const maxViewportWidth = Math.max(SLIP_MIN_WIDTH, window.innerWidth - 72)
+	const maxViewportHeight = Math.max(SLIP_MIN_HEIGHT, window.innerHeight - 72)
 	return {
 		width: clamp(
-			Math.round(window.innerWidth * POPOVER_VIEWPORT_WIDTH_FRACTION),
-			POPOVER_MIN_WIDTH,
-			Math.min(POPOVER_MAX_WIDTH, maxViewportWidth),
+			Math.round(window.innerWidth * 0.31),
+			SLIP_MIN_WIDTH,
+			Math.min(SLIP_MAX_WIDTH, maxViewportWidth),
 		),
 		height: clamp(
-			Math.round(window.innerHeight * POPOVER_VIEWPORT_HEIGHT_FRACTION),
-			POPOVER_MIN_HEIGHT,
-			Math.min(POPOVER_MAX_HEIGHT, maxViewportHeight),
+			Math.round(window.innerHeight * 0.66),
+			SLIP_MIN_HEIGHT,
+			Math.min(SLIP_MAX_HEIGHT, maxViewportHeight),
 		),
 	}
 }
@@ -757,7 +1051,7 @@ const DotButton = memo(function DotButton({
 	groupKey: string
 	isCitingSelectedBlock: boolean
 	isCurrentPage: boolean
-	onClick: (el: HTMLButtonElement) => void
+	onClick: () => void
 	primaryNoteId: string
 	rightOffset: number
 	srLabel: string
@@ -780,7 +1074,7 @@ const DotButton = memo(function DotButton({
 			data-rail-top={topPercent.toFixed(3)}
 			onClick={(e) => {
 				e.stopPropagation()
-				onClick(e.currentTarget)
+				onClick()
 			}}
 			style={{
 				top: `calc(${topPercent}% - ${radius}px)`,
@@ -810,13 +1104,93 @@ const DotButton = memo(function DotButton({
 	)
 })
 
-function NotePopover({
-	anchor,
-	anchorPage,
+function FoldedSlip({
+	accentColor,
+	active,
+	annotationOrdinal,
 	blockNumber,
+	group,
+	note,
+	onOpen,
+	opacity,
+	sourceExcerpt,
+	topPx,
+}: {
+	accentColor: string
+	active: boolean
+	annotationOrdinal: number | null
+	blockNumber: number | null
+	group: {
+		groupKey: string
+		notes: Note[]
+		page: number
+	}
+	note: Note
+	onOpen: () => void
+	opacity: number
+	sourceExcerpt: string
+	topPx: number
+}) {
+	const excerpt = foldedSlipExcerpt(note, sourceExcerpt, group.notes.length)
+	const sourceTagLabel = slipSourceTagLabel(note, group.notes, blockNumber, annotationOrdinal)
+	const effectiveOpacity = active ? Math.max(opacity, 0.92) : opacity
+	return (
+		<button
+			aria-label={`Open note ${note.title || "Untitled"}`}
+			className="absolute z-[2] overflow-hidden rounded-2xl border border-border-default/80 bg-white/96 text-left shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition-[transform,box-shadow,opacity,border-color] duration-200 hover:-translate-x-0.5 hover:shadow-[0_18px_34px_rgba(15,23,42,0.14)]"
+			data-slip-group-key={group.groupKey}
+			onClick={onOpen}
+			style={{
+				left: `${SLIP_LANE_INSET_LEFT}px`,
+				right: `${SLIP_LANE_INSET_RIGHT}px`,
+				top: `${topPx - FOLDED_SLIP_HEIGHT / 2}px`,
+				height: `${FOLDED_SLIP_HEIGHT}px`,
+				borderLeft: `3px solid ${accentColor}`,
+				opacity: effectiveOpacity,
+			}}
+			type="button"
+		>
+			<div className="flex h-full flex-col">
+				<div
+					aria-hidden="true"
+					className="shrink-0 border-b border-border-subtle/80 bg-[color-mix(in_srgb,var(--color-bg-secondary)_68%,white)]"
+					style={{ height: `${FOLDED_SLIP_HEADER_HEIGHT}px` }}
+				/>
+				<div className="flex-1 px-3 pt-3 pb-3">
+				<div className="mb-2 flex items-center gap-1.5">
+					<span
+						className="inline-flex items-center rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.02em]"
+						style={{
+							color: accentColor,
+							backgroundColor: `color-mix(in srgb, ${accentColor} 14%, white)`,
+							boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accentColor} 30%, white)`,
+						}}
+					>
+						{sourceTagLabel}
+					</span>
+					{group.notes.length > 1 ? (
+						<span className="inline-flex items-center rounded-md bg-bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary">
+							{`+${group.notes.length - 1}`}
+						</span>
+					) : null}
+				</div>
+				<p className="line-clamp-3 font-serif text-[13.5px] leading-6 text-text-primary">{excerpt}</p>
+				</div>
+			</div>
+		</button>
+	)
+}
+
+function ExpandedSlip({
+	anchorPage,
+	annotationBlockIdById,
+	annotationOrdinalById,
+	blockNumber,
+	blockNumberByBlockId,
 	colorByAnnotation,
 	colorByBlock,
 	groupLabel,
+	laneAvailableHeight,
 	note,
 	notes,
 	onClose,
@@ -826,13 +1200,20 @@ function NotePopover({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	onSelectNote,
+	topPx,
 }: {
-	anchor: HTMLElement
 	anchorPage: number | null
+	annotationBlockIdById?: Map<string, string>
+	annotationOrdinalById?: Map<string, number>
 	blockNumber: number | null
+	blockNumberByBlockId?: Map<string, number>
 	colorByAnnotation?: Map<string, string>
 	colorByBlock?: Map<string, string>
 	groupLabel: string
+	// Measured height of the lane container (after inset-y-6 padding).
+	// Used to clamp the slip's vertical position so it never slides under
+	// the workspace's top chrome or off the bottom of the pane.
+	laneAvailableHeight: number
 	note: Note
 	notes: Note[]
 	onClose: () => void
@@ -847,20 +1228,9 @@ function NotePopover({
 		yRatio?: number,
 	) => void
 	onSelectNote: (noteId: string) => void
+	topPx: number
 }) {
-	const popoverRef = useRef<HTMLDivElement | null>(null)
-	const [position, setPosition] = useState<{
-		top: number
-		left: number
-		side: "left" | "right"
-		anchorOffsetY: number
-	} | null>(null)
-	// Popover dimensions are user-resizable now that the marginalia frame
-	// is gone. Drag the bottom-left corner (the corner facing the PDF) to
-	// resize; left edge stays anchored to where the popover currently
-	// sits, so a wider popover grows further into the PDF rather than
-	// pushing into the rail.
-	const [size, setSize] = useState<{ width: number; height: number }>(() => defaultPopoverSize())
+	const [size, setSize] = useState<{ width: number; height: number }>(() => defaultSlipSize())
 	const stackedNotes = useMemo(() => [...notes].sort(compareNotesByAnchor), [notes])
 	const activeAccentColor =
 		dotColorFor(note, colorByBlock, colorByAnnotation) ?? "var(--color-accent-600)"
@@ -895,86 +1265,18 @@ function NotePopover({
 		startWidth: number
 		startHeight: number
 	} | null>(null)
-
-	// Compute popover position relative to the anchor dot. The popover
-	// hangs to the LEFT of the rail (toward the PDF), so the user's eye
-	// travels back from the dot into the document where the cited
-	// passage lives. Re-runs on resize so the editor stays in view if
-	// the viewport reflows.
 	useEffect(() => {
-		const reposition = () => {
-			const rect = anchor.getBoundingClientRect()
-			const anchorCenterY = rect.top + rect.height / 2
-			const top = clamp(
-				anchorCenterY - POPOVER_ANCHOR_MARGIN * 2,
-				12,
-				window.innerHeight - size.height - 12,
-			)
-			let left = rect.left - size.width - POPOVER_GAP
-			let side: "left" | "right" = "left"
-			// If we'd run off the left edge (very narrow viewport or rail
-			// pinned far left), fall back to the right side of the dot.
-			if (left < 12) {
-				left = rect.right + POPOVER_GAP
-				side = "right"
-			}
-			setPosition((prev) => {
-				const nextOffsetY = clamp(
-					anchorCenterY - top,
-					POPOVER_ANCHOR_MARGIN,
-					size.height - POPOVER_ANCHOR_MARGIN,
-				)
-				if (
-					prev &&
-					prev.top === top &&
-					prev.left === left &&
-					prev.side === side &&
-					prev.anchorOffsetY === nextOffsetY
-				) {
-					return prev
-				}
-				return {
-					top,
-					left,
-					side,
-					anchorOffsetY: nextOffsetY,
-				}
-			})
-		}
-		reposition()
-		window.addEventListener("scroll", reposition, true)
-		window.addEventListener("resize", reposition)
-		return () => {
-			window.removeEventListener("scroll", reposition, true)
-			window.removeEventListener("resize", reposition)
-		}
-	}, [anchor, size.height, size.width])
-
-	// Click-outside / Esc to close. The popover itself is in a portal, so
-	// "outside" means anywhere not inside `popoverRef` and not the anchor
-	// dot (whose own click handler manages toggle state).
-	useEffect(() => {
-		const onPointerDown = (event: PointerEvent) => {
-			const target = event.target as Node | null
-			if (!target) return
-			if (popoverRef.current?.contains(target)) return
-			if (anchor.contains(target)) return
-			onClose()
-		}
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === "Escape") onClose()
 		}
-		window.addEventListener("pointerdown", onPointerDown, true)
 		window.addEventListener("keydown", onKeyDown)
 		return () => {
-			window.removeEventListener("pointerdown", onPointerDown, true)
 			window.removeEventListener("keydown", onKeyDown)
 		}
-	}, [anchor, onClose])
+	}, [onClose])
 
-	// Resize: drag bottom-left corner. dx is inverted because growing
-	// the popover means the LEFT edge moves left (toward the PDF), which
-	// looks like negative pointer-x delta from the corner's perspective.
+	// Resize from the bottom-left so the expanded editor grows toward the
+	// PDF while its right edge stays anchored to the rail.
 	const onResizePointerDown = useCallback(
 		(event: ReactPointerEvent<HTMLDivElement>) => {
 			event.preventDefault()
@@ -996,8 +1298,8 @@ function NotePopover({
 			const dx = event.clientX - drag.startX
 			const dy = event.clientY - drag.startY
 			setSize({
-				width: clamp(drag.startWidth - dx, POPOVER_MIN_WIDTH, POPOVER_MAX_WIDTH),
-				height: clamp(drag.startHeight + dy, POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT),
+				width: clamp(drag.startWidth - dx, SLIP_MIN_WIDTH, SLIP_MAX_WIDTH),
+				height: clamp(drag.startHeight + dy, SLIP_MIN_HEIGHT, SLIP_MAX_HEIGHT),
 			})
 		}
 		const onUp = () => {
@@ -1013,55 +1315,58 @@ function NotePopover({
 		}
 	}, [])
 
-	if (typeof document === "undefined" || !position) return null
+	// `topPx` is the slip's anchor-y inside the lane (PDF-coupled). We
+	// center the editor on it, then clamp against the lane's measured
+	// height so the top edge stays clear of the page header and the
+	// bottom edge stays inside the workspace pane.
+	const idealTop = topPx - size.height / 2
+	const minTop = SLIP_EXPANDED_EDGE_PAD
+	const maxTop =
+		laneAvailableHeight > 0
+			? Math.max(minTop, laneAvailableHeight - size.height - SLIP_EXPANDED_EDGE_PAD)
+			: idealTop
+	const clampedTop = Math.min(Math.max(idealTop, minTop), maxTop)
 
-	return createPortal(
+	return (
 		<div
-			className="fixed z-[40] flex flex-col rounded-md border border-border-default bg-bg-overlay shadow-[var(--shadow-popover)]"
-			ref={popoverRef}
+			className="absolute z-[4] flex flex-col overflow-hidden rounded-[18px] border border-border-default bg-bg-overlay shadow-[0_24px_64px_rgba(15,23,42,0.18)]"
 			style={{
-				top: `${position.top}px`,
-				left: `${position.left}px`,
+				top: `${clampedTop}px`,
+				right: `${SLIP_EXPANDED_ANCHOR_RIGHT}px`,
 				width: `${size.width}px`,
 				height: `${size.height}px`,
+				borderLeft: `3px solid ${activeAccentColor}`,
 			}}
 		>
 			<div
 				aria-hidden="true"
-				className="pointer-events-none absolute"
+				className="pointer-events-none absolute right-[-34px] top-1/2 -translate-y-1/2"
 				style={{
-					top: `${position.anchorOffsetY - POPOVER_CONNECTOR_DOT / 2}px`,
-					width: `${POPOVER_CONNECTOR_SPAN}px`,
-					...(position.side === "left"
-						? { left: `${-POPOVER_CONNECTOR_SPAN}px` }
-						: { right: `${-POPOVER_CONNECTOR_SPAN}px` }),
+					width: `${SLIP_ANCHOR_LINE_SPAN}px`,
 				}}
 			>
-				<div className="relative" style={{ height: `${POPOVER_CONNECTOR_DOT}px`, width: "100%" }}>
+				<div className="relative" style={{ height: `${SLIP_ANCHOR_DOT}px`, width: "100%" }}>
 					<span
 						className="absolute top-1/2 h-px -translate-y-1/2"
 						style={{
 							backgroundColor: activeAccentColor,
 							opacity: 0.58,
-							width: `${POPOVER_CONNECTOR_SPAN - POPOVER_CONNECTOR_DOT - 12}px`,
-							...(position.side === "left"
-								? { right: `${POPOVER_CONNECTOR_DOT}px` }
-								: { left: `${POPOVER_CONNECTOR_DOT}px` }),
+							left: 0,
+							width: `${SLIP_ANCHOR_LINE_SPAN - SLIP_ANCHOR_DOT}px`,
 						}}
 					/>
 					<span
-						className="absolute top-1/2 -translate-y-1/2 rounded-full border-2 border-white"
+						className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border-2 border-white"
 						style={{
-							width: `${POPOVER_CONNECTOR_DOT}px`,
-							height: `${POPOVER_CONNECTOR_DOT}px`,
+							width: `${SLIP_ANCHOR_DOT}px`,
+							height: `${SLIP_ANCHOR_DOT}px`,
 							backgroundColor: activeAccentColor,
 							boxShadow: "0 0 0 4px rgba(255,255,255,0.92), 0 6px 16px rgba(15,23,42,0.18)",
-							...(position.side === "left" ? { right: 0 } : { left: 0 }),
 						}}
 					/>
 				</div>
 			</div>
-			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle px-2.5 py-1.5 text-xs text-text-tertiary">
+			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/60 px-2.5 py-1.5 text-xs text-text-tertiary">
 				{onJumpToAnchor || (note.paperId && (note.anchorAnnotationId || note.anchorBlockId)) ? (
 					<button
 						aria-label="Jump to note anchor"
@@ -1091,7 +1396,7 @@ function NotePopover({
 					</button>
 				</div>
 			</div>
-			{stackedNotes.length > 1 ? (
+			{stackedNotes.length > 0 ? (
 				<div className="shrink-0 border-b border-border-subtle bg-bg-primary/55 px-3 py-3">
 					<div className="relative space-y-1.5 pl-5">
 						<div className="absolute bottom-2 left-[7px] top-2 w-px bg-border-subtle" />
@@ -1118,6 +1423,9 @@ function NotePopover({
 					onEditorReady={onEditorReady}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
+					annotationBlockIdById={annotationBlockIdById}
+					annotationOrdinalById={annotationOrdinalById}
+					blockNumberByBlockId={blockNumberByBlockId}
 				/>
 			</div>
 			{/* Resize handle in the bottom-LEFT corner — the corner facing the
@@ -1133,8 +1441,7 @@ function NotePopover({
 			>
 				<span className="absolute bottom-1 left-1 h-2 w-2 border-b-2 border-l-2 border-border-default/80" />
 			</div>
-		</div>,
-		document.body,
+		</div>
 	)
 }
 

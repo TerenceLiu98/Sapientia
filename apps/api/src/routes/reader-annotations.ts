@@ -7,6 +7,7 @@ import {
 	createReaderAnnotation,
 	deleteReaderAnnotation,
 	listReaderAnnotationsForPaper,
+	restoreReaderAnnotation,
 	updateReaderAnnotationColor,
 } from "../services/reader-annotation"
 
@@ -121,10 +122,23 @@ readerAnnotationRoutes.patch("/reader-annotations/:id", requireAuth, async (c) =
 
 readerAnnotationRoutes.delete("/reader-annotations/:id", requireAuth, async (c) => {
 	const user = c.get("user")
-	const removed = await deleteReaderAnnotation({
+	const result = await deleteReaderAnnotation({
 		annotationId: c.req.param("id"),
 		userId: user.id,
 	})
-	if (!removed) return c.json({ error: "not found" }, 404)
+	if (!result.removed) return c.json({ error: "not found" }, 404)
+	// Tell the client whether the row stuck around as a ghost so it can
+	// keep rendering a faint outline (and not strip it from the cache).
+	if (result.softDeleted) return c.json({ softDeleted: true }, 200)
 	return c.body(null, 204)
+})
+
+readerAnnotationRoutes.post("/reader-annotations/:id/restore", requireAuth, async (c) => {
+	const user = c.get("user")
+	const restored = await restoreReaderAnnotation({
+		annotationId: c.req.param("id"),
+		userId: user.id,
+	})
+	if (!restored) return c.json({ error: "not found" }, 404)
+	return c.json(restored)
 })

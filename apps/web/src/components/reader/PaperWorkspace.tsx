@@ -14,6 +14,7 @@ import {
 	useCreateReaderAnnotation,
 	useDeleteReaderAnnotation,
 	useReaderAnnotations,
+	useRestoreReaderAnnotation,
 	useUpdateReaderAnnotationColor,
 } from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
@@ -32,12 +33,18 @@ import {
 type ViewMode = "pdf-only" | "md-only"
 
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
+const NOTES_SIDEBAR_COLLAPSED_KEY = "paperWorkspace.notesSidebarCollapsed"
 const AUTO_FOLLOW_LOCK_MS = 1400
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
 	const v = window.localStorage.getItem(VIEW_MODE_KEY)
 	return v === "pdf-only" || v === "md-only" ? v : "pdf-only"
+}
+
+function loadNotesSidebarCollapsed() {
+	if (typeof window === "undefined") return false
+	return window.localStorage.getItem(NOTES_SIDEBAR_COLLAPSED_KEY) === "1"
 }
 
 export function PaperWorkspace({ paperId }: { paperId: string }) {
@@ -73,6 +80,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const clearBlockHighlight = useClearBlockHighlight(paperId)
 	const createReaderAnnotation = useCreateReaderAnnotation(paperId)
 	const deleteReaderAnnotation = useDeleteReaderAnnotation(paperId, workspace?.id)
+	const restoreReaderAnnotation = useRestoreReaderAnnotation(paperId, workspace?.id)
 	const updateReaderAnnotationColor = useUpdateReaderAnnotationColor(paperId, workspace?.id)
 	const { palette } = usePalette()
 
@@ -489,6 +497,13 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		[deleteReaderAnnotation],
 	)
 
+	const handleRestoreReaderAnnotation = useCallback(
+		async (annotationId: string) => {
+			await restoreReaderAnnotation.mutateAsync(annotationId)
+		},
+		[restoreReaderAnnotation],
+	)
+
 	const handleUpdateReaderAnnotationColor = useCallback(
 		async (annotationId: string, color: string) => {
 			await updateReaderAnnotationColor.mutateAsync({ annotationId, color })
@@ -519,6 +534,50 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const colorByAnnotation = useMemo(() => {
 		const map = new Map<string, string>()
 		for (const annotation of readerAnnotations) map.set(annotation.id, annotation.color)
+		return map
+	}, [readerAnnotations])
+
+	// annotationId → blockId of the structural block whose bbox the
+	// annotation visually overlaps. Lets the canonical label include
+	// `blk. N` even though annotations themselves don't store a block id
+	// (the block id is stable across re-parse — annotation ids aren't —
+	// so we don't store this; we recompute on demand).
+	const annotationBlockIdById = useMemo(() => {
+		const map = new Map<string, string>()
+		for (const annotation of readerAnnotations) {
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") continue
+			const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+			if (!bbox) continue
+			const block = findOverlappingBlock(blocks ?? [], annotation.page, bbox)
+			if (block) map.set(annotation.id, block.blockId)
+		}
+		return map
+	}, [blocks, readerAnnotations])
+
+	// annotationId → 1-based ordinal among the paper's annotations of
+	// the same kind. Sorted by (page, yRatio, createdAt) so the numbering
+	// follows reading order rather than creation order. Drives the
+	// canonical "highlight 1 p. 12 blk. 7" label across the marginalia
+	// rail, citation chips, and tooltips.
+	const annotationOrdinalById = useMemo(() => {
+		const byKind = new Map<string, ReaderAnnotation[]>()
+		for (const annotation of readerAnnotations) {
+			if (annotation.kind !== "highlight" && annotation.kind !== "underline") continue
+			const list = byKind.get(annotation.kind) ?? []
+			list.push(annotation)
+			byKind.set(annotation.kind, list)
+		}
+		const map = new Map<string, number>()
+		for (const list of byKind.values()) {
+			const sorted = [...list].sort((a, b) => {
+				if (a.page !== b.page) return a.page - b.page
+				const ay = annotationBodyBoundingBox(a.kind, a.body)?.y ?? 0
+				const by = annotationBodyBoundingBox(b.kind, b.body)?.y ?? 0
+				if (ay !== by) return ay - by
+				return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+			})
+			sorted.forEach((annotation, index) => map.set(annotation.id, index + 1))
+		}
 		return map
 	}, [readerAnnotations])
 
@@ -558,6 +617,17 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return expandedNote.anchorAnnotationId ?? null
 	}, [expandedNoteId, paperNotes])
 
+	// While a note is open and anchored to a block, suppress the
+	// image/table preview popup for that block — the note panel and the
+	// zoomed image popup compete for the same screen real estate, and
+	// note creation should win. Naturally clears when the note closes.
+	const previewSuppressedBlockId = useMemo(() => {
+		if (!expandedNoteId) return null
+		const expandedNote = paperNotes.find((candidate) => candidate.id === expandedNoteId) ?? null
+		if (!expandedNote || expandedNote.anchorKind !== "block") return null
+		return expandedNote.anchorBlockId ?? null
+	}, [expandedNoteId, paperNotes])
+
 	// Total page count for the marginalia rail, so each dot can land at
 	// `((page-1) + yRatio) / numPages` along the rail. Falls back to 1 so
 	// notes still render reasonably while the paper is mid-parse.
@@ -589,6 +659,18 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		for (const block of blocks ?? []) map.set(block.blockId, block.blockIndex + 1)
 		return map
 	}, [blocks])
+
+	const sourceExcerptByNote = useMemo(() => {
+		const map = new Map<string, string>()
+		const blocksList = blocks ?? []
+		const blocksById = new Map(blocksList.map((block) => [block.blockId, block]))
+		const annotationsById = new Map(readerAnnotations.map((annotation) => [annotation.id, annotation]))
+		for (const note of notesPaneFor(paperNotes, optimisticNotes)) {
+			const excerpt = sourceExcerptForNote(note, blocksById, annotationsById, blocksList)
+			if (excerpt) map.set(note.id, excerpt)
+		}
+		return map
+	}, [blocks, optimisticNotes, paperNotes, readerAnnotations])
 
 	// Toolbar `+ Note` — creates a note anchored to the user's current reading
 	// position in the main pane.
@@ -676,11 +758,13 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			selectedBlockRequestNonce={selectedBlockRequestNonce}
 			handleCreateReaderAnnotation={handleCreateReaderAnnotation}
 			handleDeleteReaderAnnotation={handleDeleteReaderAnnotation}
+			handleRestoreReaderAnnotation={handleRestoreReaderAnnotation}
 			handleOpenCitationAnnotation={handleOpenCitationAnnotation}
 			handleUpdateReaderAnnotationColor={handleUpdateReaderAnnotationColor}
 			flashedAnnotationId={flashedAnnotationId}
 			onRailLayoutChange={setPdfRailLayout}
 			previewedAnnotationId={previewedAnnotationId}
+			previewSuppressedBlockId={previewSuppressedBlockId}
 			viewMode={viewMode}
 		/>
 	)
@@ -692,8 +776,11 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				blockNumberByBlockId={blockNumberByBlockId}
 				blockAnchorsById={blockAnchorsById}
 				colorByAnnotation={colorByAnnotation}
+				annotationOrdinalById={annotationOrdinalById}
+				annotationBlockIdById={annotationBlockIdById}
 				colorByBlock={cssColorByBlock}
 				dotColorsByNote={dotColorsByNote}
+				sourceExcerptByNote={sourceExcerptByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
 				currentAnchorYRatio={currentAnchorYRatio}
@@ -754,6 +841,54 @@ function blockCitationSnapshot(block: Block) {
 	return raw.length > 160 ? `${raw.slice(0, 157)}...` : raw
 }
 
+function sourceExcerptForNote(
+	note: Note,
+	blocksById: Map<string, Block>,
+	annotationsById: Map<string, ReaderAnnotation>,
+	blocks: Block[],
+) {
+	const directBlock = note.anchorBlockId ? (blocksById.get(note.anchorBlockId) ?? null) : null
+	if (directBlock) return blockSourceExcerpt(directBlock)
+
+	const annotation = note.anchorAnnotationId ? (annotationsById.get(note.anchorAnnotationId) ?? null) : null
+	if (annotation && (annotation.kind === "highlight" || annotation.kind === "underline")) {
+		const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
+		const overlappingBlock = bbox ? findOverlappingBlock(blocks, annotation.page, bbox) : null
+		if (overlappingBlock) return blockSourceExcerpt(overlappingBlock)
+	}
+
+	const nearest = nearestBlockForAnchor(blocks, note.anchorPage, note.anchorYRatio)
+	return nearest ? blockSourceExcerpt(nearest) : ""
+}
+
+function blockSourceExcerpt(block: Block) {
+	return truncateSourceText((block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim(), 140)
+}
+
+function truncateSourceText(text: string, maxChars: number) {
+	if (!text) return ""
+	if (text.length <= maxChars) return text
+	return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
+}
+
+function nearestBlockForAnchor(blocks: Block[], page: number | null, yRatio: number | null) {
+	if (!page) return null
+	const onPage = blocks.filter((block) => block.page === page)
+	if (onPage.length === 0) return null
+	if (yRatio == null) return onPage[0] ?? null
+	let best: Block | null = null
+	let bestDistance = Number.POSITIVE_INFINITY
+	for (const block of onPage) {
+		const by = block.bbox?.y
+		const distance = by == null ? 1 : Math.abs(by - yRatio)
+		if (distance < bestDistance) {
+			best = block
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
 function annotationCitationSnapshot(
 	annotation: ReaderAnnotation,
 	block: Block | null,
@@ -799,8 +934,11 @@ interface WorkspaceContentProps {
 	blockAnchorsById: Map<string, { page: number; yRatio: number }>
 	blockNumberByBlockId: Map<string, number>
 	colorByAnnotation: Map<string, string>
+	annotationOrdinalById: Map<string, number>
+	annotationBlockIdById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
+	sourceExcerptByNote: Map<string, string>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
 	currentAnchorYRatio: number
@@ -832,8 +970,11 @@ function WorkspaceContent({
 	blockAnchorsById,
 	blockNumberByBlockId,
 	colorByAnnotation,
+	annotationOrdinalById,
+	annotationBlockIdById,
 	colorByBlock,
 	dotColorsByNote,
+	sourceExcerptByNote,
 	numPages,
 	pdfRailLayout,
 	currentAnchorYRatio,
@@ -854,6 +995,15 @@ function WorkspaceContent({
 	viewMode,
 }: WorkspaceContentProps) {
 	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
+	const [isNotesSidebarCollapsed, setIsNotesSidebarCollapsed] = useState(() => loadNotesSidebarCollapsed())
+
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		window.localStorage.setItem(
+			NOTES_SIDEBAR_COLLAPSED_KEY,
+			isNotesSidebarCollapsed ? "1" : "0",
+		)
+	}, [isNotesSidebarCollapsed])
 
 	return isLoading ? (
 		<div className="p-8 text-sm text-text-tertiary">Loading…</div>
@@ -865,7 +1015,12 @@ function WorkspaceContent({
 
 			<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
 				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
-				<SidebarToggleButtons leftOpen={isLeftNavOpen} onToggleLeft={toggleLeftNav} />
+				<SidebarToggleButtons
+					leftOpen={isLeftNavOpen}
+					onToggleLeft={toggleLeftNav}
+					rightOpen={!isNotesSidebarCollapsed}
+					onToggleRight={() => setIsNotesSidebarCollapsed((collapsed) => !collapsed)}
+				/>
 			</div>
 
 			<div className="min-h-0 flex-1 p-6">
@@ -874,8 +1029,11 @@ function WorkspaceContent({
 					blockNumberByBlockId={blockNumberByBlockId}
 					blockAnchorsById={blockAnchorsById}
 					colorByAnnotation={colorByAnnotation}
+					annotationOrdinalById={annotationOrdinalById}
+					annotationBlockIdById={annotationBlockIdById}
 					colorByBlock={colorByBlock}
 					dotColorsByNote={dotColorsByNote}
+					sourceExcerptByNote={sourceExcerptByNote}
 					numPages={numPages}
 					pdfRailLayout={pdfRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
@@ -891,6 +1049,8 @@ function WorkspaceContent({
 					onJumpToPage={onJumpToPage}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
+					isNotesSidebarCollapsed={isNotesSidebarCollapsed}
+					onRequestExpandNotesSidebar={() => setIsNotesSidebarCollapsed(false)}
 				/>
 			</div>
 		</div>
@@ -995,9 +1155,13 @@ function MarkdownIcon() {
 function SidebarToggleButtons({
 	leftOpen,
 	onToggleLeft,
+	rightOpen,
+	onToggleRight,
 }: {
 	leftOpen: boolean
 	onToggleLeft: () => void
+	rightOpen: boolean
+	onToggleRight: () => void
 }) {
 	return (
 		<div className="inline-flex overflow-hidden rounded-lg border border-border-default bg-bg-primary/90 p-0.5 shadow-[var(--shadow-popover)]">
@@ -1009,22 +1173,48 @@ function SidebarToggleButtons({
 				title={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
 				type="button"
 			>
-				<SidebarIcon open={leftOpen} />
+				<SidebarIcon open={leftOpen} side="left" />
+			</button>
+			<button
+				aria-label={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
+				aria-pressed={rightOpen}
+				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+				onClick={onToggleRight}
+				title={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
+				type="button"
+			>
+				<SidebarIcon open={rightOpen} side="right" />
 			</button>
 		</div>
 	)
 }
 
-function SidebarIcon({ open }: { open: boolean }) {
+function SidebarIcon({ open, side }: { open: boolean; side: "left" | "right" }) {
+	const leadingPane =
+		side === "left"
+			? open
+				? "w-2 bg-current/80"
+				: "w-2 bg-current/20"
+			: open
+				? "flex-1 bg-transparent"
+				: "flex-1 bg-current/20"
+	const trailingPane =
+		side === "left"
+			? open
+				? "flex-1 bg-transparent"
+				: "flex-1 bg-current/20"
+			: open
+				? "w-2 bg-current/80"
+				: "w-2 bg-current/20"
 	return (
 		<span
 			className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
 				open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
 			}`}
 		>
-			<span className={`transition-colors ${open ? "w-2 bg-current/80" : "w-2 bg-transparent"}`} />
+			<span className={`transition-colors ${leadingPane}`} />
 			<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
-			<span className={`flex-1 transition-colors ${open ? "bg-transparent" : "bg-current/20"}`} />
+			<span className={`transition-colors ${trailingPane}`} />
 		</span>
 	)
 }
@@ -1048,6 +1238,7 @@ interface MainViewProps {
 		body: ReaderAnnotationBody
 	}) => Promise<unknown> | unknown
 	handleDeleteReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
+	handleRestoreReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
 	handleOpenCitationAnnotation: (
 		paperId: string,
 		annotationId: string,
@@ -1072,6 +1263,7 @@ interface MainViewProps {
 	selectedBlockRequestNonce: number
 	flashedAnnotationId: string | null
 	previewedAnnotationId: string | null
+	previewSuppressedBlockId: string | null
 	viewMode: ViewMode
 }
 
@@ -1101,6 +1293,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						onClearHighlight={props.handleClearBlockHighlight}
 						onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
 						onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
+						onRestoreReaderAnnotation={props.handleRestoreReaderAnnotation}
 						onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}
 						onClearSelectedBlock={props.handleClearSelectedBlock}
 						onInteract={props.handleMainInteract}
@@ -1111,6 +1304,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						palette={props.palette}
 						paperId={props.paperId}
 						previewedAnnotationId={props.previewedAnnotationId}
+						previewSuppressedBlockId={props.previewSuppressedBlockId}
 						readerAnnotations={props.readerAnnotations}
 						renderAnnotationActions={props.renderAnnotationActions}
 						renderActions={props.renderActions}
@@ -1159,8 +1353,11 @@ interface MainNotesSplitProps {
 	blockAnchorsById: Map<string, { page: number; yRatio: number }>
 	blockNumberByBlockId: Map<string, number>
 	colorByAnnotation: Map<string, string>
+	annotationOrdinalById: Map<string, number>
+	annotationBlockIdById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
+	sourceExcerptByNote: Map<string, string>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
 	main: React.ReactNode
@@ -1180,6 +1377,8 @@ interface MainNotesSplitProps {
 		page?: number,
 		yRatio?: number,
 	) => void
+	isNotesSidebarCollapsed: boolean
+	onRequestExpandNotesSidebar: () => void
 }
 
 function MainNotesSplit({
@@ -1188,8 +1387,11 @@ function MainNotesSplit({
 	blockAnchorsById,
 	blockNumberByBlockId,
 	colorByAnnotation,
+	annotationOrdinalById,
+	annotationBlockIdById,
 	colorByBlock,
 	dotColorsByNote,
+	sourceExcerptByNote,
 	numPages,
 	pdfRailLayout,
 	main,
@@ -1204,6 +1406,8 @@ function MainNotesSplit({
 	onEditorReady,
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
+	isNotesSidebarCollapsed,
+	onRequestExpandNotesSidebar,
 }: MainNotesSplitProps) {
 	// Rail is a fixed-width strip glued to the main pane's right edge —
 	// no draggable splitter, no per-user width, no framed column. The
@@ -1217,8 +1421,11 @@ function MainNotesSplit({
 				blockAnchorsById={blockAnchorsById}
 				blockNumberByBlockId={blockNumberByBlockId}
 				colorByAnnotation={colorByAnnotation}
+				annotationOrdinalById={annotationOrdinalById}
+				annotationBlockIdById={annotationBlockIdById}
 				colorByBlock={colorByBlock}
 				dotColorsByNote={dotColorsByNote}
+				sourceExcerptByNote={sourceExcerptByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
 				currentAnchorYRatio={currentAnchorYRatio}
@@ -1233,6 +1440,8 @@ function MainNotesSplit({
 				onJumpToPage={onJumpToPage}
 				onOpenCitationBlock={onOpenCitationBlock}
 				onOpenCitationAnnotation={onOpenCitationAnnotation}
+				isSidebarCollapsed={isNotesSidebarCollapsed}
+				onRequestExpandSidebar={onRequestExpandNotesSidebar}
 			/>
 		</div>
 	)

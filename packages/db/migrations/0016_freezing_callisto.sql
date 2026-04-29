@@ -1,0 +1,1 @@
+ALTER TABLE "reader_annotations" ADD COLUMN "deleted_at" timestamp with time zone;
