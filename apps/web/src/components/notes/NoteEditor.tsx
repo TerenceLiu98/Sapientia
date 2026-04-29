@@ -65,11 +65,17 @@ import {
 type SaveStatus = "idle" | "saving" | "saved" | "failed"
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
+const noteEditorContentCache = new Map<string, unknown>()
+const noteEditorContentInflight = new Map<string, Promise<unknown>>()
 
 // Loose alias — the editor type fully parametrized by our extensions is
 // noisy. Consumers (PaperWorkspace) only need a handle to insert citations
 // + jump cursor, both reachable via the standard `Editor` interface.
 export type NoteEditorRef = Editor
+
+export function primeNoteEditorContent(noteId: string, jsonUrl: string) {
+	return loadNoteEditorContent(noteId, jsonUrl).then(() => undefined)
+}
 
 const editorExtensions = [
 	StarterKit.configure({
@@ -262,6 +268,7 @@ interface Props {
 		yRatio?: number,
 	) => void
 	headerActions?: ReactNode
+	beforeEditorContent?: ReactNode
 	// Lookup maps surfaced via NoteCitationThemeContext so chips inside
 	// the editor can render the canonical `highlight K p. P blk. B`
 	// label. Optional — chips fall back to the snapshot when absent.
@@ -276,6 +283,7 @@ export function NoteEditor({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	headerActions,
+	beforeEditorContent,
 	annotationOrdinalById,
 	annotationBlockIdById,
 	blockNumberByBlockId,
@@ -283,43 +291,57 @@ export function NoteEditor({
 	const { data: note, isLoading } = useNote(noteId)
 	const updateNote = useUpdateNote()
 
+	const [displayedNote, setDisplayedNote] = useState<NoteWithUrl | null>(null)
 	const [initialContent, setInitialContent] = useState<unknown | null>(null)
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
 	const [titleDraft, setTitleDraft] = useState("")
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
-		if (!note) return
-		setTitleDraft(note.title)
-	}, [note?.id, note])
+		if (noteEditorContentCache.has(noteId)) {
+			setInitialContent(normalizeInitialContent(noteEditorContentCache.get(noteId)))
+		}
+	}, [noteId])
 
-	// Pull the JSON document from the presigned URL once we have it. Keeps
-	// the editor body off the API response path — large notes never round-
-	// trip through Hono twice.
 	useEffect(() => {
-		if (!note?.jsonUrl) return
+		if (!note || note.id !== noteId || !note.jsonUrl) return
 		let cancelled = false
-		fetch(note.jsonUrl)
-			.then((r) => (r.ok ? r.json() : null))
+		loadNoteEditorContent(note.id, note.jsonUrl)
 			.then((data) => {
 				if (cancelled) return
+				setDisplayedNote(note)
 				setInitialContent(normalizeInitialContent(data))
 			})
 			.catch(() => {
-				if (!cancelled) setInitialContent(EMPTY_DOC)
+				if (cancelled) return
+				setDisplayedNote(note)
+				setInitialContent(EMPTY_DOC)
 			})
 		return () => {
 			cancelled = true
 		}
-	}, [note?.jsonUrl])
+	}, [note, noteId])
 
-	if (isLoading || !note || initialContent === null) {
+	useEffect(() => {
+		if (!displayedNote) return
+		setTitleDraft(displayedNote.title)
+	}, [displayedNote])
+
+	useEffect(() => {
+		setSaveStatus("idle")
+		if (debounceRef.current) {
+			clearTimeout(debounceRef.current)
+			debounceRef.current = null
+		}
+	}, [noteId])
+
+	if ((isLoading && !displayedNote) || !displayedNote || initialContent === null) {
 		return <div className="p-6 text-sm text-text-tertiary">Loading note…</div>
 	}
 
 	return (
 		<NoteEditorInner
-			note={note}
+			note={displayedNote}
 			initialContent={initialContent}
 			saveStatus={saveStatus}
 			setSaveStatus={setSaveStatus}
@@ -331,6 +353,7 @@ export function NoteEditor({
 			onOpenCitationBlock={onOpenCitationBlock}
 			onOpenCitationAnnotation={onOpenCitationAnnotation}
 			headerActions={headerActions}
+			beforeEditorContent={beforeEditorContent}
 			annotationOrdinalById={annotationOrdinalById}
 			annotationBlockIdById={annotationBlockIdById}
 			blockNumberByBlockId={blockNumberByBlockId}
@@ -349,6 +372,29 @@ function normalizeInitialContent(raw: unknown): unknown {
 	return EMPTY_DOC
 }
 
+function loadNoteEditorContent(noteId: string, jsonUrl: string) {
+	if (noteEditorContentCache.has(noteId)) {
+		return Promise.resolve(noteEditorContentCache.get(noteId))
+	}
+	const inflight = noteEditorContentInflight.get(noteId)
+	if (inflight) return inflight
+	const request = fetch(jsonUrl)
+		.then((response) => (response.ok ? response.json() : null))
+		.then((data) => {
+			const normalized = normalizeInitialContent(data)
+			noteEditorContentCache.set(noteId, normalized)
+			noteEditorContentInflight.delete(noteId)
+			return normalized
+		})
+		.catch(() => {
+			noteEditorContentInflight.delete(noteId)
+			noteEditorContentCache.set(noteId, EMPTY_DOC)
+			return EMPTY_DOC
+		})
+	noteEditorContentInflight.set(noteId, request)
+	return request
+}
+
 function blockExcerpt(block: Block | null) {
 	if (!block) return null
 	const raw = (block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim()
@@ -356,12 +402,30 @@ function blockExcerpt(block: Block | null) {
 	return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw
 }
 
-function NovelEditorHandle({ onEditorReady }: { onEditorReady?: (editor: NoteEditorRef) => void }) {
+function NovelEditorHandle({
+	noteId,
+	initialContent,
+	onEditorReady,
+}: {
+	noteId: string
+	initialContent: unknown
+	onEditorReady?: (editor: NoteEditorRef) => void
+}) {
 	const { editor } = useEditor()
+	const lastSyncedNoteIdRef = useRef<string | null>(null)
 
 	useEffect(() => {
 		if (editor && onEditorReady) onEditorReady(editor)
 	}, [editor, onEditorReady])
+
+	useEffect(() => {
+		if (!editor) return
+		if (lastSyncedNoteIdRef.current === noteId) return
+		lastSyncedNoteIdRef.current = noteId
+		editor.commands.setContent(initialContent as never, false)
+		const scrollBody = editor.view.dom.closest(".note-editor__body")
+		if (scrollBody instanceof HTMLElement) scrollBody.scrollTop = 0
+	}, [editor, initialContent, noteId])
 
 	return null
 }
@@ -600,6 +664,7 @@ function NoteEditorInner({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	headerActions,
+	beforeEditorContent,
 	annotationOrdinalById,
 	annotationBlockIdById,
 	blockNumberByBlockId,
@@ -621,6 +686,7 @@ function NoteEditorInner({
 		yRatio?: number,
 	) => void
 	headerActions?: ReactNode
+	beforeEditorContent?: ReactNode
 	annotationOrdinalById?: Map<string, number>
 	annotationBlockIdById?: Map<string, string>
 	blockNumberByBlockId?: Map<string, number>
@@ -787,6 +853,7 @@ function NoteEditorInner({
 							</div>
 						</div>
 					) : null}
+					{beforeEditorContent}
 					<EditorRoot>
 						<EditorContent
 							className="note-editor__novel"
@@ -820,7 +887,11 @@ function NoteEditorInner({
 								}, AUTOSAVE_DEBOUNCE_MS)
 							}}
 						>
-							<NovelEditorHandle onEditorReady={onEditorReady} />
+							<NovelEditorHandle
+								initialContent={initialContent}
+								noteId={note.id}
+								onEditorReady={onEditorReady}
+							/>
 							<SelectionBubbleMenu />
 							<SlashMenu />
 						</EditorContent>

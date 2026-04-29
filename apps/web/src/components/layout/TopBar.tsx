@@ -34,17 +34,17 @@ export function TopBar({
 	const { user } = currentUser
 
 	return (
-		<div className="flex h-full items-center justify-between bg-bg-primary px-4 sm:px-6">
-			<div>
+		<div className="flex h-full items-center justify-between gap-4 bg-bg-primary px-4 sm:px-6">
+			<div className="min-w-0 flex-1">
 				<div className="text-xs font-medium uppercase tracking-[0.16em] text-text-secondary">
 					Sapientia
 				</div>
-				<div className="mt-1 font-serif text-xl font-semibold tracking-[-0.03em] text-text-primary">
+				<div className="mt-1 truncate font-serif text-base font-semibold tracking-[-0.03em] text-text-primary sm:text-xl">
 					{title}
 				</div>
 			</div>
 
-			<div className="flex items-center gap-3">
+			<div className="shrink-0 flex items-center gap-3">
 				<button
 					aria-expanded={isAgentPanelOpen}
 					className="hidden h-9 rounded-full border border-border-default px-3 text-sm text-text-secondary transition-colors hover:bg-surface-hover lg:inline-flex lg:items-center"

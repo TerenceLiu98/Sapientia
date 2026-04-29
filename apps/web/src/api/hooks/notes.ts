@@ -51,6 +51,7 @@ export function useNote(noteId: string) {
 		queryKey: ["note", noteId],
 		queryFn: () => apiFetch<NoteWithUrl>(`/api/v1/notes/${noteId}`),
 		enabled: Boolean(noteId),
+		placeholderData: (previous) => previous,
 		// The presigned URL expires in 30 min; refetch a little before that.
 		staleTime: 25 * 60 * 1000,
 	})

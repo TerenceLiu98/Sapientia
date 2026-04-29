@@ -12,7 +12,7 @@ Sapientia is a web app that lets researchers read papers deeply while AI assists
 2. **Block-level addressing**: PDFs are parsed into blocks via MinerU; users cite blocks in notes; wikis cross-reference blocks.
 3. **Accumulating knowledge**: notes grow into auto-built wiki pages and a knowledge graph (LLM Wiki paradigm, web-native rebuild).
 
-For full product context: `docs/PRD_v0.1.md`. For active phase + tasks: `docs/STATUS.md`.
+For full product context: `docs/PRD_v1.md`. For active phase + tasks: `docs/tasks/`.
 
 ---
 
@@ -82,12 +82,10 @@ sapientia/
 │       ├── seed-minio.sh
 │       └── pg-backup.sh
 ├── docs/
-│   ├── PRD.md
-│   ├── DECISIONS.md
-│   ├── DESIGN_TOKENS.md
+│   ├── PRD_v1.md               # Product Requirements Document
+│   ├── PHILOSOPHY.md           # Core product philosophy
+│   ├── DESIGN_TOKENS.md        # Visual design tokens
 │   ├── DEPLOYMENT.md           # K8s deployment runbook
-│   ├── STATUS.md               # Current phase + active tasks
-│   ├── NOTES.md                # Deferred improvements / ideas
 │   └── tasks/                  # Task cards (TASK-NUM.md)
 ├── CLAUDE.md                   # This file
 ├── README.md
@@ -310,12 +308,14 @@ All visual decisions trace to `docs/DESIGN_TOKENS.md`. Never hardcode colors, fo
 
 ## Current Phase
 
-**Phase 1: Reading Foundation (Weeks 1–6)**
+**Phase 2: Block-Level Foundation + Marginalia — 核心已完成** ✅
 
-Goal: User can sign up, upload a PDF, see it parsed by MinerU, read it in the browser, highlight/select blocks.
+Phase 1（Reading Foundation）和 Phase 2 核心任务已全部完成。用户可以注册、上传 PDF、在浏览器中阅读、查看 MinerU 解析的 blocks、高亮标注、写笔记、引用 blocks、以及元数据自动补全。
 
-For active tasks see `docs/STATUS.md` and `docs/tasks/`.
+**下一个里程碑**: Phase 3 — Zettelkasten Output（TASK-019 ~ TASK-022，待起草）
+
+For task status see `docs/tasks/README.md`.
 
 ---
 
-*Last updated: project inception. Keep this header current.*
+*Last updated: 2026-04-29. Phase 1 + Phase 2 core complete.*

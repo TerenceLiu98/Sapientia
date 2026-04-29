@@ -8,9 +8,11 @@ const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRec
 vi.mock("@/components/notes/NoteEditor", () => ({
 	NoteEditor: (props: {
 		noteId: string
+		beforeEditorContent?: React.ReactNode
 		onOpenCitationBlock?: (paperId: string, blockId: string) => void
 	}) => (
 		<div>
+			{props.beforeEditorContent}
 			<div>{`Editor for ${props.noteId}`}</div>
 			<button onClick={() => props.onOpenCitationBlock?.("paper-1", "block-9")} type="button">
 				Open citation block
@@ -154,9 +156,66 @@ describe("NotesPanel", () => {
 
 		fireEvent.click(dots[0] as HTMLButtonElement)
 		expect(screen.getByText("Editor for note-older")).toBeInTheDocument()
+		await new Promise<void>((resolve) => {
+			window.requestAnimationFrame(() => resolve())
+		})
 
 		fireEvent.click(screen.getByRole("button", { name: "block 7 note 2" }))
 		expect(screen.getByText("Editor for note-newer")).toBeInTheDocument()
+		const expandedSlip = document.querySelector('[data-expanded-slip-id="note-newer"]') as
+			| HTMLElement
+			| null
+		expect(expandedSlip).not.toBeNull()
+		expect(expandedSlip?.style.opacity).toBe("1")
+	})
+
+	it("shows highlight ordinals in the grouped note list when one block has multiple highlights", async () => {
+		const notes = [
+			makeNote({
+				id: "note-h1",
+				title: "First highlight note",
+				anchorPage: 3,
+				anchorYRatio: 0.63,
+				anchorKind: "highlight",
+				anchorBlockId: "block-45",
+				anchorAnnotationId: "annotation-1",
+			}),
+			makeNote({
+				id: "note-h2",
+				title: "Second highlight note",
+				anchorPage: 3,
+				anchorYRatio: 0.66,
+				anchorKind: "highlight",
+				anchorBlockId: "block-45",
+				anchorAnnotationId: "annotation-2",
+			}),
+		]
+
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				annotationOrdinalById={
+					new Map([
+						["annotation-1", 1],
+						["annotation-2", 2],
+					])
+				}
+				blockAnchorsById={new Map([["block-45", { page: 3, yRatio: 0.64 }]])}
+				blockNumberByBlockId={new Map([["block-45", 45]])}
+				currentAnchorYRatio={0.5}
+				currentPage={3}
+				expandedNoteId="note-h1"
+				notes={notes}
+				numPages={5}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		expect(screen.getByRole("button", { name: "highlight 1 p. 3 blk. 45" })).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "highlight 2 p. 3 blk. 45" })).toBeInTheDocument()
 	})
 
 	it("spreads nearby block dots so dense anchors do not collapse into one visual cluster", async () => {
@@ -317,22 +376,95 @@ describe("NotesPanel", () => {
 					viewportHeight: 280,
 					viewportAnchorTop: 360,
 				}}
-				sourceExcerptByNote={
-					new Map([
-						[
-							"note-near",
-							"Situated response is the keyword. Marginalia should help the reader remember where the thought came from.",
-						],
-					])
-				}
 			/>,
 		)
 
 		expect(container.querySelector('[data-slip-group-key="block:block-near"]')).not.toBeNull()
 		expect(container.querySelector('[data-slip-group-key="note:note-far"]')).toBeNull()
 		expect(container.querySelector('[data-note-id="note-far"]')).not.toBeNull()
-		expect(screen.getByText(/Situated response is the keyword/i)).toBeInTheDocument()
 		expect(screen.getAllByText("block 12").length).toBeGreaterThan(0)
+		expect(screen.queryByText(/Situated response is the keyword/i)).not.toBeInTheDocument()
+	})
+
+	it("clamps folded slips inside the lane when a note anchor sits near the top edge", async () => {
+		const NotesPanel = await importNotesPanel()
+		const { container } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.5}
+				currentPage={1}
+				expandedNoteId={null}
+				notes={[
+					makeNote({
+						id: "note-top-edge",
+						title: "Top edge note",
+						anchorPage: 1,
+						anchorYRatio: 0,
+					}),
+				]}
+				numPages={3}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				pdfRailLayout={{
+					pageMetrics: new Map([
+						[1, { top: 0, height: 200 }],
+						[2, { top: 240, height: 220 }],
+						[3, { top: 500, height: 220 }],
+					]),
+					scrollHeight: 900,
+					scrollTop: 0,
+					viewportHeight: 280,
+					viewportAnchorTop: 140,
+				}}
+			/>,
+		)
+
+		const slip = container.querySelector('[data-slip-group-key="note:note-top-edge"]') as HTMLElement | null
+		expect(slip).not.toBeNull()
+		expect(slip?.style.top).toBe("8px")
+		expect(Number(slip?.style.opacity)).toBeLessThan(1)
+	})
+
+	it("fades folded slips near the lower lane edge too, so the effect stays symmetric", async () => {
+		const NotesPanel = await importNotesPanel()
+		const { container } = render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.5}
+				currentPage={3}
+				expandedNoteId={null}
+				notes={[
+					makeNote({
+						id: "note-bottom-edge",
+						title: "Bottom edge note",
+						anchorPage: 3,
+						anchorYRatio: 1,
+					}),
+				]}
+				numPages={3}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+				pdfRailLayout={{
+					pageMetrics: new Map([
+						[1, { top: 0, height: 200 }],
+						[2, { top: 240, height: 220 }],
+						[3, { top: 500, height: 220 }],
+					]),
+					scrollHeight: 900,
+					scrollTop: 260,
+					viewportHeight: 280,
+					viewportAnchorTop: 400,
+				}}
+			/>,
+		)
+
+		const slip = container.querySelector(
+			'[data-slip-group-key="note:note-bottom-edge"]',
+		) as HTMLElement | null
+		expect(slip).not.toBeNull()
+		expect(Number(slip?.style.opacity)).toBeLessThan(1)
 	})
 
 	it("can collapse the sidebar and re-expand it from a rail dot click", async () => {
@@ -369,9 +501,6 @@ describe("NotesPanel", () => {
 							viewportHeight: 280,
 							viewportAnchorTop: 360,
 						}}
-						sourceExcerptByNote={
-							new Map([["note-1", "The folded slip should stay reachable even after the sidebar collapses."]])
-						}
 					/>
 				</>
 			)
@@ -548,6 +677,54 @@ describe("NotesPanel", () => {
 			3,
 			0.38,
 		)
+	})
+
+	it("shrinks the expanded slip to fit narrow viewports instead of forcing the old desktop minimum", async () => {
+		const originalInnerWidth = window.innerWidth
+		const originalInnerHeight = window.innerHeight
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: 320,
+		})
+		Object.defineProperty(window, "innerHeight", {
+			configurable: true,
+			value: 560,
+		})
+
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				currentAnchorYRatio={0.38}
+				currentPage={3}
+				expandedNoteId="note-1"
+				notes={[
+					makeNote({
+						id: "note-1",
+						title: "Narrow viewport note",
+						anchorPage: 3,
+						anchorYRatio: 0.38,
+					}),
+				]}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		expect(screen.getByText("Editor for note-1")).toBeInTheDocument()
+		const expandedSlip = document.querySelector('[data-expanded-slip-id="note-1"]')
+		expect(expandedSlip).not.toBeNull()
+		expect((expandedSlip as HTMLElement).style.width).toBe("248px")
+
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: originalInnerWidth,
+		})
+		Object.defineProperty(window, "innerHeight", {
+			configurable: true,
+			value: originalInnerHeight,
+		})
 	})
 
 	it("does not auto-follow to another page while a note is expanded", async () => {

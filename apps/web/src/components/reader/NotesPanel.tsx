@@ -7,8 +7,10 @@ import {
 	useRef,
 	useState,
 } from "react"
-import type { Note } from "@/api/hooks/notes"
-import { NoteEditor, type NoteEditorRef } from "@/components/notes/NoteEditor"
+import { useQueryClient } from "@tanstack/react-query"
+import { apiFetch } from "@/api/client"
+import type { Note, NoteWithUrl } from "@/api/hooks/notes"
+import { NoteEditor, type NoteEditorRef, primeNoteEditorContent } from "@/components/notes/NoteEditor"
 import type { PdfRailLayout } from "@/components/reader/PdfViewer"
 
 interface NotesPanelProps {
@@ -61,11 +63,6 @@ interface NotesPanelProps {
 	// "this note pulls from these N highlights" at a glance. Falls
 	// back to the anchor color when empty / missing.
 	dotColorsByNote?: Map<string, string[]>
-	// noteId → anchor-source excerpt shown in folded slips. This comes
-	// from the anchored block / markup source, not from the note title,
-	// so slips can preview the original PDF text even when notes are
-	// untitled.
-	sourceExcerptByNote?: Map<string, string>
 	isSidebarCollapsed?: boolean
 	onRequestExpandSidebar?: () => void
 	pdfRailLayout?: PdfRailLayout | null
@@ -93,30 +90,31 @@ const MINIMAP_NEAR_DOT_SCALE = 1.15
 const MINIMAP_FAR_DOT_SCALE = 0.74
 const MINIMAP_VIEWPORT_MIN_SPAN_FRAC = 0.06
 const SIDEBAR_INSET_X = 4
-const SIDEBAR_COLLAPSED_WIDTH = 56
-const SLIP_LANE_WIDTH = 248
-const RAIL_STRIP_WIDTH = 40
+const SIDEBAR_COLLAPSED_WIDTH = 44
+const SLIP_LANE_WIDTH = 188
+const RAIL_STRIP_WIDTH = 30
 const RAIL_EDGE_RIGHT = 2
 const RAIL_EDGE_TOP = 4
 const RAIL_EDGE_BOTTOM = 4
-const FOLDED_SLIP_HEIGHT = 92
-const FOLDED_SLIP_HEADER_HEIGHT = 12
+const FOLDED_SLIP_HEIGHT = 56
+const FOLDED_SLIP_STACK_GAP = 12
 const SLIP_DEFAULT_HEIGHT = 520
 const SLIP_MIN_HEIGHT = 360
 const SLIP_MAX_HEIGHT = 920
 const SLIP_DEFAULT_WIDTH = 420
 const SLIP_MIN_WIDTH = 360
 const SLIP_MAX_WIDTH = 760
+const SLIP_VIEWPORT_MARGIN = 72
+const SLIP_COMPACT_MIN_WIDTH = 240
+const SLIP_COMPACT_MIN_HEIGHT = 260
 const SLIP_LANE_INSET_LEFT = 18
-const SLIP_LANE_INSET_RIGHT = 14
 // Slip vertical position couples to the PDF's actual scroll position
 // (true marginalia: each slip stays near the line that provoked it).
 // The parallax factor lets us soften that coupling so slips don't fly
 // off-screen instantly. 1.0 = locked to anchor, 0.0 = ignores scroll.
-// 0.85 keeps slips near their source while drifting slightly slower
-// than the underlying PDF, which preserves spatial memory across short
-// scrolls and gives the lane a subtle layered feel.
-const SLIP_PARALLAX_FACTOR = 0.85
+// 0.78 keeps slips near their source while softening the travel enough
+// that short PDF scrolls don't feel like the notes are snapping around.
+const SLIP_PARALLAX_FACTOR = 0.78
 // Half-viewport's worth of fade past the viewport edge before a slip
 // fully disappears. 0.5 means a slip fades to 0 when its screen-y is
 // half a viewport beyond the visible area. Slips beyond that are
@@ -162,7 +160,6 @@ export function NotesPanel({
 	annotationOrdinalById,
 	annotationBlockIdById,
 	dotColorsByNote,
-	sourceExcerptByNote,
 	isSidebarCollapsed = false,
 	onRequestExpandSidebar,
 	pdfRailLayout,
@@ -367,9 +364,9 @@ export function NotesPanel({
 		}
 		const viewportTop = layout.scrollTop
 		const viewportHeight = layout.viewportHeight
+		const laneHeight = laneInnerHeight > 0 ? laneInnerHeight : viewportHeight
 		const viewportCenter = viewportTop + viewportHeight / 2
 		const halfH = viewportHeight / 2
-		const fadeTailPx = halfH * (1 + SLIP_FADE_TAIL_FRAC * 2)
 		const placed: Array<{
 			groupKey: string
 			blockId: string | null
@@ -405,14 +402,7 @@ export function NotesPanel({
 				// own drift rate.
 				const offsetFromCenter = anchorAbsolute - viewportCenter
 				slipScreenY = halfH + offsetFromCenter * SLIP_PARALLAX_FACTOR
-				const distFromCenter = Math.abs(slipScreenY - halfH)
-				if (distFromCenter <= halfH) {
-					opacity = 1
-				} else if (distFromCenter >= fadeTailPx) {
-					opacity = 0
-				} else {
-					opacity = 1 - (distFromCenter - halfH) / (fadeTailPx - halfH)
-				}
+				opacity = foldedSlipOpacityForLane(slipScreenY, laneHeight, viewportHeight)
 			}
 			if (opacity < SLIP_OPACITY_RENDER_THRESHOLD && !expanded) continue
 			placed.push({
@@ -438,13 +428,21 @@ export function NotesPanel({
 			foldedIndices.push(i)
 			foldedTops.push(entry.topPx)
 		}
-		const adjustedTops = spreadTopsWithSpacingPx(foldedTops, FOLDED_SLIP_HEIGHT + 12)
+		const adjustedTops = spreadTopsWithSpacingPx(
+			foldedTops,
+			FOLDED_SLIP_HEIGHT + FOLDED_SLIP_STACK_GAP,
+			FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD,
+			Math.max(
+				FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD,
+				laneHeight - FOLDED_SLIP_HEIGHT / 2 - SLIP_EXPANDED_EDGE_PAD,
+			),
+		)
 		for (let n = 0; n < foldedIndices.length; n += 1) {
 			const idx = foldedIndices[n] as number
 			placed[idx] = { ...placed[idx], topPx: adjustedTops[n] ?? placed[idx].topPx } as (typeof placed)[number]
 		}
 		return placed
-	}, [expandedNoteId, groupedDots, pdfRailLayout])
+	}, [expandedNoteId, groupedDots, laneInnerHeight, pdfRailLayout])
 
 	const handleOpenCitationBlock = useCallback(
 		(paperId: string, blockId: string) => {
@@ -569,7 +567,6 @@ export function NotesPanel({
 									note={note}
 									onOpen={() => handleDotClick(group)}
 									opacity={group.opacity}
-									sourceExcerpt={sourceExcerptByNote?.get(note.id) ?? ""}
 									topPx={group.topPx}
 								/>
 							)
@@ -804,23 +801,6 @@ function sourceLabelForNote(
 	})
 }
 
-// Folded slip body. Precedence:
-//   1. The note's own body excerpt (`note.excerpt`) — what the user
-//      *wrote* about this anchor, the most marginalia-true preview.
-//   2. The source text excerpt (the underlying block / annotation),
-//      passed in from PaperWorkspace — useful when the note is empty.
-//   3. The user-set title (skips the default "Untitled").
-//   4. A neutral "{N} notes" or "Source preview unavailable" fallback.
-function foldedSlipExcerpt(note: Note, sourceExcerpt: string, noteCount: number) {
-	const noteExcerpt = (note.excerpt ?? "").trim()
-	if (noteExcerpt.length > 0) return noteExcerpt
-	const sourceText = sourceExcerpt.trim()
-	if (sourceText.length > 0) return sourceText
-	const title = note.title.trim()
-	if (title.length > 0 && title.toLowerCase() !== "untitled") return title
-	return noteCount > 1 ? `${noteCount} notes anchored here` : "Source preview unavailable"
-}
-
 function slipSourceTagLabel(
 	note: Note,
 	notes: Note[],
@@ -980,11 +960,31 @@ function spreadDotTops(rawTops: number[]) {
 // parallax mode; this nudges later entries down so each slip remains
 // individually clickable. Order in / order out is preserved (callers
 // rely on it to map back to the original list).
-function spreadTopsWithSpacingPx(rawTops: number[], minSpacingPx: number) {
+function spreadTopsWithSpacingPx(
+	rawTops: number[],
+	minSpacingPx: number,
+	minTopPx = Number.NEGATIVE_INFINITY,
+	maxTopPx = Number.POSITIVE_INFINITY,
+) {
 	if (rawTops.length === 0) return rawTops
 	const tops = [...rawTops]
 	for (let i = 1; i < tops.length; i += 1) {
 		tops[i] = Math.max(tops[i] as number, (tops[i - 1] as number) + minSpacingPx)
+	}
+	if (tops[tops.length - 1]! > maxTopPx) {
+		tops[tops.length - 1] = maxTopPx
+		for (let i = tops.length - 2; i >= 0; i -= 1) {
+			tops[i] = Math.min(tops[i] as number, (tops[i + 1] as number) - minSpacingPx)
+		}
+	}
+	if (tops[0]! < minTopPx) {
+		tops[0] = minTopPx
+		for (let i = 1; i < tops.length; i += 1) {
+			tops[i] = Math.max(tops[i] as number, (tops[i - 1] as number) + minSpacingPx)
+		}
+	}
+	for (let i = 0; i < tops.length; i += 1) {
+		tops[i] = clamp(tops[i] as number, minTopPx, maxTopPx)
 	}
 	return tops
 }
@@ -1008,26 +1008,73 @@ function spreadTopsWithSpacing(rawTops: number[], minSpacingFrac: number) {
 	return tops
 }
 
+function foldedSlipOpacityForLane(centerY: number, laneHeight: number, viewportHeight: number) {
+	const minCenter = FOLDED_SLIP_HEIGHT / 2 + SLIP_EXPANDED_EDGE_PAD
+	const maxCenter = Math.max(
+		minCenter,
+		laneHeight - FOLDED_SLIP_HEIGHT / 2 - SLIP_EXPANDED_EDGE_PAD,
+	)
+	const fadeTailPx = Math.max(
+		FOLDED_SLIP_HEIGHT * 0.7,
+		viewportHeight * Math.max(0.18, SLIP_FADE_TAIL_FRAC * 0.4),
+	)
+	if (centerY < minCenter) {
+		return clamp(1 - (minCenter - centerY) / fadeTailPx, 0, 1)
+	}
+	if (centerY > maxCenter) {
+		return clamp(1 - (centerY - maxCenter) / fadeTailPx, 0, 1)
+	}
+	return 1
+}
+
 function defaultSlipSize() {
+	const widthBounds = slipWidthBounds()
+	const heightBounds = slipHeightBounds()
 	if (typeof window === "undefined") {
 		return {
-			width: SLIP_DEFAULT_WIDTH,
-			height: SLIP_DEFAULT_HEIGHT,
+			width: clamp(SLIP_DEFAULT_WIDTH, widthBounds.min, widthBounds.max),
+			height: clamp(SLIP_DEFAULT_HEIGHT, heightBounds.min, heightBounds.max),
 		}
 	}
-	const maxViewportWidth = Math.max(SLIP_MIN_WIDTH, window.innerWidth - 72)
-	const maxViewportHeight = Math.max(SLIP_MIN_HEIGHT, window.innerHeight - 72)
 	return {
 		width: clamp(
 			Math.round(window.innerWidth * 0.31),
-			SLIP_MIN_WIDTH,
-			Math.min(SLIP_MAX_WIDTH, maxViewportWidth),
+			widthBounds.min,
+			widthBounds.max,
 		),
 		height: clamp(
 			Math.round(window.innerHeight * 0.66),
-			SLIP_MIN_HEIGHT,
-			Math.min(SLIP_MAX_HEIGHT, maxViewportHeight),
+			heightBounds.min,
+			heightBounds.max,
 		),
+	}
+}
+
+function slipWidthBounds() {
+	if (typeof window === "undefined") {
+		return { min: SLIP_MIN_WIDTH, max: SLIP_MAX_WIDTH }
+	}
+	const max = Math.min(
+		SLIP_MAX_WIDTH,
+		Math.max(SLIP_COMPACT_MIN_WIDTH, window.innerWidth - SLIP_VIEWPORT_MARGIN),
+	)
+	return {
+		min: Math.min(SLIP_MIN_WIDTH, max),
+		max,
+	}
+}
+
+function slipHeightBounds() {
+	if (typeof window === "undefined") {
+		return { min: SLIP_MIN_HEIGHT, max: SLIP_MAX_HEIGHT }
+	}
+	const max = Math.min(
+		SLIP_MAX_HEIGHT,
+		Math.max(SLIP_COMPACT_MIN_HEIGHT, window.innerHeight - SLIP_VIEWPORT_MARGIN),
+	)
+	return {
+		min: Math.min(SLIP_MIN_HEIGHT, max),
+		max,
 	}
 }
 
@@ -1113,7 +1160,6 @@ function FoldedSlip({
 	note,
 	onOpen,
 	opacity,
-	sourceExcerpt,
 	topPx,
 }: {
 	accentColor: string
@@ -1128,42 +1174,34 @@ function FoldedSlip({
 	note: Note
 	onOpen: () => void
 	opacity: number
-	sourceExcerpt: string
 	topPx: number
 }) {
-	const excerpt = foldedSlipExcerpt(note, sourceExcerpt, group.notes.length)
 	const sourceTagLabel = slipSourceTagLabel(note, group.notes, blockNumber, annotationOrdinal)
 	const effectiveOpacity = active ? Math.max(opacity, 0.92) : opacity
 	return (
 		<button
 			aria-label={`Open note ${note.title || "Untitled"}`}
-			className="absolute z-[2] overflow-hidden rounded-2xl border border-border-default/80 bg-white/96 text-left shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition-[transform,box-shadow,opacity,border-color] duration-200 hover:-translate-x-0.5 hover:shadow-[0_18px_34px_rgba(15,23,42,0.14)]"
+			className="absolute z-[2] overflow-hidden rounded-2xl border border-border-default/80 bg-white/96 text-left shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-[top,transform,box-shadow,opacity,border-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity] hover:-translate-x-0.5 hover:shadow-[0_16px_28px_rgba(15,23,42,0.12)]"
 			data-slip-group-key={group.groupKey}
 			onClick={onOpen}
 			style={{
 				left: `${SLIP_LANE_INSET_LEFT}px`,
-				right: `${SLIP_LANE_INSET_RIGHT}px`,
 				top: `${topPx - FOLDED_SLIP_HEIGHT / 2}px`,
 				height: `${FOLDED_SLIP_HEIGHT}px`,
+				maxWidth: "188px",
 				borderLeft: `3px solid ${accentColor}`,
 				opacity: effectiveOpacity,
 			}}
 			type="button"
 		>
-			<div className="flex h-full flex-col">
-				<div
-					aria-hidden="true"
-					className="shrink-0 border-b border-border-subtle/80 bg-[color-mix(in_srgb,var(--color-bg-secondary)_68%,white)]"
-					style={{ height: `${FOLDED_SLIP_HEADER_HEIGHT}px` }}
-				/>
-				<div className="flex-1 px-3 pt-3 pb-3">
-				<div className="mb-2 flex items-center gap-1.5">
+			<div className="flex h-full items-center px-3 py-2">
+				<div className="flex items-center gap-1.5">
 					<span
-						className="inline-flex items-center rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.02em]"
+						className="inline-flex items-center rounded-md px-2.5 py-1.5 text-[11px] font-bold tracking-[0.01em]"
 						style={{
-							color: accentColor,
-							backgroundColor: `color-mix(in srgb, ${accentColor} 14%, white)`,
-							boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accentColor} 30%, white)`,
+							color: `color-mix(in srgb, ${accentColor} 62%, var(--color-text-primary))`,
+							backgroundColor: `color-mix(in srgb, ${accentColor} 9%, white)`,
+							boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accentColor} 22%, white)`,
 						}}
 					>
 						{sourceTagLabel}
@@ -1173,8 +1211,6 @@ function FoldedSlip({
 							{`+${group.notes.length - 1}`}
 						</span>
 					) : null}
-				</div>
-				<p className="line-clamp-3 font-serif text-[13.5px] leading-6 text-text-primary">{excerpt}</p>
 				</div>
 			</div>
 		</button>
@@ -1230,10 +1266,41 @@ function ExpandedSlip({
 	onSelectNote: (noteId: string) => void
 	topPx: number
 }) {
+	let queryClient: ReturnType<typeof useQueryClient> | null = null
+	try {
+		queryClient = useQueryClient()
+	} catch {
+		queryClient = null
+	}
 	const [size, setSize] = useState<{ width: number; height: number }>(() => defaultSlipSize())
+	const [entered, setEntered] = useState(false)
+	const [viewportSize, setViewportSize] = useState(() => ({
+		width: typeof window === "undefined" ? 0 : window.innerWidth,
+		height: typeof window === "undefined" ? 0 : window.innerHeight,
+	}))
 	const stackedNotes = useMemo(() => [...notes].sort(compareNotesByAnchor), [notes])
 	const activeAccentColor =
 		dotColorFor(note, colorByBlock, colorByAnnotation) ?? "var(--color-accent-600)"
+	const widthBounds = useMemo(
+		() => ({
+			min: Math.min(SLIP_MIN_WIDTH, Math.max(SLIP_COMPACT_MIN_WIDTH, viewportSize.width - SLIP_VIEWPORT_MARGIN)),
+			max: Math.min(SLIP_MAX_WIDTH, Math.max(SLIP_COMPACT_MIN_WIDTH, viewportSize.width - SLIP_VIEWPORT_MARGIN)),
+		}),
+		[viewportSize.width],
+	)
+	const heightBounds = useMemo(
+		() => ({
+			min: Math.min(
+				SLIP_MIN_HEIGHT,
+				Math.max(SLIP_COMPACT_MIN_HEIGHT, viewportSize.height - SLIP_VIEWPORT_MARGIN),
+			),
+			max: Math.min(
+				SLIP_MAX_HEIGHT,
+				Math.max(SLIP_COMPACT_MIN_HEIGHT, viewportSize.height - SLIP_VIEWPORT_MARGIN),
+			),
+		}),
+		[viewportSize.height],
+	)
 	const handleJumpToSource = useCallback(() => {
 		if (note.paperId && note.anchorAnnotationId) {
 			onOpenCitationAnnotation?.(
@@ -1275,6 +1342,51 @@ function ExpandedSlip({
 		}
 	}, [onClose])
 
+	useEffect(() => {
+		if (typeof window === "undefined") return
+		const updateViewportSize = () =>
+			setViewportSize({ width: window.innerWidth, height: window.innerHeight })
+		updateViewportSize()
+		window.addEventListener("resize", updateViewportSize)
+		return () => {
+			window.removeEventListener("resize", updateViewportSize)
+		}
+	}, [])
+
+	useEffect(() => {
+		if (!queryClient) return
+		for (const candidate of stackedNotes) {
+			void queryClient
+				.ensureQueryData<NoteWithUrl>({
+					queryKey: ["note", candidate.id],
+					queryFn: () => apiFetch<NoteWithUrl>(`/api/v1/notes/${candidate.id}`),
+				})
+				.then((resolved) => primeNoteEditorContent(resolved.id, resolved.jsonUrl))
+				.catch(() => undefined)
+		}
+	}, [queryClient, stackedNotes])
+
+	useEffect(() => {
+		setEntered(false)
+		if (typeof window === "undefined") {
+			setEntered(true)
+			return
+		}
+		const frame = window.requestAnimationFrame(() => {
+			setEntered(true)
+		})
+		return () => {
+			window.cancelAnimationFrame(frame)
+		}
+	}, [])
+
+	useEffect(() => {
+		setSize((current) => ({
+			width: clamp(current.width, widthBounds.min, widthBounds.max),
+			height: clamp(current.height, heightBounds.min, heightBounds.max),
+		}))
+	}, [heightBounds.max, heightBounds.min, widthBounds.max, widthBounds.min])
+
 	// Resize from the bottom-left so the expanded editor grows toward the
 	// PDF while its right edge stays anchored to the rail.
 	const onResizePointerDown = useCallback(
@@ -1298,8 +1410,8 @@ function ExpandedSlip({
 			const dx = event.clientX - drag.startX
 			const dy = event.clientY - drag.startY
 			setSize({
-				width: clamp(drag.startWidth - dx, SLIP_MIN_WIDTH, SLIP_MAX_WIDTH),
-				height: clamp(drag.startHeight + dy, SLIP_MIN_HEIGHT, SLIP_MAX_HEIGHT),
+				width: clamp(drag.startWidth - dx, widthBounds.min, widthBounds.max),
+				height: clamp(drag.startHeight + dy, heightBounds.min, heightBounds.max),
 			})
 		}
 		const onUp = () => {
@@ -1313,7 +1425,7 @@ function ExpandedSlip({
 			window.removeEventListener("pointerup", onUp)
 			window.removeEventListener("pointercancel", onUp)
 		}
-	}, [])
+	}, [heightBounds.max, heightBounds.min, widthBounds.max, widthBounds.min])
 
 	// `topPx` is the slip's anchor-y inside the lane (PDF-coupled). We
 	// center the editor on it, then clamp against the lane's measured
@@ -1329,13 +1441,16 @@ function ExpandedSlip({
 
 	return (
 		<div
-			className="absolute z-[4] flex flex-col overflow-hidden rounded-[18px] border border-border-default bg-bg-overlay shadow-[0_24px_64px_rgba(15,23,42,0.18)]"
+			className="absolute z-[4] flex flex-col overflow-hidden rounded-[18px] border border-border-default bg-bg-overlay shadow-[0_24px_64px_rgba(15,23,42,0.18)] transition-[top,transform,opacity,box-shadow] duration-220 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity]"
+			data-expanded-slip-id={note.id}
 			style={{
 				top: `${clampedTop}px`,
 				right: `${SLIP_EXPANDED_ANCHOR_RIGHT}px`,
 				width: `${size.width}px`,
 				height: `${size.height}px`,
 				borderLeft: `3px solid ${activeAccentColor}`,
+				opacity: entered ? 1 : 0,
+				transform: entered ? "translate3d(0, 0, 0) scale(1)" : "translate3d(18px, 0, 0) scale(0.965)",
 			}}
 		>
 			<div
@@ -1396,33 +1511,35 @@ function ExpandedSlip({
 					</button>
 				</div>
 			</div>
-			{stackedNotes.length > 0 ? (
-				<div className="shrink-0 border-b border-border-subtle bg-bg-primary/55 px-3 py-3">
-					<div className="relative space-y-1.5 pl-5">
-						<div className="absolute bottom-2 left-[7px] top-2 w-px bg-border-subtle" />
-						{stackedNotes.map((candidate) => (
-							<SourceStackRow
-								active={candidate.id === note.id}
-								blockNumber={blockNumber}
-								colorByAnnotation={colorByAnnotation}
-								colorByBlock={colorByBlock}
-								key={candidate.id}
-								note={candidate}
-								notes={stackedNotes}
-								onDelete={onDelete}
-								onSelect={onSelectNote}
-							/>
-						))}
-					</div>
-				</div>
-			) : null}
 			<div className="min-h-0 flex-1">
 				<NoteEditor
-					key={note.id}
 					noteId={note.id}
 					onEditorReady={onEditorReady}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
+					beforeEditorContent={
+						stackedNotes.length > 0 ? (
+							<div className="border-b border-border-subtle bg-bg-primary/55 px-3 py-3">
+								<div className="relative space-y-1.5 pl-5">
+									<div className="absolute bottom-2 left-[7px] top-2 w-px bg-border-subtle" />
+									{stackedNotes.map((candidate) => (
+										<SourceStackRow
+											active={candidate.id === note.id}
+											annotationOrdinalById={annotationOrdinalById}
+											blockNumber={blockNumber}
+											colorByAnnotation={colorByAnnotation}
+											colorByBlock={colorByBlock}
+											key={candidate.id}
+											note={candidate}
+											notes={stackedNotes}
+											onDelete={onDelete}
+											onSelect={onSelectNote}
+										/>
+									))}
+								</div>
+							</div>
+						) : null
+					}
 					annotationBlockIdById={annotationBlockIdById}
 					annotationOrdinalById={annotationOrdinalById}
 					blockNumberByBlockId={blockNumberByBlockId}
@@ -1447,6 +1564,7 @@ function ExpandedSlip({
 
 function SourceStackRow({
 	active,
+	annotationOrdinalById,
 	blockNumber,
 	colorByAnnotation,
 	colorByBlock,
@@ -1456,6 +1574,7 @@ function SourceStackRow({
 	onSelect,
 }: {
 	active: boolean
+	annotationOrdinalById?: Map<string, number>
 	blockNumber: number | null
 	colorByAnnotation?: Map<string, string>
 	colorByBlock?: Map<string, string>
@@ -1464,7 +1583,10 @@ function SourceStackRow({
 	onDelete?: (noteId: string) => Promise<void> | void
 	onSelect: (noteId: string) => void
 }) {
-	const label = sourceLabelForNote(note, notes, blockNumber)
+	const annotationOrdinal = note.anchorAnnotationId
+		? (annotationOrdinalById?.get(note.anchorAnnotationId) ?? null)
+		: null
+	const label = sourceLabelForNote(note, notes, blockNumber, annotationOrdinal)
 	const accentColor = dotColorFor(note, colorByBlock, colorByAnnotation)
 	const subtitle =
 		note.anchorKind === "block"

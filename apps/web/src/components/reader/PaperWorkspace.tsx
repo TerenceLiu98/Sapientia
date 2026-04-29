@@ -660,18 +660,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		return map
 	}, [blocks])
 
-	const sourceExcerptByNote = useMemo(() => {
-		const map = new Map<string, string>()
-		const blocksList = blocks ?? []
-		const blocksById = new Map(blocksList.map((block) => [block.blockId, block]))
-		const annotationsById = new Map(readerAnnotations.map((annotation) => [annotation.id, annotation]))
-		for (const note of notesPaneFor(paperNotes, optimisticNotes)) {
-			const excerpt = sourceExcerptForNote(note, blocksById, annotationsById, blocksList)
-			if (excerpt) map.set(note.id, excerpt)
-		}
-		return map
-	}, [blocks, optimisticNotes, paperNotes, readerAnnotations])
-
 	// Toolbar `+ Note` — creates a note anchored to the user's current reading
 	// position in the main pane.
 	const handleCreateAtCurrent = useCallback(async () => {
@@ -780,7 +768,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				annotationBlockIdById={annotationBlockIdById}
 				colorByBlock={cssColorByBlock}
 				dotColorsByNote={dotColorsByNote}
-				sourceExcerptByNote={sourceExcerptByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
 				currentAnchorYRatio={currentAnchorYRatio}
@@ -841,54 +828,6 @@ function blockCitationSnapshot(block: Block) {
 	return raw.length > 160 ? `${raw.slice(0, 157)}...` : raw
 }
 
-function sourceExcerptForNote(
-	note: Note,
-	blocksById: Map<string, Block>,
-	annotationsById: Map<string, ReaderAnnotation>,
-	blocks: Block[],
-) {
-	const directBlock = note.anchorBlockId ? (blocksById.get(note.anchorBlockId) ?? null) : null
-	if (directBlock) return blockSourceExcerpt(directBlock)
-
-	const annotation = note.anchorAnnotationId ? (annotationsById.get(note.anchorAnnotationId) ?? null) : null
-	if (annotation && (annotation.kind === "highlight" || annotation.kind === "underline")) {
-		const bbox = annotationBodyBoundingBox(annotation.kind, annotation.body)
-		const overlappingBlock = bbox ? findOverlappingBlock(blocks, annotation.page, bbox) : null
-		if (overlappingBlock) return blockSourceExcerpt(overlappingBlock)
-	}
-
-	const nearest = nearestBlockForAnchor(blocks, note.anchorPage, note.anchorYRatio)
-	return nearest ? blockSourceExcerpt(nearest) : ""
-}
-
-function blockSourceExcerpt(block: Block) {
-	return truncateSourceText((block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim(), 140)
-}
-
-function truncateSourceText(text: string, maxChars: number) {
-	if (!text) return ""
-	if (text.length <= maxChars) return text
-	return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
-}
-
-function nearestBlockForAnchor(blocks: Block[], page: number | null, yRatio: number | null) {
-	if (!page) return null
-	const onPage = blocks.filter((block) => block.page === page)
-	if (onPage.length === 0) return null
-	if (yRatio == null) return onPage[0] ?? null
-	let best: Block | null = null
-	let bestDistance = Number.POSITIVE_INFINITY
-	for (const block of onPage) {
-		const by = block.bbox?.y
-		const distance = by == null ? 1 : Math.abs(by - yRatio)
-		if (distance < bestDistance) {
-			best = block
-			bestDistance = distance
-		}
-	}
-	return best
-}
-
 function annotationCitationSnapshot(
 	annotation: ReaderAnnotation,
 	block: Block | null,
@@ -938,7 +877,6 @@ interface WorkspaceContentProps {
 	annotationBlockIdById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
-	sourceExcerptByNote: Map<string, string>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
 	currentAnchorYRatio: number
@@ -974,7 +912,6 @@ function WorkspaceContent({
 	annotationBlockIdById,
 	colorByBlock,
 	dotColorsByNote,
-	sourceExcerptByNote,
 	numPages,
 	pdfRailLayout,
 	currentAnchorYRatio,
@@ -1013,7 +950,7 @@ function WorkspaceContent({
 		<div className="relative flex h-full min-h-0 flex-col">
 			<ParseStatusBanner paper={paper} />
 
-			<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
+			<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
 				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
 				<SidebarToggleButtons
 					leftOpen={isLeftNavOpen}
@@ -1023,7 +960,7 @@ function WorkspaceContent({
 				/>
 			</div>
 
-			<div className="min-h-0 flex-1 p-6">
+			<div className="min-h-0 flex-1 p-3 sm:p-4 lg:p-6">
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockNumberByBlockId={blockNumberByBlockId}
@@ -1033,7 +970,6 @@ function WorkspaceContent({
 					annotationBlockIdById={annotationBlockIdById}
 					colorByBlock={colorByBlock}
 					dotColorsByNote={dotColorsByNote}
-					sourceExcerptByNote={sourceExcerptByNote}
 					numPages={numPages}
 					pdfRailLayout={pdfRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
@@ -1357,7 +1293,6 @@ interface MainNotesSplitProps {
 	annotationBlockIdById: Map<string, string>
 	colorByBlock: Map<string, string>
 	dotColorsByNote: Map<string, string[]>
-	sourceExcerptByNote: Map<string, string>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
 	main: React.ReactNode
@@ -1391,7 +1326,6 @@ function MainNotesSplit({
 	annotationBlockIdById,
 	colorByBlock,
 	dotColorsByNote,
-	sourceExcerptByNote,
 	numPages,
 	pdfRailLayout,
 	main,
@@ -1414,35 +1348,36 @@ function MainNotesSplit({
 	// note popover is portaled and expands left over the PDF, so the
 	// rail itself only needs room for its dots.
 	return (
-		<div className="flex h-full min-h-0 min-w-0">
+		<div className="relative h-full min-h-0 min-w-0 lg:flex">
 			<div className="min-h-0 min-w-0 flex-1">{main}</div>
-			<NotesPanel
-				activeCitingNoteIds={activeCitingNoteIds}
-				blockAnchorsById={blockAnchorsById}
-				blockNumberByBlockId={blockNumberByBlockId}
-				colorByAnnotation={colorByAnnotation}
-				annotationOrdinalById={annotationOrdinalById}
-				annotationBlockIdById={annotationBlockIdById}
-				colorByBlock={colorByBlock}
-				dotColorsByNote={dotColorsByNote}
-				sourceExcerptByNote={sourceExcerptByNote}
+			<div className="absolute inset-y-0 right-0 z-[5] lg:static lg:inset-auto lg:z-auto lg:shrink-0">
+				<NotesPanel
+					activeCitingNoteIds={activeCitingNoteIds}
+					blockAnchorsById={blockAnchorsById}
+					blockNumberByBlockId={blockNumberByBlockId}
+					colorByAnnotation={colorByAnnotation}
+					annotationOrdinalById={annotationOrdinalById}
+					annotationBlockIdById={annotationBlockIdById}
+					colorByBlock={colorByBlock}
+					dotColorsByNote={dotColorsByNote}
 				numPages={numPages}
 				pdfRailLayout={pdfRailLayout}
-				currentAnchorYRatio={currentAnchorYRatio}
-				currentPage={currentPage}
-				externalFollowLockUntil={autoFollowLockUntil}
-				expandedNoteId={expandedNoteId}
-				notes={notes}
-				onCreateAtCurrent={onCreateAtCurrent}
-				onDelete={onDeleteNote}
-				onEditorReady={onEditorReady}
-				onExpand={onExpand}
-				onJumpToPage={onJumpToPage}
-				onOpenCitationBlock={onOpenCitationBlock}
-				onOpenCitationAnnotation={onOpenCitationAnnotation}
-				isSidebarCollapsed={isNotesSidebarCollapsed}
-				onRequestExpandSidebar={onRequestExpandNotesSidebar}
-			/>
+					currentAnchorYRatio={currentAnchorYRatio}
+					currentPage={currentPage}
+					externalFollowLockUntil={autoFollowLockUntil}
+					expandedNoteId={expandedNoteId}
+					notes={notes}
+					onCreateAtCurrent={onCreateAtCurrent}
+					onDelete={onDeleteNote}
+					onEditorReady={onEditorReady}
+					onExpand={onExpand}
+					onJumpToPage={onJumpToPage}
+					onOpenCitationBlock={onOpenCitationBlock}
+					onOpenCitationAnnotation={onOpenCitationAnnotation}
+					isSidebarCollapsed={isNotesSidebarCollapsed}
+					onRequestExpandSidebar={onRequestExpandNotesSidebar}
+				/>
+			</div>
 		</div>
 	)
 }

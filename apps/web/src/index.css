@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @import "react-pdf/dist/Page/AnnotationLayer.css";
 @import "react-pdf/dist/Page/TextLayer.css";
@@ -56,8 +55,22 @@
 	--color-status-error-bg: oklch(0.93 0.035 25);
 	--color-status-error-text: oklch(0.45 0.13 25);
 
-	--font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
-	--font-sans: "Inter", system-ui, -apple-system, sans-serif;
+	--font-serif:
+		"Iowan Old Style",
+		"Palatino Linotype",
+		"Book Antiqua",
+		Georgia,
+		"GenYoMin TC",
+		"GenYoMin TW",
+		serif;
+	--font-sans:
+		"Avenir Next",
+		"Segoe UI",
+		"Helvetica Neue",
+		"GenYoMin TC",
+		"GenYoMin TW",
+		Arial,
+		sans-serif;
 	--font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
 
 	--text-md: 1rem;

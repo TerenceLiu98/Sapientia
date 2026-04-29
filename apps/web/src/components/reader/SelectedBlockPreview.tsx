@@ -12,6 +12,7 @@ import type { Block } from "@/api/hooks/blocks"
 const PREVIEW_MIN_SCALE = 0.75
 const PREVIEW_MAX_SCALE = 3.5
 const PREVIEW_MIN_WIDTH_PX = 320
+const PREVIEW_COMPACT_MIN_WIDTH_PX = 180
 const PREVIEW_MAX_WIDTH_PX = 1480
 const PREVIEW_VIEWPORT_MARGIN_PX = 48
 // Popup outer width targets at least this fraction of the viewport so
@@ -31,11 +32,12 @@ export function SelectedBlockPreview({
 	block: Block
 	onDismiss?: () => void
 }) {
+	const overlayRef = useRef<HTMLDivElement | null>(null)
 	const [popupScale, setPopupScale] = useState(1)
 	const [rotation, setRotation] = useState(0)
 	const [offset, setOffset] = useState({ x: 0, y: 0 })
 	const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
-	const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null)
+	const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null)
 	const interactionRef = useRef<
 		| {
 				mode: "drag"
@@ -58,7 +60,7 @@ export function SelectedBlockPreview({
 	const previewBaseSize = useMemo(() => {
 		const fallbackCaption = 1024
 		const fallbackImage = { width: 1024, height: 560 }
-		if (!naturalSize || !viewportSize) {
+		if (!naturalSize || !containerSize) {
 			return {
 				captionWidth: fallbackCaption,
 				imageWidth: fallbackImage.width,
@@ -68,20 +70,20 @@ export function SelectedBlockPreview({
 		const { width: nw, height: nh } = naturalSize
 
 		const availableWidth = Math.max(
-			PREVIEW_MIN_WIDTH_PX,
-			viewportSize.width - PREVIEW_VIEWPORT_MARGIN_PX * 2,
+			PREVIEW_COMPACT_MIN_WIDTH_PX,
+			containerSize.width - PREVIEW_VIEWPORT_MARGIN_PX * 2,
 		)
 		const availableHeight = Math.max(
 			240,
-			viewportSize.height - PREVIEW_VIEWPORT_MARGIN_PX * 2,
+			containerSize.height - PREVIEW_VIEWPORT_MARGIN_PX * 2,
 		)
 
 		// Caption dock width: rotation-invariant. Driven by the un-rotated
 		// natural width plus a viewport floor, so rotating never reflows
 		// the caption.
-		const targetWidth = Math.max(nw, viewportSize.width * PREVIEW_TARGET_VIEWPORT_FRACTION)
+		const targetWidth = Math.max(nw, containerSize.width * PREVIEW_TARGET_VIEWPORT_FRACTION)
 		const captionWidth = Math.max(
-			PREVIEW_MIN_WIDTH_PX,
+			Math.min(PREVIEW_MIN_WIDTH_PX, availableWidth),
 			Math.round(Math.min(targetWidth, availableWidth, PREVIEW_MAX_WIDTH_PX)),
 		)
 
@@ -105,7 +107,7 @@ export function SelectedBlockPreview({
 			imageWidth: Math.round(imageWidth),
 			imageHeight: Math.round(imageHeight),
 		}
-	}, [isQuarterTurn, naturalSize, summary, viewportSize])
+	}, [containerSize, isQuarterTurn, naturalSize, summary])
 
 	const endDrag = useCallback(() => {
 		interactionRef.current = null
@@ -145,13 +147,21 @@ export function SelectedBlockPreview({
 	}, [endDrag, handlePointerMove])
 
 	useEffect(() => {
-		if (typeof window === "undefined") return
-		const syncViewport = () => {
-			setViewportSize({ width: window.innerWidth, height: window.innerHeight })
+		const overlay = overlayRef.current
+		const container = overlay?.parentElement
+		if (!overlay || !container) return
+		const syncContainerSize = () => {
+			setContainerSize({ width: container.clientWidth, height: container.clientHeight })
 		}
-		syncViewport()
-		window.addEventListener("resize", syncViewport)
-		return () => window.removeEventListener("resize", syncViewport)
+		syncContainerSize()
+		if (typeof ResizeObserver === "undefined") {
+			if (typeof window === "undefined") return
+			window.addEventListener("resize", syncContainerSize)
+			return () => window.removeEventListener("resize", syncContainerSize)
+		}
+		const observer = new ResizeObserver(() => syncContainerSize())
+		observer.observe(container)
+		return () => observer.disconnect()
 	}, [])
 
 	useEffect(() => {
@@ -196,7 +206,7 @@ export function SelectedBlockPreview({
 	)
 
 	return (
-		<div className="pointer-events-none absolute inset-0 z-[5] p-6">
+		<div className="pointer-events-none absolute inset-0 z-[5] p-6" ref={overlayRef}>
 			<button
 				aria-label="Close focused preview"
 				className="pointer-events-auto absolute inset-0 bg-black/18 backdrop-blur-[1px]"
@@ -280,7 +290,12 @@ export function SelectedBlockPreview({
 				className="pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-border-subtle/70 bg-bg-overlay/70 px-5 py-3 shadow-[var(--shadow-popover)] backdrop-blur-md"
 				style={{
 					width: `${previewBaseSize.captionWidth}px`,
-					maxWidth: "calc(100vw - 96px)",
+					maxWidth: containerSize
+						? `${Math.max(
+								PREVIEW_COMPACT_MIN_WIDTH_PX,
+								containerSize.width - PREVIEW_VIEWPORT_MARGIN_PX * 2,
+							)}px`
+						: "calc(100% - 96px)",
 				}}
 			>
 				{summary ? (

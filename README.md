@@ -29,9 +29,16 @@ Most "AI for papers" tools answer for you. Sapientia is built for the opposite h
 - **Restraint-first AI.** v0.1 ships a single-turn "ask about this paper" agent with explicit context layers. No tool-calling, no auto-summoning, no workspace-wide context bleed.
 - **Self-hostable.** Bring your own MinerU token and Anthropic / OpenAI key. Postgres + Redis + MinIO run in your cluster.
 
-## Screenshots
+## For Now
 
-> Drop `.png`s into [`demo/`](demo/) and reference them here as your reading flow stabilizes. The block-level highlight palette, the three-pane note editor, and the wiki-page knowledge graph are the obvious shots.
+**Sapientia is in early development and in a quick iteration phase.** 
+
+Date: Apr 29, 2026: 
+<center>
+    <figure>
+        <img src="https://32cf906.webp.li/2026/04/sapientia-development-example-1.png" width="60%" alt="Sapientia Reading Mode">
+    <figure>
+</center>
 
 ## Quick start
 
