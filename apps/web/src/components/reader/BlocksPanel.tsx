@@ -316,13 +316,18 @@ function BlocksPanelScrollBody({
 	// the smooth-scrolling PDF can't drag this pane through every intermediate
 	// page header on the way to the target.
 	const lockUntilRef = useRef(0)
-	// Set right before a click *inside this pane* selects a block. The
-	// selection effect treats this as "the user can already see the block,
-	// don't auto-scroll the pane" — only PDF-side or programmatic selections
-	// should re-center the card. Avoids the small jitter where clicking a
-	// fully-visible card scrolls it the few pixels needed to be exactly
-	// centered in the viewport.
-	const skipNextSelectionScrollRef = useRef(false)
+	// Tracks which selectedBlockRequestNonce value we've already
+	// auto-scrolled to. The nonce only bumps for OUTSIDE-this-pane
+	// selections (PDF click → handleSelectBlock; citation chip jump →
+	// handleJumpToBlock). In-pane card clicks change selectedBlockId
+	// without bumping the nonce, so the selection-scroll effect will
+	// see "already handled" and skip the scroll branch. This protects
+	// against cardRefsVersion ticks (or any other dep tick that re-runs
+	// the effect after the click) re-firing the smooth scroll and
+	// stealing the user's wheel scroll attempts. Initialized so the
+	// initial render is treated as already-handled — first PDF select
+	// or citation jump bumps the nonce and triggers the first scroll.
+	const handledSelectionNonceRef = useRef<number | undefined>(undefined)
 
 	useEffect(() => {
 		if (!externalFollowLockUntil) return
@@ -336,7 +341,6 @@ function BlocksPanelScrollBody({
 
 	const handleBlockSelectFromPane = useCallback(
 		(block: Block) => {
-			skipNextSelectionScrollRef.current = true
 			onSelect?.(block)
 		},
 		[onSelect],
@@ -348,10 +352,10 @@ function BlocksPanelScrollBody({
 		const requestKey = `${requestedPageNonce ?? "default"}:${requestedPage}:${requestedAnchorYRatio ?? "none"}`
 		if (handledRequestedJumpRef.current === requestKey) return
 		lockUntilRef.current = Date.now() + 500
-		// A programmatic jump already positions the pane at the target block.
-		// Skip the next selection-driven recenter so we don't "correct" the
-		// scroll a second time and create a visible bounce.
-		skipNextSelectionScrollRef.current = true
+		// Mark this selection nonce as already handled so the selection-
+		// scroll effect doesn't immediately re-center after we land here.
+		// The programmatic jump itself will scroll to the target.
+		handledSelectionNonceRef.current = selectedBlockRequestNonce
 		const container = scrollRef.current
 		const header = pageHeaderRefs.current.get(requestedPage)
 		if (!container || !header) return
@@ -518,19 +522,28 @@ function BlocksPanelScrollBody({
 	}, [scheduleViewportMeasure])
 
 	useEffect(() => {
-		void selectedBlockRequestNonce
 		if (requestedPage) return
 		// Lock the page-driven scroll regardless — we don't want the PDF's
 		// smooth-scroll to drag the pane through intermediate pages even if
 		// we're skipping our own selection scroll.
 		if (selectedBlockId) lockUntilRef.current = Date.now() + 500
-		if (skipNextSelectionScrollRef.current) {
-			skipNextSelectionScrollRef.current = false
+
+		// Only auto-recenter for OUTSIDE-this-pane selections. PDF clicks
+		// and citation chip jumps bump selectedBlockRequestNonce; in-pane
+		// card clicks change selectedBlockId without bumping the nonce.
+		// Without this gate, transient cardRefsVersion ticks (e.g. from a
+		// re-render touching a ref callback) would re-fire the scroll
+		// after a click and steal the user's wheel scroll attempts.
+		if (handledSelectionNonceRef.current === selectedBlockRequestNonce) return
+
+		if (!selectedBlockId) {
+			handledSelectionNonceRef.current = selectedBlockRequestNonce
 			return
 		}
-		if (!selectedBlockId) return
 		const card = cardRefs.current.get(selectedBlockId)
 		const container = scrollRef.current
+		// Wait until the card's ref has registered — cardRefsVersion will
+		// re-trigger this effect when it does.
 		if (!card || !container) return
 		// `offsetTop` is unreliable here because the scroll container isn't
 		// guaranteed to be the offsetParent. Compute the card's position via
@@ -541,6 +554,7 @@ function BlocksPanelScrollBody({
 		const cardTopInContent = cardRect.top - containerRect.top + container.scrollTop
 		const target = cardTopInContent - container.clientHeight / 2 + cardRect.height / 2
 		scrollContainerToOffset(target)
+		handledSelectionNonceRef.current = selectedBlockRequestNonce
 	}, [cardRefsVersion, requestedPage, selectedBlockId, selectedBlockRequestNonce, scrollContainerToOffset])
 
 	// Follow PDF scroll: when the PDF advances to a new page, snap the parsed
