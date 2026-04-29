@@ -10,6 +10,8 @@ export interface CredentialsStatus {
 	hasMineruToken: boolean
 	hasLlmKey: boolean
 	llmProvider: LlmProvider | null
+	llmBaseUrl: string | null
+	llmModel: string | null
 }
 
 export async function getCredentialsStatus(userId: string): Promise<CredentialsStatus> {
@@ -20,13 +22,21 @@ export async function getCredentialsStatus(userId: string): Promise<CredentialsS
 		.limit(1)
 
 	if (!row) {
-		return { hasMineruToken: false, hasLlmKey: false, llmProvider: null }
+		return {
+			hasMineruToken: false,
+			hasLlmKey: false,
+			llmProvider: null,
+			llmBaseUrl: null,
+			llmModel: null,
+		}
 	}
 
 	return {
 		hasMineruToken: row.mineruTokenCiphertext != null,
 		hasLlmKey: row.llmApiKeyCiphertext != null,
 		llmProvider: row.llmProvider,
+		llmBaseUrl: row.llmBaseUrl ?? null,
+		llmModel: row.llmModel?.trim() ? row.llmModel.trim() : null,
 	}
 }
 
@@ -43,21 +53,29 @@ export async function getMineruToken(userId: string): Promise<string | null> {
 
 export async function getLlmCredential(
 	userId: string,
-): Promise<{ provider: LlmProvider; apiKey: string } | null> {
+): Promise<{ provider: LlmProvider; apiKey: string; baseURL: string | null; model: string } | null> {
 	const [row] = await db
 		.select()
 		.from(userCredentials)
 		.where(eq(userCredentials.userId, userId))
 		.limit(1)
 
-	if (!row?.llmApiKeyCiphertext || !row.llmProvider) return null
-	return { provider: row.llmProvider, apiKey: decrypt(row.llmApiKeyCiphertext) }
+	const model = row?.llmModel?.trim()
+	if (!row?.llmApiKeyCiphertext || !row.llmProvider || !model) return null
+	return {
+		provider: row.llmProvider,
+		apiKey: decrypt(row.llmApiKeyCiphertext),
+		baseURL: row.llmBaseUrl?.trim() ? row.llmBaseUrl.trim() : null,
+		model,
+	}
 }
 
 export interface CredentialsUpdate {
 	mineruToken?: string | null
 	llmProvider?: LlmProvider | null
 	llmApiKey?: string | null
+	llmBaseUrl?: string | null
+	llmModel?: string | null
 }
 
 export async function updateCredentials(userId: string, updates: CredentialsUpdate) {
@@ -74,6 +92,12 @@ export async function updateCredentials(userId: string, updates: CredentialsUpda
 	}
 	if (updates.llmApiKey !== undefined) {
 		dbValues.llmApiKeyCiphertext = updates.llmApiKey ? encrypt(updates.llmApiKey) : null
+	}
+	if (updates.llmBaseUrl !== undefined) {
+		dbValues.llmBaseUrl = updates.llmBaseUrl?.trim() ? updates.llmBaseUrl.trim() : null
+	}
+	if (updates.llmModel !== undefined) {
+		dbValues.llmModel = updates.llmModel?.trim() ? updates.llmModel.trim() : null
 	}
 
 	await db

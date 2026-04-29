@@ -31,9 +31,23 @@ export function useAppShellLayout() {
 // pages keep `overflow-hidden` and let an inner viewer scroll. Without
 // this, nested overflow-auto containers (PDF viewer, blocks panel) end
 // up scrolling the whole document instead of themselves.
-export function AppShell(props: { title: string; children: ReactNode }) {
+export function AppShell(props: {
+	title: string
+	children: ReactNode
+	isAgentPanelOpen?: boolean
+	onAgentPanelOpenChange?: (open: boolean) => void
+	rightPanel?: ReactNode
+}) {
 	const [isLeftNavOpen, setIsLeftNavOpen] = useState(() => loadLeftNavVisible())
-	const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
+	const [uncontrolledAgentPanelOpen, setUncontrolledAgentPanelOpen] = useState(false)
+	const isAgentPanelOpen = props.isAgentPanelOpen ?? uncontrolledAgentPanelOpen
+	const setIsAgentPanelOpen = (next: boolean | ((open: boolean) => boolean)) => {
+		const resolved = typeof next === "function" ? next(isAgentPanelOpen) : next
+		props.onAgentPanelOpenChange?.(resolved)
+		if (props.isAgentPanelOpen === undefined) {
+			setUncontrolledAgentPanelOpen(resolved)
+		}
+	}
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
@@ -100,7 +114,7 @@ export function AppShell(props: { title: string; children: ReactNode }) {
 							isLeftNavOpen ? "lg:col-start-3" : "lg:col-start-2"
 						}`}
 					>
-						<RightPanel />
+						{props.rightPanel ?? <RightPanel />}
 					</aside>
 				) : null}
 			</div>

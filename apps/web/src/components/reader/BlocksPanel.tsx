@@ -2,6 +2,7 @@ import "katex/dist/katex.min.css"
 import { memo, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import katex from "katex"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
 import { BlockHighlightPicker } from "./BlockHighlightPicker"
@@ -877,7 +878,7 @@ const BlockRow = memo(function BlockRow({
 		e.stopPropagation()
 		const text = (block.caption ?? block.text ?? "").trim()
 		if (!text) return
-		void navigator.clipboard?.writeText(text)
+		void copyTextToClipboard(text)
 	}
 
 	// Block-level fill is the only highlight rendering — soft tinted bg
@@ -926,7 +927,7 @@ const BlockRow = memo(function BlockRow({
 			 * (zero gap) keeps the toolbar a hover descendant so cursor
 			 * transit between row and toolbar doesn't fire mouseleave.
 			 */}
-			<div className="absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+			<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
 				{citationCount && citationCount > 0 ? (
 					<span className="relative">
 						<button

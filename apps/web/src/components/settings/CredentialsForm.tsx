@@ -13,6 +13,8 @@ export function CredentialsForm() {
 	const [showMineru, setShowMineru] = useState(false)
 	const [llmProvider, setLlmProvider] = useState<LlmProvider>("anthropic")
 	const [llmApiKey, setLlmApiKey] = useState("")
+	const [llmBaseUrl, setLlmBaseUrl] = useState("")
+	const [llmModel, setLlmModel] = useState("")
 	const [showLlm, setShowLlm] = useState(false)
 	const [savedMessage, setSavedMessage] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -23,10 +25,24 @@ export function CredentialsForm() {
 		setSavedMessage(null)
 
 		const updates: Parameters<typeof update.mutateAsync>[0] = {}
+		const llmApiKeyValue = llmApiKey.trim()
+		const llmBaseUrlValue = llmBaseUrl.trim()
+		const llmModelValue = llmModel.trim()
+
 		if (mineruToken.trim()) updates.mineruToken = mineruToken.trim()
-		if (llmApiKey.trim()) {
+		if (llmApiKeyValue && !llmModelValue && !data?.llmModel) {
+			setError("Model name is required when saving an LLM key.")
+			return
+		}
+		if (llmApiKeyValue) {
 			updates.llmProvider = llmProvider
-			updates.llmApiKey = llmApiKey.trim()
+			updates.llmApiKey = llmApiKeyValue
+		}
+		if (llmBaseUrlValue) {
+			updates.llmBaseUrl = llmBaseUrlValue
+		}
+		if (llmModelValue) {
+			updates.llmModel = llmModelValue
 		}
 
 		if (Object.keys(updates).length === 0) {
@@ -38,6 +54,8 @@ export function CredentialsForm() {
 			await update.mutateAsync(updates)
 			setMineruToken("")
 			setLlmApiKey("")
+			setLlmBaseUrl("")
+			setLlmModel("")
 			setSavedMessage("Saved.")
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Save failed")
@@ -97,8 +115,9 @@ export function CredentialsForm() {
 					</div>
 					<h2 className="font-serif text-xl text-text-primary">Reading assistant API key</h2>
 					<p className="mt-1 text-sm text-text-secondary">
-						Used by the agent and the wiki ingestion pipeline. Pick a provider you have a key for —
-						Sapientia never sends your key anywhere except the provider you choose.
+						Used by the agent and the wiki ingestion pipeline. Save the provider, exact model
+						name, and API key your endpoint expects. Sapientia never sends your key anywhere
+						except the provider you choose.
 					</p>
 				</header>
 				<div className="grid gap-4 sm:grid-cols-[180px_1fr]">
@@ -143,6 +162,45 @@ export function CredentialsForm() {
 							</button>
 						</div>
 					</div>
+				</div>
+				<div className="space-y-1.5">
+					<label className="block text-sm font-medium text-text-primary" htmlFor="llm-base-url">
+						Base URL{" "}
+						<span className="text-xs text-text-tertiary">
+							{data?.llmBaseUrl ? `configured (${data.llmBaseUrl})` : "optional"}
+						</span>
+					</label>
+					<input
+						className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+						id="llm-base-url"
+						onChange={(e) => setLlmBaseUrl(e.target.value)}
+						placeholder={data?.llmBaseUrl ?? "https://api.openai.com/v1"}
+						type="url"
+						value={llmBaseUrl}
+					/>
+					<p className="text-xs leading-5 text-text-secondary">
+						Optional. Use this for OpenAI-compatible endpoints or self-hosted Anthropic-compatible
+						proxies.
+					</p>
+				</div>
+				<div className="space-y-1.5">
+					<label className="block text-sm font-medium text-text-primary" htmlFor="llm-model">
+						Model name{" "}
+						<span className="text-xs text-text-tertiary">
+							{data?.llmModel ? `configured (${data.llmModel})` : "required for BYOK"}
+						</span>
+					</label>
+					<input
+						className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+						id="llm-model"
+						onChange={(e) => setLlmModel(e.target.value)}
+						placeholder={data?.llmModel ?? "claude-sonnet-4-5 / gpt-4o / your-deployment-name"}
+						type="text"
+						value={llmModel}
+					/>
+					<p className="text-xs leading-5 text-text-secondary">
+						Required. Enter the exact model or deployment name your provider endpoint expects.
+					</p>
 				</div>
 			</section>
 

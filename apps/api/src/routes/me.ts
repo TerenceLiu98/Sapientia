@@ -7,6 +7,8 @@ const UpdateCredentialsSchema = z.object({
 	mineruToken: z.string().nullable().optional(),
 	llmProvider: z.enum(["anthropic", "openai"]).nullable().optional(),
 	llmApiKey: z.string().nullable().optional(),
+	llmBaseUrl: z.string().url().nullable().optional(),
+	llmModel: z.string().trim().min(1).nullable().optional(),
 })
 
 export const meRoutes = new Hono<AuthContext>()

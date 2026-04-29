@@ -1,3 +1,4 @@
+import { AGENT_SUMMON_V1 } from "./agent-summon-v1"
 import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
 
 // Registry of prompt templates available across Sapientia. Each ID
@@ -12,6 +13,7 @@ import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
 // the answer is more pre-computed input slots, not a templating
 // engine. Keep prompts readable as static text.
 const PROMPTS = {
+	"agent-summon-v1": AGENT_SUMMON_V1,
 	"source-summary-v1": SOURCE_SUMMARY_V1,
 } as const
 

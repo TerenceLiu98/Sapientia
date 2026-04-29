@@ -18,6 +18,8 @@ export const userCredentials = pgTable("user_credentials", {
 	// LLM provider + envelope-encrypted API key.
 	llmProvider: text("llm_provider", { enum: ["anthropic", "openai"] }),
 	llmApiKeyCiphertext: bytea("llm_api_key_ciphertext"),
+	llmBaseUrl: text("llm_base_url"),
+	llmModel: text("llm_model"),
 
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })

@@ -1,5 +1,15 @@
 import { Link } from "@tanstack/react-router"
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+	type Dispatch,
+	type SetStateAction,
+	memo,
+	startTransition,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import {
 	useNotesForBlock,
@@ -18,6 +28,9 @@ import {
 	useUpdateReaderAnnotationColor,
 } from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
+import { AgentPanel } from "@/components/agent/AgentPanel"
+import type { AgentSelectionContext } from "@/components/agent/types"
+import { getOrCreateAgentChatSession } from "@/components/agent/useAgentChat"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
@@ -35,6 +48,7 @@ type ViewMode = "pdf-only" | "md-only"
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
 const NOTES_SIDEBAR_COLLAPSED_KEY = "paperWorkspace.notesSidebarCollapsed"
 const AUTO_FOLLOW_LOCK_MS = 1400
+const AGENT_QUOTE_MAX_CHARS = 480
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
@@ -61,6 +75,12 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [currentPage, setCurrentPage] = useState(1)
 	const [currentAnchorYRatio, setCurrentAnchorYRatio] = useState(0.5)
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+	const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
+	const [agentSummonNonce, setAgentSummonNonce] = useState(0)
+	const [agentSummonPrefill, setAgentSummonPrefill] = useState("")
+	const [agentSummonSelectionContext, setAgentSummonSelectionContext] = useState<
+		AgentSelectionContext | undefined
+	>(undefined)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [optimisticNotes, setOptimisticNotes] = useState<Note[]>([])
@@ -84,6 +104,14 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const restoreReaderAnnotation = useRestoreReaderAnnotation(paperId, workspace?.id)
 	const updateReaderAnnotationColor = useUpdateReaderAnnotationColor(paperId, workspace?.id)
 	const { palette } = usePalette()
+	const agentSession = useMemo(() => {
+		if (!workspace?.id) return null
+		return getOrCreateAgentChatSession({
+			sessionKey: `${workspace.id}:${paperId}`,
+			paperId,
+			workspaceId: workspace.id,
+		})
+	}, [paperId, workspace?.id])
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
@@ -119,7 +147,17 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				: null,
 		[blocks, selectedBlockId],
 	)
+	const viewportSelectionContext = useMemo<AgentSelectionContext | undefined>(() => {
+		const viewportBlockIds = getViewportBlockIds(blocks ?? [], currentPage, currentAnchorYRatio)
+		if (viewportBlockIds.length === 0) return undefined
+		return { blockIds: viewportBlockIds }
+	}, [blocks, currentAnchorYRatio, currentPage])
 	const previousViewModeRef = useRef<ViewMode | null>(null)
+
+	if (agentSession) {
+		agentSession.selectionContextRef.current =
+			agentSummonSelectionContext ?? viewportSelectionContext
+	}
 
 	const requestMainPaneFocus = useCallback((block: Block) => {
 		setRequestedPage(block.page)
@@ -363,7 +401,12 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				anchorBlockId: block.blockId,
 			})
 			upsertOptimisticNote(note)
-			handleSelectBlock(block)
+			// Text blocks keep the existing "select while note opens" cue,
+			// but media blocks should not flash their focused preview just
+			// because the user clicked the note action in the hover toolbar.
+			if (block.type !== "figure" && block.type !== "table") {
+				handleSelectBlock(block)
+			}
 			setExpandedNoteId(note.id)
 			setPendingCiteBlock(block)
 		},
@@ -412,24 +455,44 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	//   • Note open     -> Cite into that note
 	const renderActions = useCallback(
 		(block: Block) => (
-			<button
-				aria-label={
-					expandedNoteId ? "Cite this block in the open note" : "Add a new note for this block"
-				}
-				className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
-				onClick={(e) => {
-					e.stopPropagation()
-					if (expandedNoteId) {
-						handleCiteBlock(block)
-						return
+			<>
+				<button
+					aria-label="Ask the agent about this block"
+					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+					onClick={(e) => {
+						e.stopPropagation()
+						summonAgentForBlock({
+							block,
+							setAgentPanelOpen: setIsAgentPanelOpen,
+							setSelectionContext: setAgentSummonSelectionContext,
+							setSummonNonce: setAgentSummonNonce,
+							setSummonPrefill: setAgentSummonPrefill,
+						})
+					}}
+					title="Ask agent"
+					type="button"
+				>
+					<AgentIcon />
+				</button>
+				<button
+					aria-label={
+						expandedNoteId ? "Cite this block in the open note" : "Add a new note for this block"
 					}
-					void handleNewNoteForBlock(block)
-				}}
-				title={expandedNoteId ? "Cite in open note" : "New note"}
-				type="button"
-			>
-				{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
-			</button>
+					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+					onClick={(e) => {
+						e.stopPropagation()
+						if (expandedNoteId) {
+							handleCiteBlock(block)
+							return
+						}
+						void handleNewNoteForBlock(block)
+					}}
+					title={expandedNoteId ? "Cite in open note" : "New note"}
+					type="button"
+				>
+					{expandedNoteId ? <CiteIcon /> : <NoteIcon />}
+				</button>
+			</>
 		),
 		[expandedNoteId, handleCiteBlock, handleNewNoteForBlock],
 	)
@@ -784,7 +847,37 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	)
 
 	return (
-		<AppShell title={paper?.title ?? "Paper"}>
+		<AppShell
+			isAgentPanelOpen={isAgentPanelOpen}
+			onAgentPanelOpenChange={(open) => {
+				if (!open) {
+					void agentSession?.chat.stop()
+					setIsAgentPanelOpen(false)
+					return
+				}
+				setAgentSummonSelectionContext(undefined)
+				setAgentSummonPrefill("")
+				setAgentSummonNonce((value) => value + 1)
+				setIsAgentPanelOpen(true)
+			}}
+			rightPanel={
+				agentSession ? (
+					<AgentPanel
+						chat={agentSession.chat}
+						isOpen={isAgentPanelOpen}
+						onClose={() => {
+							void agentSession.chat.stop()
+							setIsAgentPanelOpen(false)
+						}}
+						onOpenBlock={(blockId) => handleOpenCitationBlock(paperId, blockId)}
+						paperTitle={paper?.title ?? "Paper"}
+						summonNonce={agentSummonNonce}
+						summonPrefill={agentSummonPrefill}
+					/>
+				) : undefined
+			}
+			title={paper?.title ?? "Paper"}
+		>
 			<WorkspaceContent
 				activeCitingNoteIds={activeCitingNoteIds}
 				blockNumberByBlockId={blockNumberByBlockId}
@@ -1490,6 +1583,41 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 	)
 }
 
+function summonAgentForBlock(args: {
+	block: Block
+	setAgentPanelOpen: (open: boolean) => void
+	setSelectionContext: (selection: AgentSelectionContext | undefined) => void
+	setSummonNonce: Dispatch<SetStateAction<number>>
+	setSummonPrefill: (text: string) => void
+}) {
+	const selectedText = normalizeAgentSnippet(args.block.caption || args.block.text)
+	args.setSelectionContext({
+		blockIds: [args.block.blockId],
+		selectedText,
+	})
+	args.setSummonPrefill(selectedText ? `"${selectedText}"\n\n` : "")
+	args.setSummonNonce((value) => value + 1)
+	args.setAgentPanelOpen(true)
+}
+
+function getViewportBlockIds(blocks: Block[], currentPage: number, currentAnchorYRatio: number) {
+	const candidates = blocks
+		.filter((block) => block.page === currentPage)
+		.map((block) => ({
+			blockId: block.blockId,
+			distance: Math.abs((block.bbox?.y ?? 0.5) - currentAnchorYRatio),
+		}))
+		.sort((a, b) => a.distance - b.distance)
+
+	return candidates.slice(0, 3).map((candidate) => candidate.blockId)
+}
+
+function normalizeAgentSnippet(text: string) {
+	const normalized = text.replace(/\s+/g, " ").trim()
+	if (normalized.length <= AGENT_QUOTE_MAX_CHARS) return normalized
+	return `${normalized.slice(0, AGENT_QUOTE_MAX_CHARS)}…`
+}
+
 function CiteIcon() {
 	return (
 		<svg
@@ -1505,6 +1633,25 @@ function CiteIcon() {
 		>
 			<path d="M3 21c3 0 7-1 7-8V5H3v8h4" />
 			<path d="M14 21c3 0 7-1 7-8V5h-7v8h4" />
+		</svg>
+	)
+}
+
+function AgentIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.6"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M12 4a8 8 0 0 1 8 8c0 4.4-3.6 8-8 8H5l-1 1v-9a8 8 0 0 1 8-8Z" />
+			<path d="M8 11h8M8 15h5" />
 		</svg>
 	)
 }

@@ -57,6 +57,7 @@ afterEach(() => {
 	delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight
 	delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop
 	delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo
+	delete (navigator as { clipboard?: unknown }).clipboard
 })
 
 describe("BlocksPanel", () => {
@@ -450,6 +451,42 @@ describe("BlocksPanel", () => {
 		await user.click(screen.getByRole("button", { name: /alpha text/i }))
 
 		expect(onInteract).toHaveBeenCalledTimes(1)
+	})
+
+	it("copies block text from the hover toolbar", async () => {
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				type: "text",
+				page: 1,
+				bbox: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 },
+				text: "Alpha text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+		]
+		const user = userEvent.setup()
+		const writeText = vi.fn().mockResolvedValue(undefined)
+
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: { writeText },
+		})
+
+		useBlocksMock.mockReturnValue({ data: blocks, isLoading: false, error: null })
+
+		const BlocksPanel = await importBlocksPanel()
+		render(<BlocksPanel paperId="paper-1" />)
+
+		await user.hover(screen.getByRole("button", { name: /alpha text/i }))
+		await user.click(screen.getByRole("button", { name: /copy block text/i }))
+
+		expect(writeText).toHaveBeenCalledWith("Alpha text")
 	})
 
 	it("renders inline and display LaTeX in parsed blocks", async () => {

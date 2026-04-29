@@ -7,12 +7,16 @@ export interface CredentialsStatus {
 	hasMineruToken: boolean
 	hasLlmKey: boolean
 	llmProvider: LlmProvider | null
+	llmBaseUrl: string | null
+	llmModel: string | null
 }
 
 export interface CredentialsUpdate {
 	mineruToken?: string | null
 	llmProvider?: LlmProvider | null
 	llmApiKey?: string | null
+	llmBaseUrl?: string | null
+	llmModel?: string | null
 }
 
 export function useCredentialsStatus() {

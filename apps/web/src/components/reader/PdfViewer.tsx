@@ -11,6 +11,7 @@ import { Document, Page } from "react-pdf"
 import type { Block } from "@/api/hooks/blocks"
 import type { ReaderAnnotation } from "@/api/hooks/reader-annotations"
 import { usePaperPdfUrl } from "@/api/hooks/papers"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 import {
 	READER_ANNOTATION_COLORS,
@@ -1304,7 +1305,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						{hasToolbar ? (
 							// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
 							<div
-								className="-translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+								className="pointer-events-none -translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"
 								onClick={(e) => e.stopPropagation()}
 								onKeyDown={(e) => e.stopPropagation()}
 								onMouseDown={(e) => e.stopPropagation()}
@@ -1327,7 +1328,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 									onClick={(e) => {
 										e.stopPropagation()
 										const text = (block.caption ?? block.text ?? "").trim()
-										if (text) void navigator.clipboard?.writeText(text)
+										if (text) void copyTextToClipboard(text)
 									}}
 									title="Copy"
 									type="button"

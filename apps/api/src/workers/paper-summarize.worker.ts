@@ -10,13 +10,12 @@ import {
 	type PaperSummarizeJobData,
 	type PaperSummarizeJobResult,
 } from "../queues/paper-summarize"
+import { getLlmCredential } from "../services/credentials"
 import { complete, LlmCallError, LlmCredentialMissingError } from "../services/llm-client"
 
-// TASK-019: bumping either constant invalidates every paper's cached
-// summary on next worker run via the idempotency check below. Treat
-// them as the only places to make that judgement — anywhere else
-// asking "is this summary fresh?" must read these.
-const CURRENT_MODEL = "claude-sonnet-4-6"
+// TASK-019 / TASK-022: the prompt version remains app-owned, but the
+// actual model name is now user-configured because BYOK providers can
+// expose arbitrary deployment names.
 const CURRENT_PROMPT_VERSION = "source-summary-v1"
 
 // Bound the prompt's content slot so a long paper can't blow past the
@@ -37,6 +36,22 @@ async function processPaperSummarize(
 	const [paper] = await db.select().from(papers).where(eq(papers.id, paperId)).limit(1)
 	if (!paper) throw new Error(`paper ${paperId} not found`)
 
+	const credential = await getLlmCredential(userId)
+	if (!credential) {
+		await db
+			.update(papers)
+			.set({
+				summaryStatus: "no-credentials",
+				summaryError: null,
+				updatedAt: new Date(),
+			})
+			.where(eq(papers.id, paperId))
+		log.info("paper_summarize_no_credentials")
+		return { paperId, status: "no-credentials" }
+	}
+
+	const currentModel = credential.model
+
 	// Idempotency: matching model + prompt version + status=done means
 	// nothing about the summary's freshness has changed since last run.
 	// Returning "skipped" is a normal success path — the BullMQ retry
@@ -44,7 +59,7 @@ async function processPaperSummarize(
 	if (
 		paper.summary &&
 		paper.summaryStatus === "done" &&
-		paper.summaryModel === CURRENT_MODEL &&
+		paper.summaryModel === currentModel &&
 		paper.summaryPromptVersion === CURRENT_PROMPT_VERSION
 	) {
 		log.info(
@@ -100,7 +115,7 @@ async function processPaperSummarize(
 		const result = await complete({
 			userId,
 			promptId: CURRENT_PROMPT_VERSION,
-			model: CURRENT_MODEL,
+			model: currentModel,
 			messages: [{ role: "user", content: userPrompt }],
 			maxTokens: 2048,
 			temperature: 0.4,

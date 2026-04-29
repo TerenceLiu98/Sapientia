@@ -39,6 +39,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "anthropic",
 			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -76,6 +78,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "openai",
 			apiKey: "sk-openai-test",
+			baseURL: null,
+			model: "gpt-4o",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -116,6 +120,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "anthropic",
 			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -157,6 +163,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "anthropic",
 			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -183,6 +191,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "openai",
 			apiKey: "sk-openai-test",
+			baseURL: null,
+			model: "gpt-4o",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -224,6 +234,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "anthropic",
 			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -268,6 +280,8 @@ describe("llm-client", () => {
 		vi.mocked(getLlmCredential).mockResolvedValue({
 			provider: "anthropic",
 			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
 		})
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
