@@ -62,7 +62,7 @@ import {
 	NoteCitationThemeProvider,
 } from "./citation-schema"
 
-type SaveStatus = "idle" | "saving" | "saved" | "failed"
+export type SaveStatus = "idle" | "saving" | "saved" | "failed"
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
 const noteEditorContentCache = new Map<string, unknown>()
@@ -82,6 +82,10 @@ const editorExtensions = [
 		// Keep dropcursor subtle — the default `#ddeeff` reads teal/green over
 		// our cream reading background.
 		dropcursor: { color: "rgba(15, 23, 42, 0.22)", width: 2 },
+		// `horizontalRule` is registered separately below via novel's
+		// re-export — disabling it here avoids Tiptap's "duplicate
+		// extension names" warning. Behavior identical either way.
+		horizontalRule: false,
 	}),
 	Placeholder.configure({
 		placeholder: "Type '/' for commands…",
@@ -269,6 +273,13 @@ interface Props {
 	) => void
 	headerActions?: ReactNode
 	beforeEditorContent?: ReactNode
+	// Save-status hand-off. When provided, the parent owns the visual
+	// indicator (e.g. the marginalia slip header renders a single icon
+	// alongside Jump/Close) and NoteEditor's internal "Saving… / Saved"
+	// text is hidden to avoid duplication. When omitted, internal text
+	// renders as before — so standalone routes like `/notes/:id` keep
+	// their existing UX without changes.
+	onSaveStatusChange?: (status: SaveStatus) => void
 	// Lookup maps surfaced via NoteCitationThemeContext so chips inside
 	// the editor can render the canonical `highlight K p. P blk. B`
 	// label. Optional — chips fall back to the snapshot when absent.
@@ -284,6 +295,7 @@ export function NoteEditor({
 	onOpenCitationAnnotation,
 	headerActions,
 	beforeEditorContent,
+	onSaveStatusChange,
 	annotationOrdinalById,
 	annotationBlockIdById,
 	blockNumberByBlockId,
@@ -335,6 +347,15 @@ export function NoteEditor({
 		}
 	}, [noteId])
 
+	// Forward save-status to a parent that wants to render its own
+	// indicator (e.g. the marginalia slip header). Driven by useEffect
+	// so we never call back during render. Cheap because saveStatus
+	// only flips on a small set of transitions (type → "saving",
+	// debounce fires → "saved" / "failed", noteId change → "idle").
+	useEffect(() => {
+		onSaveStatusChange?.(saveStatus)
+	}, [saveStatus, onSaveStatusChange])
+
 	if ((isLoading && !displayedNote) || !displayedNote || initialContent === null) {
 		return <div className="p-6 text-sm text-text-tertiary">Loading note…</div>
 	}
@@ -345,6 +366,7 @@ export function NoteEditor({
 			initialContent={initialContent}
 			saveStatus={saveStatus}
 			setSaveStatus={setSaveStatus}
+			suppressInternalSaveStatus={Boolean(onSaveStatusChange)}
 			titleDraft={titleDraft}
 			setTitleDraft={setTitleDraft}
 			updateNote={updateNote}
@@ -656,6 +678,7 @@ function NoteEditorInner({
 	initialContent,
 	saveStatus,
 	setSaveStatus,
+	suppressInternalSaveStatus,
 	titleDraft,
 	setTitleDraft,
 	updateNote,
@@ -673,6 +696,7 @@ function NoteEditorInner({
 	initialContent: unknown
 	saveStatus: SaveStatus
 	setSaveStatus: (s: SaveStatus) => void
+	suppressInternalSaveStatus?: boolean
 	titleDraft: string
 	setTitleDraft: (s: string) => void
 	updateNote: ReturnType<typeof useUpdateNote>
@@ -790,11 +814,13 @@ function NoteEditorInner({
 				)}
 				<div className="flex max-w-[65%] flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
 					{headerActions}
-					<div className="text-xs text-text-tertiary">
-						{saveStatus === "saving" && "Saving…"}
-						{saveStatus === "saved" && "Saved"}
-						{saveStatus === "failed" && <span className="text-text-error">Save failed</span>}
-					</div>
+					{suppressInternalSaveStatus ? null : (
+						<div className="text-xs text-text-tertiary">
+							{saveStatus === "saving" && "Saving…"}
+							{saveStatus === "saved" && "Saved"}
+							{saveStatus === "failed" && <span className="text-text-error">Save failed</span>}
+						</div>
+					)}
 				</div>
 			</div>
 			<div className="note-editor__body flex-1 overflow-y-auto">
@@ -876,10 +902,21 @@ function NoteEditorInner({
 								if (debounceRef.current) clearTimeout(debounceRef.current)
 								debounceRef.current = setTimeout(async () => {
 									try {
+										const json = ed.getJSON()
 										await updateNote.mutateAsync({
 											noteId: note.id,
-											blocknoteJson: ed.getJSON(),
+											blocknoteJson: json,
 										})
+										// Keep the in-memory cache in sync with what we
+										// just persisted. Without this, folding the slip
+										// then reopening it (e.g. in the marginalia
+										// gutter) re-reads the stale pre-edit JSON from
+										// the cache and the user's writing appears to
+										// vanish, even though the backend has it. Fixed
+										// here rather than via cache-bust on every
+										// reopen because we already have the canonical
+										// JSON in hand at save time — no extra fetch.
+										noteEditorContentCache.set(note.id, json)
 										setSaveStatus("saved")
 									} catch {
 										setSaveStatus("failed")
