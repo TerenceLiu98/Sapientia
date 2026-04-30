@@ -1,4 +1,9 @@
-<svg viewBox="0 0 24 24">
-  <path d="M6 3 L6 21" stroke="currentColor" stroke-width="2"/>
-  <path d="M10 8 L18 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="220" fill="oklch(0.985 0.003 75)"/>
+  
+  <rect x="308" y="238" width="64" height="548" rx="32" fill="oklch(0.37 0.09 195)"/>
+  
+  <circle cx="518" cy="370" r="58" fill="oklch(0.37 0.09 195)"/>
+  
+  <rect x="462" y="506" width="238" height="56" rx="28" fill="oklch(0.37 0.09 195)"/>
 </svg>

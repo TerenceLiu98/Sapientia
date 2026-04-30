@@ -41,7 +41,7 @@ describe("agent route", () => {
 
 		streamAgentAnswerMock.mockResolvedValue({
 			model: "claude-sonnet-4-6",
-			promptId: "agent-summon-v1",
+			promptId: "agent-summon-v2",
 			stream: {
 				toUIMessageStreamResponse: () =>
 					new Response("data: {\"type\":\"start\"}\n\ndata: {\"type\":\"finish\"}\n\n", {
@@ -90,7 +90,7 @@ describe("agent route", () => {
 
 		streamAgentAnswerMock.mockResolvedValue({
 			model: "claude-sonnet-4-6",
-			promptId: "agent-summon-v1",
+			promptId: "agent-summon-v2",
 			stream: {
 				toUIMessageStreamResponse: () =>
 					new Response("data: {\"type\":\"finish\"}\n\n", {
@@ -118,7 +118,7 @@ describe("agent route", () => {
 					{
 						id: "msg-2",
 						role: "assistant",
-						metadata: { model: "glm-5.1", promptId: "agent-summon-v1" },
+						metadata: { model: "glm-5.1", promptId: "agent-summon-v2" },
 						parts: [],
 					},
 					{
@@ -137,6 +137,64 @@ describe("agent route", () => {
 					expect.objectContaining({ id: "msg-1" }),
 					expect.objectContaining({ id: "msg-3" }),
 				],
+			}),
+		)
+	})
+
+	it("passes selectionContext through to the agent service", async () => {
+		const workspaceId = "123e4567-e89b-42d3-a456-426614174000"
+		selectMock.mockReturnValue({
+			from: () => ({
+				innerJoin: () => ({
+					where: () => ({
+						limit: async () => [{ workspaceId }],
+					}),
+				}),
+			}),
+		})
+
+		streamAgentAnswerMock.mockResolvedValue({
+			model: "claude-sonnet-4-6",
+			promptId: "agent-summon-v2",
+			stream: {
+				toUIMessageStreamResponse: () =>
+					new Response("data: {\"type\":\"finish\"}\n\n", {
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					}),
+			},
+		})
+
+		const { agentRoutes } = await import("./agent")
+		const app = new Hono()
+		app.route("/", agentRoutes)
+
+		const response = await app.request("/agent/ask", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				paperId: "paper-1",
+				workspaceId,
+				messages: [
+					{
+						id: "msg-1",
+						role: "user",
+						parts: [{ type: "text", text: "What does this selected text mean?" }],
+					},
+				],
+				selectionContext: {
+					blockIds: ["blk-1", "blk-2"],
+					selectedText: "selected snippet",
+				},
+			}),
+		})
+
+		expect(response.status).toBe(200)
+		expect(streamAgentAnswerMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				selectionContext: {
+					blockIds: ["blk-1", "blk-2"],
+					selectedText: "selected snippet",
+				},
 			}),
 		)
 	})

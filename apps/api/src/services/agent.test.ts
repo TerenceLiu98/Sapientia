@@ -95,4 +95,57 @@ describe("agent context builder", () => {
 		expect(context.marginaliaSignal).toContain("USER MARKED AS IMPORTANT")
 		expect(context.marginaliaSignal).toContain("Next block with results.")
 	})
+
+	it("marks legacy summaries without block citations as background-only", async () => {
+		const paper = {
+			id: "paper-1",
+			title: "A Paper",
+			authors: ["Ada Lovelace"],
+			summary: "This summary predates block citations.",
+		}
+		const blocks = [
+			{
+				paperId: "paper-1",
+				blockId: "blk-focus",
+				blockIndex: 0,
+				type: "text",
+				text: "Focused block.",
+				caption: null,
+				headingLevel: null,
+			},
+		]
+
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [paper],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => blocks,
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [],
+					}),
+				}),
+			})
+
+		const { buildAgentContext } = await import("./agent")
+		const context = await buildAgentContext({
+			paperId: "paper-1",
+			workspaceId: "00000000-0000-0000-0000-000000000001",
+			userId: "user-1",
+		})
+
+		expect(context.paperSummary).toContain("Legacy summary without block citations")
+		expect(context.paperSummary).toContain("This summary predates block citations.")
+	})
 })

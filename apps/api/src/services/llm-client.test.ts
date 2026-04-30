@@ -301,4 +301,52 @@ describe("llm-client", () => {
 		const serialized = JSON.stringify(loggerCalls)
 		expect(serialized).not.toContain(SECRET_PROMPT_NEEDLE)
 	})
+
+	it("streamComplete uses AI SDK streaming without telemetry and abort logs stay private", async () => {
+		vi.resetModules()
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-ant-test",
+			baseURL: null,
+			model: "claude-sonnet-4-6",
+		})
+
+		const fakeStream = { kind: "fake-stream" }
+		let capturedArgs: Record<string, unknown> | undefined
+		const fakeStreamText = vi.fn((args: Record<string, unknown>) => {
+			capturedArgs = args
+			return fakeStream as never
+		})
+		vi.doMock("ai", async () => {
+			const actual = await vi.importActual<typeof import("ai")>("ai")
+			return { ...actual, streamText: fakeStreamText }
+		})
+
+		const { streamComplete } = await import("./llm-client")
+		const result = await streamComplete({
+			userId: "u-1",
+			workspaceId: "w-1",
+			promptId: "agent-summon-v2",
+			model: "claude-sonnet-4-6",
+			messages: [{ role: "user", content: SECRET_PROMPT_NEEDLE }],
+			system: "system slot also has secrets",
+		})
+
+		expect(result).toBe(fakeStream)
+		expect(capturedArgs).toBeDefined()
+		expect(fakeStreamText).toHaveBeenCalledOnce()
+		expect(capturedArgs).not.toHaveProperty("experimental_telemetry")
+
+		const onAbort = capturedArgs?.onAbort
+		if (typeof onAbort === "function") onAbort({} as never)
+
+		const serialized = JSON.stringify(loggerCalls)
+		expect(serialized).not.toContain(SECRET_PROMPT_NEEDLE)
+		expect(serialized).not.toContain("system slot also has secrets")
+		expect(serialized).toContain("agent-summon-v2")
+		expect(serialized).toContain("u-1")
+		expect(serialized).toContain("w-1")
+		vi.doUnmock("ai")
+	})
 })

@@ -77,7 +77,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
 	const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
 	const [agentSummonNonce, setAgentSummonNonce] = useState(0)
-	const [agentSummonPrefill, setAgentSummonPrefill] = useState("")
 	const [agentSummonSelectionContext, setAgentSummonSelectionContext] = useState<
 		AgentSelectionContext | undefined
 	>(undefined)
@@ -466,7 +465,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 							setAgentPanelOpen: setIsAgentPanelOpen,
 							setSelectionContext: setAgentSummonSelectionContext,
 							setSummonNonce: setAgentSummonNonce,
-							setSummonPrefill: setAgentSummonPrefill,
 						})
 					}}
 					title="Ask agent"
@@ -856,7 +854,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 					return
 				}
 				setAgentSummonSelectionContext(undefined)
-				setAgentSummonPrefill("")
 				setAgentSummonNonce((value) => value + 1)
 				setIsAgentPanelOpen(true)
 			}}
@@ -864,6 +861,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				agentSession ? (
 					<AgentPanel
 						chat={agentSession.chat}
+						blockNumberByBlockId={blockNumberByBlockId}
 						isOpen={isAgentPanelOpen}
 						onClose={() => {
 							void agentSession.chat.stop()
@@ -872,7 +870,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 						onOpenBlock={(blockId) => handleOpenCitationBlock(paperId, blockId)}
 						paperTitle={paper?.title ?? "Paper"}
 						summonNonce={agentSummonNonce}
-						summonPrefill={agentSummonPrefill}
 					/>
 				) : undefined
 			}
@@ -1588,14 +1585,12 @@ function summonAgentForBlock(args: {
 	setAgentPanelOpen: (open: boolean) => void
 	setSelectionContext: (selection: AgentSelectionContext | undefined) => void
 	setSummonNonce: Dispatch<SetStateAction<number>>
-	setSummonPrefill: (text: string) => void
 }) {
 	const selectedText = normalizeAgentSnippet(args.block.caption || args.block.text)
 	args.setSelectionContext({
 		blockIds: [args.block.blockId],
 		selectedText,
 	})
-	args.setSummonPrefill(selectedText ? `"${selectedText}"\n\n` : "")
 	args.setSummonNonce((value) => value + 1)
 	args.setAgentPanelOpen(true)
 }

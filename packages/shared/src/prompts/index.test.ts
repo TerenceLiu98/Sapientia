@@ -2,14 +2,21 @@ import { describe, expect, it } from "vitest"
 import { fillPrompt, loadPrompt } from "./index"
 
 describe("loadPrompt", () => {
-	it("returns the source-summary-v1 template", () => {
-		const template = loadPrompt("source-summary-v1")
+	it("returns the source-summary-v2 template", () => {
+		const template = loadPrompt("source-summary-v2")
 		expect(template).toContain("{{title}}")
 		expect(template).toContain("{{authors}}")
 		expect(template).toContain("{{blocks}}")
 		expect(template).toContain("{{abstractBlock}}")
 		// Sanity-check key framing (downstream-LLM, not human-summary).
 		expect(template).toContain("downstream agent")
+		expect(template).toContain("Every substantive factual claim must include one or more inline block citations")
+	})
+
+	it("returns the agent-summon-v2 template", () => {
+		const template = loadPrompt("agent-summon-v2")
+		expect(template).toContain("Evidence threshold")
+		expect(template).toContain("do not have enough evidence in the current paper context")
 	})
 })
 

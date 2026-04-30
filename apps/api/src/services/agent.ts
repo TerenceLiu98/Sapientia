@@ -7,7 +7,7 @@ import { logger } from "../logger"
 import { getLlmCredential } from "./credentials"
 import { LlmCredentialMissingError, streamComplete } from "./llm-client"
 
-export const AGENT_PROMPT_ID = "agent-summon-v1"
+export const AGENT_PROMPT_ID = "agent-summon-v2"
 
 const MAX_HISTORY_MESSAGES = 20
 const MAX_CONTEXT_CHARS = 120_000
@@ -117,7 +117,16 @@ export async function buildAgentContext(args: {
 				})
 			: "No active highlights for this user in this workspace."
 
-	const paperSummary = paper.summary?.trim() || "No source summary has been generated for this paper yet."
+	const rawPaperSummary =
+		paper.summary?.trim() || "No source summary has been generated for this paper yet."
+	const paperSummary =
+		rawPaperSummary === "No source summary has been generated for this paper yet."
+			? rawPaperSummary
+			: hasBlockCitations(rawPaperSummary)
+				? rawPaperSummary
+				: `[Legacy summary without block citations — use as background only, not as sole evidence for specific claims.]
+
+${rawPaperSummary}`
 	const totalChars = paperSummary.length + focusContext.length + marginaliaSignal.length
 	if (totalChars > MAX_CONTEXT_CHARS) {
 		const overflow = totalChars - MAX_CONTEXT_CHARS
@@ -194,4 +203,8 @@ function truncateBlockText(text: string, maxChars = 240) {
 	const normalized = text.replace(/\s+/g, " ").trim()
 	if (normalized.length <= maxChars) return normalized
 	return `${normalized.slice(0, maxChars)}…`
+}
+
+function hasBlockCitations(text: string) {
+	return /\[(?:blk|block)\s+[a-zA-Z0-9_-]+\]/i.test(text)
 }

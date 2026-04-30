@@ -16,7 +16,7 @@ import { complete, LlmCallError, LlmCredentialMissingError } from "../services/l
 // TASK-019 / TASK-022: the prompt version remains app-owned, but the
 // actual model name is now user-configured because BYOK providers can
 // expose arbitrary deployment names.
-const CURRENT_PROMPT_VERSION = "source-summary-v1"
+const CURRENT_PROMPT_VERSION = "source-summary-v2"
 
 // Bound the prompt's content slot so a long paper can't blow past the
 // model's context window. ~120k chars ≈ 30k tokens leaves comfortable
@@ -122,6 +122,12 @@ async function processPaperSummarize(
 		})
 		summaryText = result.text
 		usedModel = result.model
+		if (!hasBlockCitations(summaryText)) {
+			log.warn(
+				{ summaryModel: usedModel, summaryPromptVersion: CURRENT_PROMPT_VERSION },
+				"paper_summary_missing_block_citations",
+			)
+		}
 	} catch (err) {
 		// Missing-credentials is an expected user state for fresh
 		// installs — we don't surface it as a worker failure. Persist
@@ -169,6 +175,10 @@ async function processPaperSummarize(
 		status: "done",
 		generatedAt: new Date().toISOString(),
 	}
+}
+
+function hasBlockCitations(text: string) {
+	return /\[(?:blk|block)\s+[a-zA-Z0-9_-]+\]/i.test(text)
 }
 
 function isPermanent(err: Error): boolean {

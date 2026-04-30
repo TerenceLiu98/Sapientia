@@ -9,20 +9,20 @@ import type { AgentUIMessage } from "./types"
 
 export function AgentPanel({
 	chat,
+	blockNumberByBlockId,
 	isOpen,
 	onClose,
 	onOpenBlock,
 	paperTitle,
 	summonNonce,
-	summonPrefill,
 }: {
 	chat: Chat<AgentUIMessage>
+	blockNumberByBlockId?: Map<string, number>
 	isOpen: boolean
 	onClose: () => void
 	onOpenBlock: (blockId: string) => void
 	paperTitle: string
 	summonNonce: number
-	summonPrefill: string
 }) {
 	const credentials = useCredentialsStatus()
 	const llmConfigured =
@@ -30,6 +30,8 @@ export function AgentPanel({
 		Boolean(credentials.data?.llmProvider) &&
 		Boolean(credentials.data?.llmModel)
 	const inputRef = useRef<HTMLTextAreaElement | null>(null)
+	const messagesRef = useRef<HTMLDivElement | null>(null)
+	const shouldStickToBottomRef = useRef(true)
 	const { messages, sendMessage, regenerate, stop, status, error, clearError } = useAgentChat(chat)
 	const [input, setInput] = useState("")
 	const [retryCount, setRetryCount] = useState(0)
@@ -37,19 +39,27 @@ export function AgentPanel({
 
 	useEffect(() => {
 		if (summonNonce === 0) return
-		setInput(summonPrefill)
 		clearError()
+		shouldStickToBottomRef.current = true
 		window.setTimeout(() => inputRef.current?.focus(), 0)
-	}, [clearError, summonNonce, summonPrefill])
+	}, [clearError, summonNonce])
 
 	useEffect(() => {
 		if (!isOpen) return
+		shouldStickToBottomRef.current = true
 		window.setTimeout(() => inputRef.current?.focus(), 0)
 	}, [isOpen])
 
 	useEffect(() => {
 		if (status === "ready") setRetryCount(0)
 	}, [status])
+
+	useEffect(() => {
+		if (!isOpen || !shouldStickToBottomRef.current) return
+		window.setTimeout(() => {
+			scrollMessagesToBottom(messagesRef.current)
+		}, 0)
+	}, [isOpen, status, visibleMessages])
 
 	const helperText = useMemo(() => {
 		if (!error) return null
@@ -62,6 +72,7 @@ export function AgentPanel({
 	const handleSubmit = async () => {
 		const next = input.trim()
 		if (!next || status === "submitted" || status === "streaming") return
+		shouldStickToBottomRef.current = true
 		await sendMessage({ text: next })
 		setInput("")
 	}
@@ -103,7 +114,13 @@ export function AgentPanel({
 				</div>
 			) : (
 				<>
-					<div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+					<div
+						className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+						onScroll={() => {
+							shouldStickToBottomRef.current = isNearBottom(messagesRef.current)
+						}}
+						ref={messagesRef}
+					>
 						<div className="space-y-3">
 							{visibleMessages.length === 0 ? (
 								<div className="rounded-2xl border border-dashed border-border-default bg-bg-primary p-4 text-sm leading-6 text-text-secondary">
@@ -111,7 +128,12 @@ export function AgentPanel({
 								</div>
 							) : null}
 							{visibleMessages.map((message) => (
-								<AgentMessage key={message.id} message={message} onOpenBlock={onOpenBlock} />
+								<AgentMessage
+									key={message.id}
+									message={message}
+									onOpenBlock={onOpenBlock}
+									blockNumberByBlockId={blockNumberByBlockId}
+								/>
 							))}
 							{helperText ? (
 								<div className="rounded-2xl border border-[var(--color-status-error-text)]/15 bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
@@ -150,4 +172,18 @@ export function AgentPanel({
 			)}
 		</div>
 	)
+}
+
+function isNearBottom(container: HTMLDivElement | null) {
+	if (!container) return true
+	return container.scrollHeight - container.scrollTop - container.clientHeight < 48
+}
+
+function scrollMessagesToBottom(container: HTMLDivElement | null) {
+	if (!container) return
+	if (typeof container.scrollTo === "function") {
+		container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
+		return
+	}
+	container.scrollTop = container.scrollHeight
 }

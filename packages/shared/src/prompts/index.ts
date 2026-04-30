@@ -1,5 +1,7 @@
 import { AGENT_SUMMON_V1 } from "./agent-summon-v1"
+import { AGENT_SUMMON_V2 } from "./agent-summon-v2"
 import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
+import { SOURCE_SUMMARY_V2 } from "./source-summary-v2"
 
 // Registry of prompt templates available across Sapientia. Each ID
 // corresponds to one filename in this directory; the suffix `-vN`
@@ -14,7 +16,9 @@ import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
 // engine. Keep prompts readable as static text.
 const PROMPTS = {
 	"agent-summon-v1": AGENT_SUMMON_V1,
+	"agent-summon-v2": AGENT_SUMMON_V2,
 	"source-summary-v1": SOURCE_SUMMARY_V1,
+	"source-summary-v2": SOURCE_SUMMARY_V2,
 } as const
 
 export type PromptId = keyof typeof PROMPTS

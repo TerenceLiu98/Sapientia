@@ -55,12 +55,12 @@ describe("AgentPanel", () => {
 		render(
 			<AgentPanel
 				chat={new Chat<AgentUIMessage>({})}
+				blockNumberByBlockId={new Map()}
 				isOpen
 				onClose={() => {}}
 				onOpenBlock={() => {}}
 				paperTitle="A Paper"
 				summonNonce={0}
-				summonPrefill=""
 			/>,
 		)
 
@@ -85,19 +85,19 @@ describe("AgentPanel", () => {
 		render(
 			<AgentPanel
 				chat={new Chat<AgentUIMessage>({})}
+				blockNumberByBlockId={new Map()}
 				isOpen
 				onClose={() => {}}
 				onOpenBlock={() => {}}
 				paperTitle="A Paper"
 				summonNonce={0}
-				summonPrefill=""
 			/>,
 		)
 
 		expect(screen.getByText("No LLM provider configured.")).toBeInTheDocument()
 	})
 
-	it("loads summon prefill and sends the message", async () => {
+	it("keeps the composer empty on summon and sends only the user message", async () => {
 		useCredentialsStatusMock.mockReturnValue({
 			data: {
 				hasLlmKey: true,
@@ -123,23 +123,23 @@ describe("AgentPanel", () => {
 		render(
 			<AgentPanel
 				chat={new Chat<AgentUIMessage>({})}
+				blockNumberByBlockId={new Map()}
 				isOpen
 				onClose={onClose}
 				onOpenBlock={() => {}}
 				paperTitle="A Paper"
 				summonNonce={1}
-				summonPrefill={'"quoted block"\n\n'}
 			/>,
 		)
 
 		const input = screen.getByPlaceholderText("Ask about this paper…")
-		expect(input).toHaveValue('"quoted block"\n\n')
+		expect(input).toHaveValue("")
 
 		await userEvent.type(input, "What is the key claim?")
 		await userEvent.click(screen.getByRole("button", { name: "Send" }))
 
 		expect(sendMessage).toHaveBeenCalledWith({
-			text: '"quoted block"\n\nWhat is the key claim?',
+			text: "What is the key claim?",
 		})
 	})
 })
