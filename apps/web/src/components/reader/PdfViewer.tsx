@@ -1297,10 +1297,16 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 						<button
 							aria-label={`Focus ${blockLabel}`}
 							className={`pointer-events-auto absolute left-0 top-0 z-[2] h-full rounded-l-[2px] transition-colors ${
-								isSelected || isHovered || showLayoutBoxes || highlightColor
-									? "bg-accent-600/22 hover:bg-accent-600/30"
-									: "bg-accent-600/10 hover:bg-accent-600/20"
+								fill
+									? "hover:brightness-110"
+									: isSelected || isHovered || showLayoutBoxes
+										? "bg-accent-600/22 hover:bg-accent-600/30"
+										: "bg-accent-600/10 hover:bg-accent-600/20"
 							}`}
+							style={{
+								width: "6px",
+								...(fill ? { backgroundColor: fill.fillBg } : {}),
+							}}
 							onClick={(e) => {
 								e.stopPropagation()
 								if (selectedBlockId === block.blockId) {
@@ -1311,7 +1317,6 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 							}}
 							onMouseEnter={() => onHoverBlock?.(block.blockId)}
 							onMouseLeave={() => onHoverBlock?.(null)}
-							style={{ width: "6px" }}
 							title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
 							type="button"
 						/>
