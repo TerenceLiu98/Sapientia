@@ -6,6 +6,12 @@ import { copyTextToClipboard } from "@/lib/clipboard"
 import { type PaletteEntry, paletteVisualTokens } from "@/lib/highlight-palette"
 import { BlockCitationsPopover } from "./BlockCitationsPopover"
 import { BlockHighlightPicker } from "./BlockHighlightPicker"
+import {
+	type ReaderSelectionContext,
+	deriveSelectedBlockIds,
+	getActionableSelection,
+	selectionIntersectsElement,
+} from "./reader-selection"
 
 const BLOCKS_WINDOW_RADIUS = 1
 
@@ -56,6 +62,7 @@ interface Props {
 	renderActions?: (block: Block) => React.ReactNode
 	// Map of blockId → number of notes citing it. Drives the badge.
 	citationCounts?: Map<string, number>
+	onSelectedTextChange?: (selection: ReaderSelectionContext | undefined) => void
 }
 
 export function BlocksPanel({
@@ -79,6 +86,7 @@ export function BlocksPanel({
 	onClearHighlight,
 	renderActions,
 	citationCounts,
+	onSelectedTextChange,
 }: Props) {
 	const { data: blocks, isLoading, error } = useBlocks(paperId)
 	const [openPopoverFor, setOpenPopoverFor] = useState<string | null>(null)
@@ -148,6 +156,7 @@ export function BlocksPanel({
 				onRailLayoutChange={onRailLayoutChange}
 				onViewportAnchorChange={onViewportAnchorChange}
 				onSelect={onSelectBlock}
+				onSelectedTextChange={onSelectedTextChange}
 				onSetHighlight={onSetHighlight}
 				onTogglePopover={(id) => setOpenPopoverFor((cur) => (cur === id ? null : id))}
 				openPopoverFor={openPopoverFor}
@@ -186,6 +195,7 @@ function BlocksPanelScrollBody({
 	onRailLayoutChange,
 	onViewportAnchorChange,
 	onSelect,
+	onSelectedTextChange,
 	onSetHighlight,
 	onTogglePopover,
 	openPopoverFor,
@@ -214,6 +224,7 @@ function BlocksPanelScrollBody({
 	onRailLayoutChange?: (layout: BlocksRailLayout | null) => void
 	onViewportAnchorChange?: (page: number, yRatio: number) => void
 	onSelect?: (block: Block) => void
+	onSelectedTextChange?: (selection: ReaderSelectionContext | undefined) => void
 	onSetHighlight?: (blockId: string, color: string) => Promise<void> | void
 	onTogglePopover: (id: string) => void
 	openPopoverFor: string | null
@@ -346,6 +357,23 @@ function BlocksPanelScrollBody({
 		},
 		[onSelect],
 	)
+
+	const emitSelectedText = useCallback(() => {
+		if (!onSelectedTextChange || typeof window === "undefined") return
+		const selection = window.getSelection()
+		const container = scrollRef.current
+		const actionable = getActionableSelection(selection)
+		if (!container || !actionable || !selectionIntersectsElement(selection, container)) {
+			onSelectedTextChange(undefined)
+			return
+		}
+		onSelectedTextChange({
+			anchorRect: actionable.anchorRect,
+			blockIds: deriveSelectedBlockIds(selection, container),
+			mode: "markdown",
+			selectedText: actionable.selectedText,
+		})
+	}, [onSelectedTextChange])
 
 	useEffect(() => {
 		void requestedPageNonce
@@ -499,6 +527,23 @@ function BlocksPanelScrollBody({
 	}, [scheduleViewportMeasure])
 
 	useEffect(() => {
+		if (!onSelectedTextChange) return
+		const handleSelectionChange = () => {
+			emitSelectedText()
+		}
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") onSelectedTextChange(undefined)
+		}
+		document.addEventListener("selectionchange", handleSelectionChange)
+		document.addEventListener("keydown", handleKeyDown)
+		return () => {
+			document.removeEventListener("selectionchange", handleSelectionChange)
+			document.removeEventListener("keydown", handleKeyDown)
+			onSelectedTextChange(undefined)
+		}
+	}, [emitSelectedText, onSelectedTextChange])
+
+	useEffect(() => {
 		const container = scrollRef.current
 		if (!container) return
 		if (typeof IntersectionObserver === "undefined") return
@@ -579,7 +624,8 @@ function BlocksPanelScrollBody({
 
 	const handleUserScrollIntent = useCallback(() => {
 		lockUntilRef.current = Date.now() + 500
-	}, [])
+		onSelectedTextChange?.(undefined)
+	}, [onSelectedTextChange])
 
 	const handleMainPointerDown = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
@@ -881,6 +927,14 @@ const BlockRow = memo(function BlockRow({
 		void copyTextToClipboard(text)
 	}
 
+	const shouldSuppressBlockSelection = useCallback((element: HTMLDivElement | null) => {
+		if (!element || typeof window === "undefined") return false
+		const selection = window.getSelection()
+		const actionable = getActionableSelection(selection)
+		if (!actionable) return false
+		return selectionIntersectsElement(selection, element)
+	}, [])
+
 	// Block-level fill is the only highlight rendering — soft tinted bg
 	// applied to the whole card. Hover / selected layers blend with it.
 	const fillStyle = highlightColor
@@ -904,7 +958,11 @@ const BlockRow = memo(function BlockRow({
 		// biome-ignore lint/a11y/useSemanticElements: nesting <h1>/<figure>/<pre> inside a <button> would break their semantics; role="button" on a <div> is the right escape hatch
 		<div
 			className={wrapperClass}
-			onClick={() => onSelect?.(block)}
+			data-block-id={block.blockId}
+			onClick={(event) => {
+				if (shouldSuppressBlockSelection(event.currentTarget)) return
+				onSelect?.(block)
+			}}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault()

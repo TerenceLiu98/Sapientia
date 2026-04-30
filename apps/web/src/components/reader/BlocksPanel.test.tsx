@@ -6,6 +6,7 @@ import { BUILTIN_PALETTE } from "@/lib/highlight-palette"
 
 const useBlocksMock = vi.fn()
 const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
+const originalGetSelection = window.getSelection
 let scrollTopValue = 100
 let scrollToMock: ReturnType<typeof vi.fn>
 
@@ -58,6 +59,10 @@ afterEach(() => {
 	delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop
 	delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo
 	delete (navigator as { clipboard?: unknown }).clipboard
+	Object.defineProperty(window, "getSelection", {
+		configurable: true,
+		value: originalGetSelection,
+	})
 })
 
 describe("BlocksPanel", () => {
@@ -530,5 +535,122 @@ describe("BlocksPanel", () => {
 		expect(screen.getByText(/the loss is/i)).toBeInTheDocument()
 		expect(screen.getByText(/today\./i)).toBeInTheDocument()
 		expect(container).not.toHaveTextContent("The loss is $x^2 + 1$ today.")
+	})
+
+	it("emits selected-text context for markdown selections", async () => {
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				type: "text",
+				page: 1,
+				bbox: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 },
+				text: "Alpha text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+		]
+		const onSelectedTextChange = vi.fn()
+
+		useBlocksMock.mockReturnValue({ data: blocks, isLoading: false, error: null })
+
+		const BlocksPanel = await importBlocksPanel()
+		render(
+			<BlocksPanel onSelectedTextChange={onSelectedTextChange} paperId="paper-1" />,
+		)
+
+		const row = screen.getByRole("button", { name: /alpha text/i })
+		const selection = {
+			getRangeAt: vi.fn(() => ({
+				commonAncestorContainer: row,
+				getBoundingClientRect: () => ({
+					left: 120,
+					top: 80,
+					width: 90,
+					height: 24,
+				}),
+				intersectsNode: (node: Node) => node === row,
+			})),
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "Alpha text",
+		}
+
+		Object.defineProperty(window, "getSelection", {
+			configurable: true,
+			value: vi.fn(() => selection),
+		})
+
+		document.dispatchEvent(new Event("selectionchange"))
+
+		await waitFor(() => {
+			expect(onSelectedTextChange).toHaveBeenCalledWith({
+				anchorRect: {
+					left: 120,
+					top: 80,
+					width: 90,
+					height: 24,
+				},
+				blockIds: ["block-1"],
+				mode: "markdown",
+				selectedText: "Alpha text",
+			})
+		})
+	})
+
+	it("does not treat a text-selection release as a block click", async () => {
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				type: "text",
+				page: 1,
+				bbox: { x: 0.1, y: 0.1, w: 0.4, h: 0.2 },
+				text: "Alpha text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+			},
+		]
+		const onSelectBlock = vi.fn()
+		const user = userEvent.setup()
+
+		useBlocksMock.mockReturnValue({ data: blocks, isLoading: false, error: null })
+
+		const BlocksPanel = await importBlocksPanel()
+		render(<BlocksPanel onSelectBlock={onSelectBlock} paperId="paper-1" />)
+
+		const row = screen.getByRole("button", { name: /alpha text/i })
+		const selection = {
+			getRangeAt: vi.fn(() => ({
+				commonAncestorContainer: row,
+				getBoundingClientRect: () => ({
+					left: 120,
+					top: 80,
+					width: 90,
+					height: 24,
+				}),
+				intersectsNode: (node: Node) => node === row,
+			})),
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "Alpha text",
+		}
+
+		Object.defineProperty(window, "getSelection", {
+			configurable: true,
+			value: vi.fn(() => selection),
+		})
+
+		await user.click(row)
+
+		expect(onSelectBlock).not.toHaveBeenCalled()
 	})
 })

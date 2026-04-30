@@ -36,6 +36,12 @@ import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
+import { SelectedTextToolbar } from "@/components/reader/SelectedTextToolbar"
+import {
+	clearBrowserSelection,
+	type ReaderSelectionContext,
+} from "@/components/reader/reader-selection"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
 import {
 	annotationBodyBoundingBox,
@@ -80,6 +86,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [agentSummonSelectionContext, setAgentSummonSelectionContext] = useState<
 		AgentSelectionContext | undefined
 	>(undefined)
+	const [readerSelection, setReaderSelection] = useState<ReaderSelectionContext | undefined>(
+		undefined,
+	)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [optimisticNotes, setOptimisticNotes] = useState<Note[]>([])
@@ -153,6 +162,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	}, [blocks, currentAnchorYRatio, currentPage])
 	const previousViewModeRef = useRef<ViewMode | null>(null)
 
+	useEffect(() => {
+		setReaderSelection(undefined)
+	}, [paperId, viewMode])
+
 	if (agentSession) {
 		agentSession.selectionContextRef.current =
 			agentSummonSelectionContext ?? viewportSelectionContext
@@ -199,6 +212,34 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 
 	const handleClearSelectedBlock = useCallback(() => {
 		setSelectedBlockId(null)
+	}, [])
+
+	const handleReaderSelectionChange = useCallback(
+		(selection: ReaderSelectionContext | undefined) => {
+			setReaderSelection(selection)
+		},
+		[],
+	)
+
+	const handleDismissReaderSelection = useCallback(() => {
+		setReaderSelection(undefined)
+		clearBrowserSelection()
+	}, [])
+
+	const handleCopyReaderSelection = useCallback((selection: ReaderSelectionContext) => {
+		void copyTextToClipboard(selection.selectedText)
+	}, [])
+
+	const handleSummonAgentForReaderSelection = useCallback((selection: ReaderSelectionContext) => {
+		const selectedText = normalizeAgentSnippet(selection.selectedText)
+		setAgentSummonSelectionContext({
+			blockIds: selection.blockIds,
+			selectedText,
+		})
+		setAgentSummonNonce((value) => value + 1)
+		setIsAgentPanelOpen(true)
+		setReaderSelection(undefined)
+		clearBrowserSelection()
 	}, [])
 
 	const handleOpenCitationBlock = useCallback(
@@ -815,6 +856,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			handleClearBlockHighlight={handleClearBlockHighlight}
 			handleClearSelectedBlock={handleClearSelectedBlock}
 			handleMainInteract={handleMainInteract}
+			handleReaderSelectionChange={handleReaderSelectionChange}
 			handleSelectBlock={handleSelectBlock}
 			handleSelectBlockFromPane={handleSelectBlockFromPane}
 			handleSetBlockHighlight={handleSetBlockHighlight}
@@ -903,6 +945,16 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				onOpenCitationBlock={handleOpenCitationBlock}
 				onOpenCitationAnnotation={handleOpenCitationAnnotation}
 				paper={paper}
+				selectedTextToolbar={
+					readerSelection ? (
+						<SelectedTextToolbar
+							onAskAgent={handleSummonAgentForReaderSelection}
+							onCopy={handleCopyReaderSelection}
+							onDismiss={handleDismissReaderSelection}
+							selection={readerSelection}
+						/>
+					) : null
+				}
 				viewMode={viewMode}
 				onChangeViewMode={setViewMode}
 			/>
@@ -1019,6 +1071,7 @@ interface WorkspaceContentProps {
 		yRatio?: number,
 	) => void
 	paper: Paper | undefined
+	selectedTextToolbar?: React.ReactNode
 	viewMode: ViewMode
 }
 
@@ -1051,6 +1104,7 @@ function WorkspaceContent({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	paper,
+	selectedTextToolbar,
 	viewMode,
 }: WorkspaceContentProps) {
 	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
@@ -1113,6 +1167,7 @@ function WorkspaceContent({
 					onRequestExpandNotesSidebar={() => setIsNotesSidebarCollapsed(false)}
 				/>
 			</div>
+			{selectedTextToolbar}
 		</div>
 	)
 }
@@ -1288,6 +1343,7 @@ interface MainViewProps {
 	handleClearBlockHighlight: (blockId: string) => Promise<void> | void
 	handleClearSelectedBlock: () => void
 	handleMainInteract: () => void
+	handleReaderSelectionChange: (selection: ReaderSelectionContext | undefined) => void
 	handleSelectBlock: (block: Block) => void
 	handleSelectBlockFromPane: (block: Block) => void
 	handleSetBlockHighlight: (blockId: string, color: string) => Promise<void> | void
@@ -1388,6 +1444,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						onClearHighlight={props.handleClearBlockHighlight}
 						onInteract={props.handleMainInteract}
 						onRailLayoutChange={props.onBlocksRailLayoutChange}
+						onSelectedTextChange={props.handleReaderSelectionChange}
 						onViewportAnchorChange={props.onViewportAnchorChange}
 						onSelectBlock={props.handleSelectBlockFromPane}
 						onSetHighlight={props.handleSetBlockHighlight}
