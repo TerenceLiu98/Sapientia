@@ -985,7 +985,7 @@ const BlockRow = memo(function BlockRow({
 			 * (zero gap) keeps the toolbar a hover descendant so cursor
 			 * transit between row and toolbar doesn't fire mouseleave.
 			 */}
-			<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+			<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1 py-1 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
 				{citationCount && citationCount > 0 ? (
 					<span className="relative">
 						<button
@@ -1016,7 +1016,8 @@ const BlockRow = memo(function BlockRow({
 							onClear={() => void onClearHighlight?.(block.blockId)}
 							onPick={(color) => void onSetHighlight?.(block.blockId, color)}
 							palette={palette}
-							size="sm"
+							shape="round"
+							size="xs"
 						/>
 						<div className="mx-0.5 h-4 w-px bg-border-subtle" />
 					</>

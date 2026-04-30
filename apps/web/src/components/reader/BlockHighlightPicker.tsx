@@ -8,6 +8,8 @@ interface Props {
 	// Visual size variant: `xs` for inline overlays on PDF bbox corners,
 	// `sm` for the parsed-blocks toolbar.
 	size?: "xs" | "sm"
+	orientation?: "horizontal" | "vertical"
+	shape?: "square" | "round"
 }
 
 // Inline color picker: a row of palette chips followed by a clear button.
@@ -20,11 +22,18 @@ export function BlockHighlightPicker({
 	onPick,
 	onClear,
 	size = "sm",
+	orientation = "horizontal",
+	shape = "square",
 }: Props) {
-	const dim = size === "xs" ? "h-4 w-4" : "h-5 w-5"
+	const dim = size === "xs" ? "h-3.5 w-3.5" : "h-5 w-5"
 	const hasActive = currentColor != null && currentColor.length > 0
+	const chipRadius = shape === "round" ? "rounded-full" : "rounded-sm"
 	return (
-		<div className="flex items-center gap-1">
+		<div
+			className={`flex gap-1 ${
+				orientation === "vertical" ? "flex-col items-center" : "items-center"
+			}`}
+		>
 			{palette.map((entry) => {
 				const colors = paletteVisualTokens(palette, entry.key)
 				const isActive = currentColor === entry.key
@@ -32,7 +41,7 @@ export function BlockHighlightPicker({
 					<button
 						aria-label={`${entry.label} highlight${isActive ? " (click to clear)" : ""}`}
 						aria-pressed={isActive}
-						className={`${dim} rounded-sm transition-transform hover:scale-110 ${
+						className={`${dim} ${chipRadius} transition-transform hover:scale-110 ${
 							isActive ? "shadow-[0_0_0_1.5px_var(--color-text-accent)]" : ""
 						}`}
 						key={entry.key}
@@ -50,7 +59,7 @@ export function BlockHighlightPicker({
 			})}
 			<button
 				aria-label="Clear highlight"
-				className={`${dim} flex items-center justify-center rounded-sm border-2 border-border-default text-text-tertiary transition-colors hover:border-text-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-default disabled:hover:text-text-tertiary`}
+				className={`${dim} flex items-center justify-center ${chipRadius} border-2 border-border-default text-text-tertiary transition-colors hover:border-text-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-default disabled:hover:text-text-tertiary`}
 				disabled={!hasActive}
 				onClick={(e) => {
 					e.stopPropagation()

@@ -1416,6 +1416,7 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						onClearSelectedBlock={props.handleClearSelectedBlock}
 						onInteract={props.handleMainInteract}
 						onRailLayoutChange={props.onRailLayoutChange}
+						onSelectedTextChange={props.handleReaderSelectionChange}
 						onViewportAnchorChange={props.onViewportAnchorChange}
 						onSelectBlock={props.handleSelectBlock}
 						onSetHighlight={props.handleSetBlockHighlight}

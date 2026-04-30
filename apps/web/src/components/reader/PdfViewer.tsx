@@ -32,6 +32,12 @@ import {
 	ReaderAnnotationSelectionOutline,
 	ReaderAnnotationShape,
 } from "./ReaderAnnotationLayer"
+import {
+	type ReaderSelectionContext,
+	deriveBlockIdsFromSelectionRects,
+	getActionableSelection,
+	selectionIntersectsElement,
+} from "./reader-selection"
 import { SelectedBlockPreview } from "./SelectedBlockPreview"
 
 const MIN_SCALE = 0.5
@@ -107,6 +113,7 @@ interface PdfViewerProps {
 	// zoom popup compete for the same screen real estate; note creation
 	// wins.
 	previewSuppressedBlockId?: string | null
+	onSelectedTextChange?: (selection: ReaderSelectionContext | undefined) => void
 }
 
 interface PdfDocumentLike {
@@ -142,6 +149,7 @@ function PdfViewerInner({
 	previewedBlockId,
 	previewedAnnotationId,
 	previewSuppressedBlockId,
+	onSelectedTextChange,
 }: PdfViewerProps) {
 	const { data, isLoading, isError, refetch } = usePaperPdfUrl(paperId)
 	const [numPages, setNumPages] = useState<number | null>(null)
@@ -211,8 +219,9 @@ function PdfViewerInner({
 		activePageRef.current = 1
 		handledExternalJumpRequestRef.current = null
 		handledInternalJumpRequestRef.current = null
+		onSelectedTextChange?.(undefined)
 		onRailLayoutChange?.(null)
-	}, [onRailLayoutChange, paperId])
+	}, [onRailLayoutChange, onSelectedTextChange, paperId])
 
 	const blocksByPage = useMemo(() => {
 		const map = new Map<number, Block[]>()
@@ -590,6 +599,52 @@ function PdfViewerInner({
 		emitRailLayout()
 	}, [emitRailLayout, numPages, pageCanvasVersion, pageRefsVersion, scale])
 
+	const emitSelectedText = useCallback(() => {
+		if (!onSelectedTextChange || annotationMode || typeof window === "undefined") return
+		const selection = window.getSelection()
+		const container = scrollContainerRef.current
+		const actionable = getActionableSelection(selection)
+		if (!container || !actionable || !selectionIntersectsElement(selection, container)) {
+			onSelectedTextChange(undefined)
+			return
+		}
+		const textLayers = container.querySelectorAll(".react-pdf__Page__textContent")
+		const isPdfTextSelection = Array.from(textLayers).some((layer) =>
+			selectionIntersectsElement(selection, layer),
+		)
+		if (!isPdfTextSelection) {
+			onSelectedTextChange(undefined)
+			return
+		}
+		onSelectedTextChange({
+			anchorRect: actionable.anchorRect,
+			blockIds: deriveBlockIdsFromSelectionRects(actionable.range, container),
+			mode: "pdf",
+			selectedText: actionable.selectedText,
+		})
+	}, [annotationMode, onSelectedTextChange])
+
+	useEffect(() => {
+		if (!onSelectedTextChange) return
+		if (annotationMode) {
+			onSelectedTextChange(undefined)
+			return
+		}
+		const handleSelectionChange = () => {
+			emitSelectedText()
+		}
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") onSelectedTextChange(undefined)
+		}
+		document.addEventListener("selectionchange", handleSelectionChange)
+		document.addEventListener("keydown", handleKeyDown)
+		return () => {
+			document.removeEventListener("selectionchange", handleSelectionChange)
+			document.removeEventListener("keydown", handleKeyDown)
+			onSelectedTextChange(undefined)
+		}
+	}, [annotationMode, emitSelectedText, onSelectedTextChange])
+
 	const handleMainPointerDown = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
 			if (!shouldCollapseNotesOnMainClick(event.target)) return
@@ -877,35 +932,6 @@ function clampUnit(value: number) {
 function shouldCollapseNotesOnMainClick(target: EventTarget | null) {
 	if (!(target instanceof HTMLElement)) return false
 	return !target.closest("button, a, input, textarea, select, [contenteditable='true']")
-}
-
-function activateUnderlyingPdfLink(
-	event: Pick<MouseEvent | globalThis.MouseEvent, "clientX" | "clientY">,
-	overlayEl: HTMLElement,
-) {
-	if (typeof document.elementFromPoint !== "function") return false
-	const previousPointerEvents = overlayEl.style.pointerEvents
-	overlayEl.style.pointerEvents = "none"
-	let underlying: Element | null = null
-	try {
-		underlying = document.elementFromPoint(event.clientX, event.clientY)
-	} finally {
-		overlayEl.style.pointerEvents = previousPointerEvents
-	}
-	if (!(underlying instanceof HTMLElement)) return false
-	const anchor = underlying.closest("a")
-	if (!(anchor instanceof HTMLAnchorElement)) return false
-	// Only hijack links that belong to the PDF annotation layer; everything
-	// else should keep flowing through our normal block-selection logic.
-	if (
-		!anchor.closest(
-			".react-pdf__Page__annotations, .annotationLayer, .linkAnnotation, [data-internal-link]",
-		)
-	) {
-		return false
-	}
-	anchor.click()
-	return true
 }
 
 function isPreviewableBlock(block: Block) {
@@ -1232,35 +1258,21 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 				const hasToolbar = Boolean(
 					onEnterMarkupMode || renderActions || (palette && (onSetHighlight || onClearHighlight)),
 				)
+				const blockLabel = `block ${block.blockIndex + 1}`
+				const showToolbar = hasToolbar && (isHovered || isSelected)
 
 				return (
-					// biome-ignore lint/a11y/noStaticElementInteractions: the block shell mirrors hover state and hosts the click-to-select handler
-					// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation lives in the parsed-blocks pane; here we only need a click target on the bbox
 						<div
-							className="group pointer-events-auto absolute cursor-pointer"
+							className="group pointer-events-none absolute"
 							data-block-id={block.blockId}
 							data-block-type={block.type}
 							key={block.blockId}
-							onClick={(e) => {
-								e.stopPropagation()
-								if (activateUnderlyingPdfLink(e.nativeEvent, e.currentTarget)) {
-									return
-								}
-								if (selectedBlockId === block.blockId) {
-									onClearSelectedBlock?.()
-									return
-								}
-								onSelectBlock?.(block)
-							}}
-						onMouseEnter={() => onHoverBlock?.(block.blockId)}
-						onMouseLeave={() => onHoverBlock?.(null)}
 						style={{
 							left: `${block.bbox.x * 100}%`,
 							top: `${block.bbox.y * 100}%`,
 							width: `${block.bbox.w * 100}%`,
 							height: `${block.bbox.h * 100}%`,
 						}}
-						title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
 					>
 							<div
 								className={`absolute inset-0 rounded-[2px] border transition-colors ${
@@ -1282,13 +1294,45 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 									: undefined
 							}
 						/>
+						<button
+							aria-label={`Focus ${blockLabel}`}
+							className={`pointer-events-auto absolute left-0 top-0 z-[2] h-full rounded-l-[2px] transition-colors ${
+								isSelected || isHovered || showLayoutBoxes || highlightColor
+									? "bg-accent-600/22 hover:bg-accent-600/30"
+									: "bg-accent-600/10 hover:bg-accent-600/20"
+							}`}
+							onClick={(e) => {
+								e.stopPropagation()
+								if (selectedBlockId === block.blockId) {
+									onClearSelectedBlock?.()
+									return
+								}
+								onSelectBlock?.(block)
+							}}
+							onMouseEnter={() => onHoverBlock?.(block.blockId)}
+							onMouseLeave={() => onHoverBlock?.(null)}
+							style={{ width: "6px" }}
+							title={(block.caption ?? block.text ?? `[${block.type}]`).slice(0, 120)}
+							type="button"
+						/>
 						{showBoxChrome ? (
-							<span
-								className={`pointer-events-none absolute -top-[14px] left-0 z-[1] inline-flex select-none rounded-t-md rounded-br-md px-1.5 py-0.5 font-medium text-[10px] leading-none shadow-[0_1px_2px_rgba(15,23,42,0.18)] ${
+							<button
+								aria-label={`Focus ${blockLabel}`}
+								className={`pointer-events-auto absolute -top-[14px] left-0 z-[2] inline-flex select-none rounded-t-md rounded-br-md px-1.5 py-0.5 font-medium text-[10px] leading-none shadow-[0_1px_2px_rgba(15,23,42,0.18)] transition-opacity ${
 									fill
 										? ""
 										: `text-text-inverse ${isSelected || isHovered ? "bg-accent-600" : "bg-accent-600/85"}`
 								}`}
+								onClick={(e) => {
+									e.stopPropagation()
+									if (selectedBlockId === block.blockId) {
+										onClearSelectedBlock?.()
+										return
+									}
+									onSelectBlock?.(block)
+								}}
+								onMouseEnter={() => onHoverBlock?.(block.blockId)}
+								onMouseLeave={() => onHoverBlock?.(null)}
 								style={
 									fill
 										? {
@@ -1298,14 +1342,19 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 											}
 										: undefined
 								}
+								type="button"
 							>
-								block {block.blockIndex + 1}
-							</span>
+								{blockLabel}
+							</button>
 						) : null}
 						{hasToolbar ? (
 							// biome-ignore lint/a11y/noStaticElementInteractions: presentational toolbar wrapper; handlers only stop propagation so chip clicks don't reselect the bbox underneath
 							<div
-								className="pointer-events-none -translate-x-1/2 absolute left-1/2 top-full z-[2] flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-0.5 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"
+								className={`absolute right-full top-0 z-[3] mr-2 flex flex-col items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1 py-1 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity ${
+									showToolbar
+										? "pointer-events-auto opacity-100"
+										: "pointer-events-none opacity-0"
+								}`}
 								onClick={(e) => e.stopPropagation()}
 								onKeyDown={(e) => e.stopPropagation()}
 								onMouseDown={(e) => e.stopPropagation()}
@@ -1316,10 +1365,12 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 											currentColor={highlightColor ?? undefined}
 											onClear={() => void onClearHighlight?.(block.blockId)}
 											onPick={(color) => void onSetHighlight?.(block.blockId, color)}
+											orientation="vertical"
 											palette={palette}
-											size="sm"
+											shape="round"
+											size="xs"
 										/>
-										<div className="mx-0.5 h-4 w-px bg-border-subtle" />
+										<div className="my-0.5 h-px w-4 bg-border-subtle" />
 									</>
 								) : null}
 								<button
@@ -1407,11 +1458,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					}}
 					pageNumber={page}
 					renderAnnotationLayer
-					// Keep this prop stable so toggling markup mode never tears
-					// down react-pdf's text layer (which would force the canvas
-					// to re-render). We disable text-selection separately via
-					// CSS pointer-events on the overlay.
-					renderTextLayer={false}
+					renderTextLayer
 					scale={scale}
 				/>
 			) : (

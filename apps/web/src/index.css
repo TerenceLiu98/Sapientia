@@ -503,6 +503,6 @@ kbd {
 }
 
 .react-pdf__Page__textContent {
-	pointer-events: none;
-	user-select: none;
+	pointer-events: auto;
+	user-select: text;
 }

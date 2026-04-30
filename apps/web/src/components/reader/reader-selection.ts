@@ -70,6 +70,34 @@ export function deriveSelectedBlockIds(selection: Selection | null, root: Parent
 	return blockIds
 }
 
+export function deriveBlockIdsFromSelectionRects(
+	range: Range | null,
+	root: ParentNode | null,
+	maxBlockIds = MAX_SELECTED_BLOCK_IDS,
+) {
+	if (!range || !root) return []
+	const rects = Array.from(range.getClientRects()).filter(
+		(rect) => rect.width > 0 && rect.height > 0,
+	)
+	if (rects.length === 0) return []
+	const scores = new Map<string, number>()
+	for (const candidate of root.querySelectorAll<HTMLElement>("[data-block-id]")) {
+		const blockId = candidate.dataset.blockId
+		if (!blockId) continue
+		const blockRect = candidate.getBoundingClientRect()
+		if (blockRect.width <= 0 || blockRect.height <= 0) continue
+		let score = 0
+		for (const rect of rects) {
+			score += intersectionArea(rect, blockRect)
+		}
+		if (score > 0) scores.set(blockId, score)
+	}
+	return [...scores.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, maxBlockIds)
+		.map(([blockId]) => blockId)
+}
+
 export function clearBrowserSelection() {
 	if (typeof window === "undefined") return
 	window.getSelection()?.removeAllRanges()
@@ -82,4 +110,15 @@ function getSelectionRange(selection: Selection | null) {
 	} catch {
 		return null
 	}
+}
+
+function intersectionArea(
+	a: Pick<DOMRectReadOnly, "left" | "top" | "right" | "bottom">,
+	b: Pick<DOMRectReadOnly, "left" | "top" | "right" | "bottom">,
+) {
+	const width = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+	if (width <= 0) return 0
+	const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+	if (height <= 0) return 0
+	return width * height
 }

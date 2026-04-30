@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -8,6 +8,7 @@ import type { Block } from "@/api/hooks/blocks"
 const refetchMock = vi.fn()
 const usePaperPdfUrlMock = vi.fn()
 const pdfDocumentGetDestinationMock = vi.fn()
+const originalGetSelection = window.getSelection
 let documentItemClickArgs:
 	| {
 			dest?: unknown
@@ -55,11 +56,13 @@ vi.mock("react-pdf", () => ({
 	Page: ({
 		pageNumber,
 		scale,
+		renderTextLayer,
 		onLoadSuccess,
 		onRenderSuccess,
 	}: {
 		pageNumber: number
 		scale: number
+		renderTextLayer?: boolean
 		onLoadSuccess?: (page: { view: number[] }) => void
 		onRenderSuccess?: () => void
 	}) => {
@@ -68,6 +71,11 @@ vi.mock("react-pdf", () => ({
 		return (
 			<div data-testid={`pdf-page-${pageNumber}`} data-scale={scale}>
 				<canvas data-testid={`pdf-canvas-${pageNumber}`} />
+				{renderTextLayer ? (
+					<div className="react-pdf__Page__textContent">
+						<span>{`Selected page ${pageNumber} text`}</span>
+					</div>
+				) : null}
 				page {pageNumber}
 			</div>
 		)
@@ -110,6 +118,10 @@ beforeEach(async () => {
 afterEach(() => {
 	vi.clearAllMocks()
 	delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+	Object.defineProperty(window, "getSelection", {
+		configurable: true,
+		value: originalGetSelection,
+	})
 })
 
 async function importPdfViewer() {
@@ -177,6 +189,111 @@ describe("PdfViewer", () => {
 		)
 
 		expect(screen.getByTestId("pdf-document")).toBeInTheDocument()
+	})
+
+	it("emits selected-text context for PDF text-layer selections", async () => {
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const onSelectedTextChange = vi.fn()
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+		const blocks: Block[] = [
+			{
+				paperId: "paper-1",
+				blockId: "block-1",
+				blockIndex: 0,
+				page: 1,
+				type: "text",
+				text: "Selected page 1 text",
+				headingLevel: null,
+				caption: null,
+				imageObjectKey: null,
+				imageUrl: null,
+				metadata: null,
+				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+			},
+		]
+
+		render(
+			<Wrapper>
+				<PdfViewer
+					blocks={blocks}
+					onSelectedTextChange={onSelectedTextChange}
+					paperId="paper-1"
+				/>
+			</Wrapper>,
+		)
+
+		const rail = await screen.findByTitle("Selected page 1 text")
+		const blockShell = rail.closest("[data-block-id]") as HTMLElement | null
+		expect(blockShell).not.toBeNull()
+		vi.spyOn(blockShell as HTMLElement, "getBoundingClientRect").mockReturnValue({
+			x: 100,
+			y: 120,
+			top: 120,
+			left: 100,
+			right: 260,
+			bottom: 180,
+			width: 160,
+			height: 60,
+			toJSON: () => ({}),
+		} as DOMRect)
+
+		const textLayer = rail
+			.closest("[data-page-number]")
+			?.querySelector(".react-pdf__Page__textContent") as HTMLElement | null
+		expect(textLayer).not.toBeNull()
+
+		const selection = {
+			getRangeAt: vi.fn(() => ({
+				commonAncestorContainer: textLayer,
+				getBoundingClientRect: () => ({
+					left: 110,
+					top: 130,
+					width: 120,
+					height: 18,
+				}),
+				getClientRects: () => [
+					{
+						left: 110,
+						top: 130,
+						right: 230,
+						bottom: 148,
+						width: 120,
+						height: 18,
+					},
+				],
+				intersectsNode: (node: Node) => node === textLayer,
+			})),
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "Selected page 1 text",
+		}
+
+		Object.defineProperty(window, "getSelection", {
+			configurable: true,
+			value: vi.fn(() => selection),
+		})
+
+		document.dispatchEvent(new Event("selectionchange"))
+
+		await waitFor(() => {
+			expect(onSelectedTextChange).toHaveBeenCalledWith({
+				anchorRect: {
+					left: 110,
+					top: 130,
+					width: 120,
+					height: 18,
+				},
+				blockIds: ["block-1"],
+				mode: "pdf",
+				selectedText: "Selected page 1 text",
+			})
+		})
 	})
 
 	it("skips malformed bbox overlays instead of rendering page-covering hit targets", async () => {
