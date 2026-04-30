@@ -648,9 +648,10 @@ function PdfViewerInner({
 	const handleMainPointerDown = useCallback(
 		(event: MouseEvent<HTMLDivElement>) => {
 			if (!shouldCollapseNotesOnMainClick(event.target)) return
+			onClearSelectedBlock?.()
 			onInteract?.()
 		},
-		[onInteract],
+		[onClearSelectedBlock, onInteract],
 	)
 
 	const handleDocumentItemClick = useCallback(
@@ -1259,7 +1260,7 @@ const PdfPageWithOverlay = memo(function PdfPageWithOverlay({
 					onEnterMarkupMode || renderActions || (palette && (onSetHighlight || onClearHighlight)),
 				)
 				const blockLabel = `block ${block.blockIndex + 1}`
-				const showToolbar = hasToolbar && (isHovered || isSelected)
+				const showToolbar = hasToolbar && isSelected
 
 				return (
 						<div
