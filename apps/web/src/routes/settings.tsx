@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { AppShell } from "@/components/layout/AppShell"
+import { AppearanceSettings } from "@/components/settings/AppearanceSettings"
 import { CredentialsForm } from "@/components/settings/CredentialsForm"
 
 export const Route = createFileRoute("/settings")({
@@ -16,10 +17,11 @@ function SettingsPage() {
 						<header className="mb-8">
 							<h1 className="font-serif text-3xl text-text-primary">Settings</h1>
 							<p className="mt-2 text-text-secondary">
-								API credentials are stored encrypted in your workspace and only decrypted at the
-								moment we call the upstream service.
+								Manage appearance and API credentials. Credentials are stored encrypted in your
+								workspace and only decrypted at the moment we call the upstream service.
 							</p>
 						</header>
+						<AppearanceSettings />
 						<CredentialsForm />
 					</div>
 				</div>

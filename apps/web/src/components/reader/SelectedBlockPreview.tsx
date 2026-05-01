@@ -257,7 +257,10 @@ export function SelectedBlockPreview({
 									})
 								}}
 								src={block.imageUrl ?? undefined}
-								style={{ transform: `rotate(${rotation}deg)` }}
+								style={{
+									filter: "var(--pdf-dark-display-filter)",
+									transform: `rotate(${rotation}deg)`,
+								}}
 							/>
 						</div>
 					</div>

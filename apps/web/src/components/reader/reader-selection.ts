@@ -1,3 +1,5 @@
+import type { ReaderTextMarkupBody } from "@/lib/reader-annotations"
+
 export type ReaderSelectionMode = "pdf" | "markdown"
 
 export interface ReaderSelectionAnchorRect {
@@ -12,6 +14,10 @@ export interface ReaderSelectionContext {
 	blockIds: string[]
 	anchorRect: ReaderSelectionAnchorRect
 	mode: ReaderSelectionMode
+	annotationTarget?: {
+		page: number
+		body: ReaderTextMarkupBody
+	}
 }
 
 const MAX_SELECTED_BLOCK_IDS = 8

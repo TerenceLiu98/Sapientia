@@ -460,12 +460,12 @@ function NovelEditorHandle({
 }
 
 function SlashMenu() {
-	return (
-		<EditorCommand className="note-editor__command rounded-xl border border-border-subtle bg-bg-primary p-2 shadow-[var(--shadow-popover)]">
-			<EditorCommandEmpty className="px-2 py-1.5 text-sm text-text-tertiary">
-				No matching commands
-			</EditorCommandEmpty>
-			<EditorCommandList className="flex max-h-80 min-w-[280px] flex-col gap-1 overflow-y-auto">
+		return (
+			<EditorCommand className="note-editor__command rounded-xl border border-border-subtle bg-bg-primary p-2 shadow-[var(--shadow-popover)]">
+				<EditorCommandEmpty className="px-2 py-1.5 text-sm text-text-tertiary">
+					No matching commands
+				</EditorCommandEmpty>
+				<EditorCommandList className="reader-scrollbar flex max-h-80 min-w-[280px] flex-col gap-1 overflow-y-auto">
 				{SLASH_MENU_ITEMS.map((item) => (
 					<EditorCommandItem
 						className="flex items-start gap-3 rounded-lg px-2.5 py-2 text-left outline-none data-[selected=true]:bg-surface-hover"
@@ -503,11 +503,11 @@ function BubbleButton({
 }) {
 	return (
 		<EditorBubbleItem
-			className={cn(
-				"flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
-				active && "bg-surface-selected text-text-accent",
-				className,
-			)}
+				className={cn(
+					"flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+					active && "bg-surface-selected text-text-primary",
+					className,
+				)}
 			onSelect={onSelect}
 			title={title}
 		>
@@ -549,10 +549,10 @@ function ColorMenuButton({ onOpenChange }: { onOpenChange?: (open: boolean) => v
 		>
 			<DropdownMenuTrigger asChild>
 				<button
-					className={cn(
-						"flex h-8 items-center gap-1 rounded-md px-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
-						currentColor && "bg-surface-selected text-text-accent",
-					)}
+						className={cn(
+							"flex h-8 items-center gap-1 rounded-md px-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+							currentColor && "bg-surface-selected text-text-primary",
+						)}
 					onMouseDown={(e) => e.preventDefault()}
 					onPointerDown={(e) => e.preventDefault()}
 					type="button"
@@ -603,7 +603,7 @@ function SelectionBubbleMenu() {
 
 	return (
 		<EditorBubble
-			className="note-editor__bubble flex items-center gap-1 rounded-2xl border border-border-subtle bg-bg-primary p-1.5 shadow-[var(--shadow-popover)]"
+				className="note-editor__bubble flex items-center gap-1 rounded-2xl border border-border-subtle bg-bg-primary p-1.5 shadow-[var(--shadow-popover)]"
 			shouldShow={({ editor: ed, state }) => {
 				const { empty } = state.selection
 				return colorMenuOpen || (ed.isEditable && !ed.isActive("image") && !empty)
@@ -611,10 +611,10 @@ function SelectionBubbleMenu() {
 			tippyOptions={{ duration: 150, placement: "top" }}
 		>
 			<EditorBubbleItem
-				className={cn(
-					"flex h-8 items-center gap-1.5 rounded-md px-3 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
-					editor?.isActive("link") && "bg-surface-selected text-text-accent",
-				)}
+					className={cn(
+						"flex h-8 items-center gap-1.5 rounded-md px-3 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+						editor?.isActive("link") && "bg-surface-selected text-text-primary",
+					)}
 				onSelect={(ed) => {
 					const previousUrl = (ed.getAttributes("link").href as string | undefined) ?? ""
 					const nextUrl = window.prompt("Link URL", previousUrl)
@@ -830,7 +830,7 @@ function NoteEditorInner({
 					)}
 				</div>
 			</div>
-			<div className="note-editor__body flex-1 overflow-y-auto">
+				<div className="note-editor__body reader-scrollbar flex-1 overflow-y-auto">
 				<NoteCitationThemeProvider
 					onOpenBlock={onOpenCitationBlock}
 					onOpenAnnotation={onOpenCitationAnnotation}
@@ -842,11 +842,11 @@ function NoteEditorInner({
 				>
 					{isMarginaliaNote ? (
 						<div className="border-b border-border-subtle/70 px-5 py-3">
-							<div
-								className={cn(
-									"rounded-2xl border border-border-subtle/80 bg-bg-primary/75 px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]",
-									canJumpToAnchor && "cursor-pointer transition-colors hover:bg-surface-hover",
-								)}
+								<div
+									className={cn(
+										"rounded-2xl border border-border-subtle/80 bg-[color-mix(in_srgb,var(--color-reading-bg)_88%,var(--color-bg-overlay))] px-3.5 py-3 shadow-[var(--shadow-sm)]",
+										canJumpToAnchor && "cursor-pointer transition-colors hover:bg-surface-hover",
+									)}
 								onClick={canJumpToAnchor ? handleOpenAnchor : undefined}
 								onKeyDown={
 									canJumpToAnchor
@@ -861,21 +861,21 @@ function NoteEditorInner({
 								role={canJumpToAnchor ? "button" : undefined}
 								tabIndex={canJumpToAnchor ? 0 : undefined}
 							>
-								<div className="mb-2 flex flex-wrap items-center gap-2">
-									{anchorBlockTag ? (
-										<span className="inline-flex min-h-6 items-center rounded-full bg-accent-700 px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-inverse">
-											{anchorBlockTag}
-										</span>
-									) : null}
+									<div className="mb-2 flex flex-wrap items-center gap-2">
+										{anchorBlockTag ? (
+											<span className="inline-flex min-h-6 items-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-reader-tag-text)] [background:var(--color-reader-tag-bg)] [box-shadow:inset_0_0_0_1px_var(--color-reader-tag-border)]">
+												{anchorBlockTag}
+											</span>
+										) : null}
 									{note.anchorPage ? (
 										<span className="inline-flex min-h-6 items-center rounded-full bg-surface-hover px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-secondary">
 											{`p.${note.anchorPage}`}
 										</span>
 									) : null}
 									{anchorLabel ? (
-										<span className="inline-flex min-h-6 items-center rounded-full bg-surface-selected px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-accent">
-											{anchorLabel}
-										</span>
+											<span className="inline-flex min-h-6 items-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-reader-tag-text)] [background:var(--color-reader-tag-bg)] [box-shadow:inset_0_0_0_1px_var(--color-reader-tag-border)]">
+												{anchorLabel}
+											</span>
 									) : null}
 								</div>
 								{anchorExcerpt ? (

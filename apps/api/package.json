@@ -9,6 +9,7 @@
 		"start": "bun dist/index.js",
 		"worker:dev": "bun src/worker.ts",
 		"worker:start": "bun src/worker.ts",
+		"audit:reader-annotations": "node --experimental-strip-types scripts/audit-reader-annotations.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run"
 	},

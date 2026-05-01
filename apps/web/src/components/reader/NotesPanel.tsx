@@ -788,24 +788,26 @@ export function NotesPanel({
 						{/* Progress fill — everything above the current anchor
 							is "read"/traversed, so the bar fills from the top
 							down to `progressFrac`. */}
-						<div
-							aria-hidden="true"
-							className="pointer-events-none absolute right-0 top-0 rounded-full bg-text-secondary/36 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.28)]"
-							style={{
-								width: `${PROGRESS_BAR_WIDTH}px`,
-								height: `${progressFrac * 100}%`,
-							}}
-						/>
+							<div
+								aria-hidden="true"
+								className="pointer-events-none absolute right-0 top-0 rounded-full bg-text-secondary/36"
+								style={{
+									width: `${PROGRESS_BAR_WIDTH}px`,
+									height: `${progressFrac * 100}%`,
+									boxShadow:
+										"inset 0 0 0 1px color-mix(in srgb, var(--color-bg-overlay) 28%, transparent)",
+								}}
+							/>
 						{/* Viewport window — kept as a secondary affordance so
 							you can still sense the visible slice, but it's now
 							a light sleeve over the progress bar rather than the
 							main bar metaphor. */}
-						<div
-							aria-hidden="true"
-							className="pointer-events-none absolute rounded-full border border-text-tertiary/22 bg-white/28 backdrop-blur-[1px]"
-							style={{
-								top: `${viewportWindow.top * 100}%`,
-								right: "-3px",
+							<div
+								aria-hidden="true"
+								className="pointer-events-none absolute rounded-full border border-text-tertiary/22 bg-bg-overlay/28 backdrop-blur-[1px]"
+								style={{
+									top: `${viewportWindow.top * 100}%`,
+									right: "-3px",
 								width: `${PROGRESS_BAR_WIDTH + 6}px`,
 								height: `${Math.max(8, (viewportWindow.bottom - viewportWindow.top) * 100)}%`,
 							}}
@@ -1411,18 +1413,17 @@ const DotButton = memo(function DotButton({
 				right: `${PROGRESS_BAR_WIDTH + RAIL_DOT_GAP + rightOffset}px`,
 				width: `${radius * 2}px`,
 				height: `${radius * 2}px`,
-				background,
-				// Layered halo: an inset darken to give the disc some
-				// modeling, a thick white halo separating it from the rail,
-				// and an outer faint ring so the dot reads even on light
-				// backgrounds. Active gets a slightly fatter halo + soft
-				// drop shadow; cited-by-selected gets an accent halo.
-				boxShadow: active
-					? `inset 0 0 0 1px rgba(15,23,42,0.06), 0 0 0 4px rgba(255,255,255,1), 0 0 0 6px ${outlineColor}, 0 4px 14px rgba(15,23,42,0.22)`
-					: isCitingSelectedBlock
-						? "inset 0 0 0 1px rgba(15,23,42,0.06), 0 0 0 3px rgba(255,255,255,1), 0 0 0 5px var(--color-accent-600)"
-						: "inset 0 0 0 1px rgba(15,23,42,0.06), 0 0 0 3px rgba(255,255,255,1), 0 0 0 4px rgba(15,23,42,0.16)",
-			}}
+					background,
+					// Layered halo: a soft inset gives the disc some modeling,
+					// then a surface-toned sleeve separates it from the rail.
+					// Active gets a thicker accent ring + elevated shadow;
+					// cited-by-selected gets the quieter accent halo.
+					boxShadow: active
+						? `inset 0 0 0 1px color-mix(in srgb, var(--color-bg-inverse) 12%, transparent), 0 0 0 4px color-mix(in srgb, var(--color-bg-overlay) 92%, transparent), 0 0 0 6px ${outlineColor}, var(--shadow-lg)`
+						: isCitingSelectedBlock
+							? "inset 0 0 0 1px color-mix(in srgb, var(--color-bg-inverse) 12%, transparent), 0 0 0 3px color-mix(in srgb, var(--color-bg-overlay) 92%, transparent), 0 0 0 5px var(--color-accent-600)"
+							: "inset 0 0 0 1px color-mix(in srgb, var(--color-bg-inverse) 12%, transparent), 0 0 0 3px color-mix(in srgb, var(--color-bg-overlay) 92%, transparent), 0 0 0 4px color-mix(in srgb, var(--color-border-default) 58%, transparent)",
+				}}
 			title={tooltip}
 			type="button"
 		>
@@ -1432,12 +1433,13 @@ const DotButton = memo(function DotButton({
 				style={{
 					left: `calc(100% - ${connectorOverlap.toFixed(2)}px)`,
 					width: `${RAIL_DOT_CONNECTOR_WIDTH}px`,
-					height: `${RAIL_DOT_CONNECTOR_HEIGHT}px`,
-					backgroundColor: connectorColor,
-					opacity: connectorOpacity,
-					boxShadow: "0 0 0 1px rgba(255,255,255,0.9)",
-				}}
-			/>
+						height: `${RAIL_DOT_CONNECTOR_HEIGHT}px`,
+						backgroundColor: connectorColor,
+						opacity: connectorOpacity,
+						boxShadow:
+							"0 0 0 1px color-mix(in srgb, var(--color-bg-overlay) 88%, transparent)",
+					}}
+				/>
 			{/* Hidden text so screen readers + tests can match by note title.
 				The visible affordance is the colored dot. */}
 			<span className="sr-only">{srLabel}</span>
@@ -1484,10 +1486,10 @@ function FoldedSlip({
 }) {
 	const sourceTagLabel = slipSourceTagLabel(note, group.notes, blockNumber, annotationOrdinal)
 	const effectiveOpacity = active ? Math.max(opacity, 0.92) : opacity
-	return (
-		<button
-			aria-label={`Open note ${note.title || "Untitled"}`}
-			className="absolute z-[2] overflow-hidden rounded-2xl border border-border-default/80 bg-white/96 text-left shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-[top,transform,box-shadow,opacity,border-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity] hover:-translate-x-0.5 hover:shadow-[0_16px_28px_rgba(15,23,42,0.12)]"
+		return (
+			<button
+				aria-label={`Open note ${note.title || "Untitled"}`}
+				className="absolute z-[2] overflow-hidden rounded-2xl border border-border-default/80 bg-[color-mix(in_srgb,var(--color-reading-bg)_84%,var(--color-bg-overlay))] text-left shadow-[var(--shadow-popover)] transition-[top,transform,box-shadow,opacity,border-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity] hover:-translate-x-0.5 hover:shadow-[var(--shadow-lg)]"
 			data-slip-group-key={group.groupKey}
 			onClick={onOpen}
 			style={{
@@ -1502,14 +1504,14 @@ function FoldedSlip({
 		>
 			<div className="flex h-full flex-col gap-1.5 px-3 py-2">
 				<div className="flex items-center gap-1.5">
-					<span
-						className="inline-flex items-center rounded-md px-2.5 py-1.5 text-[11px] font-bold tracking-[0.01em]"
-						style={{
-							color: `color-mix(in srgb, ${accentColor} 62%, var(--color-text-primary))`,
-							backgroundColor: `color-mix(in srgb, ${accentColor} 9%, white)`,
-							boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accentColor} 22%, white)`,
-						}}
-					>
+						<span
+							className="inline-flex items-center rounded-md px-2.5 py-1.5 text-[11px] font-bold tracking-[0.01em]"
+							style={{
+								color: "var(--color-reader-tag-text)",
+								backgroundColor: "var(--color-reader-tag-bg)",
+								boxShadow: "inset 0 0 0 1px var(--color-reader-tag-border)",
+							}}
+						>
 						{sourceTagLabel}
 					</span>
 					{group.notes.length > 1 ? (
@@ -1763,11 +1765,11 @@ function ExpandedSlip({
 			: idealTop
 	const clampedTop = Math.min(Math.max(idealTop, minTop), maxTop)
 
-	return (
-		<div
-			className="absolute z-[4] flex flex-col overflow-hidden rounded-[18px] border border-border-default bg-bg-overlay shadow-[0_24px_64px_rgba(15,23,42,0.18)] transition-[top,transform,opacity,box-shadow] duration-220 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity]"
-			data-expanded-slip-id={note.id}
-			style={{
+		return (
+			<div
+				className="absolute z-[4] flex flex-col overflow-hidden rounded-[18px] border border-border-default bg-[color-mix(in_srgb,var(--color-reading-bg)_90%,var(--color-bg-overlay))] shadow-[var(--shadow-xl)] transition-[top,transform,opacity,box-shadow] duration-220 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[top,transform,opacity]"
+				data-expanded-slip-id={note.id}
+				style={{
 				top: `${clampedTop}px`,
 				right: `${SLIP_EXPANDED_ANCHOR_RIGHT}px`,
 				width: `${size.width}px`,
@@ -1795,17 +1797,18 @@ function ExpandedSlip({
 						}}
 					/>
 					<span
-						className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border-2 border-white"
+						className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border-2 border-bg-overlay"
 						style={{
 							width: `${SLIP_ANCHOR_DOT}px`,
 							height: `${SLIP_ANCHOR_DOT}px`,
 							backgroundColor: activeAccentColor,
-							boxShadow: "0 0 0 4px rgba(255,255,255,0.92), 0 6px 16px rgba(15,23,42,0.18)",
+							boxShadow:
+								"0 0 0 4px color-mix(in srgb, var(--color-bg-overlay) 92%, transparent), var(--shadow-popover)",
 						}}
 					/>
 				</div>
 			</div>
-			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/60 px-2.5 py-1.5 text-xs text-text-tertiary">
+				<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_70%,var(--color-bg-secondary))] px-2.5 py-1.5 text-xs text-text-tertiary">
 				<span className="truncate px-1.5 py-1">
 					{anchorPage != null ? `Page ${anchorPage}` : "Unanchored"}
 					{groupLabel ? ` · ${groupLabel}` : ""}
@@ -1843,7 +1846,7 @@ function ExpandedSlip({
 					onSaveStatusChange={setSaveStatus}
 					beforeEditorContent={
 						stackedNotes.length > 0 ? (
-							<div className="border-b border-border-subtle bg-bg-primary/55 px-3 py-3">
+								<div className="border-b border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_78%,var(--color-bg-secondary))] px-3 py-3">
 								<div className="relative space-y-1.5 pl-5">
 									<div className="absolute bottom-2 left-[7px] top-2 w-px bg-border-subtle" />
 									{stackedNotes.map((candidate) => (
@@ -1920,29 +1923,31 @@ function SourceStackRow({
 				: "inline anchor"
 	return (
 		<div className="relative">
-			<button
-				aria-label={label}
-				aria-pressed={active}
-				className={`group relative block w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
-					active
-						? "shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
-						: "border-border-subtle bg-bg-overlay/72 hover:bg-surface-hover"
-				} ${active && onDelete ? "pr-14" : ""}`}
+				<button
+					aria-label={label}
+					aria-pressed={active}
+					className={`group relative block w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
+						active
+							? "shadow-[var(--shadow-lg)]"
+							: "border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_76%,var(--color-bg-overlay))] hover:bg-surface-hover"
+					} ${active && onDelete ? "pr-14" : ""}`}
 				onClick={() => onSelect(note.id)}
 				style={
-					active && accentColor
-						? {
-								borderColor: accentColor,
-								backgroundColor: `color-mix(in srgb, ${accentColor} 10%, white)`,
-							}
-						: undefined
-				}
+						active && accentColor
+							? {
+									borderColor: accentColor,
+									backgroundColor: `color-mix(in srgb, ${accentColor} 12%, var(--color-reading-bg))`,
+								}
+							: undefined
+					}
 				type="button"
 			>
 				<span
 					aria-hidden="true"
-					className={`absolute -left-[18px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-white ${
-						active ? "shadow-[0_0_0_4px_rgba(255,255,255,0.92)]" : ""
+					className={`absolute -left-[18px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-bg-overlay ${
+						active
+							? "shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-bg-overlay)_92%,transparent)]"
+							: ""
 					}`}
 					style={{ backgroundColor: accentColor ?? "var(--color-border-default)" }}
 				/>
@@ -1961,7 +1966,7 @@ function SourceStackRow({
 			{active && onDelete ? (
 				<button
 					aria-label="Delete note"
-					className="absolute right-3 top-1/2 z-[2] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-border-subtle bg-white/95 text-text-tertiary shadow-[0_8px_22px_rgba(15,23,42,0.12)] transition-colors hover:text-text-error"
+					className="absolute right-3 top-1/2 z-[2] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-border-subtle bg-bg-overlay/95 text-text-tertiary shadow-[var(--shadow-popover)] transition-colors hover:text-text-error"
 					onClick={(event) => {
 						event.stopPropagation()
 						void onDelete(note.id)

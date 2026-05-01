@@ -4,6 +4,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import "./index.css"
 import "./lib/pdf-setup"
+import { ThemeProvider } from "./lib/theme"
 import { router } from "./router"
 
 const queryClient = new QueryClient({
@@ -18,7 +19,9 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<RouterProvider router={router} />
+			<ThemeProvider>
+				<RouterProvider router={router} />
+			</ThemeProvider>
 		</QueryClientProvider>
 	</StrictMode>,
 )

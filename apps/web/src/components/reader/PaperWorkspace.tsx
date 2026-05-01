@@ -36,6 +36,10 @@ import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
+import {
+	ReaderAnnotationActionToast,
+	type ReaderAnnotationRecallState,
+} from "@/components/reader/ReaderAnnotationActionToast"
 import { SelectedTextToolbar } from "@/components/reader/SelectedTextToolbar"
 import {
 	clearBrowserSelection,
@@ -44,17 +48,19 @@ import {
 import { copyTextToClipboard } from "@/lib/clipboard"
 import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
 import {
+	READER_ANNOTATION_COLORS,
 	annotationBodyBoundingBox,
 	type ReaderAnnotationBody,
-	type ReaderAnnotationKind,
+	type ReaderAnnotationTool,
 } from "@/lib/reader-annotations"
 
 type ViewMode = "pdf-only" | "md-only"
-
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
 const NOTES_SIDEBAR_COLLAPSED_KEY = "paperWorkspace.notesSidebarCollapsed"
+const READER_ANNOTATION_COLOR_KEY = "paperWorkspace.readerAnnotationColor"
 const AUTO_FOLLOW_LOCK_MS = 1400
 const AGENT_QUOTE_MAX_CHARS = 480
+const READER_ANNOTATION_RECALL_MS = 5000
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
@@ -65,6 +71,15 @@ function loadViewMode(): ViewMode {
 function loadNotesSidebarCollapsed() {
 	if (typeof window === "undefined") return false
 	return window.localStorage.getItem(NOTES_SIDEBAR_COLLAPSED_KEY) === "1"
+}
+
+function loadReaderAnnotationColor() {
+	if (typeof window === "undefined") return READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f"
+	const saved = window.localStorage.getItem(READER_ANNOTATION_COLOR_KEY)
+	if (!saved) return READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f"
+	return READER_ANNOTATION_COLORS.some((entry) => entry.value === saved)
+		? saved
+		: (READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 }
 
 export function PaperWorkspace({ paperId }: { paperId: string }) {
@@ -89,12 +104,21 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const [readerSelection, setReaderSelection] = useState<ReaderSelectionContext | undefined>(
 		undefined,
 	)
+	const [readerAnnotationColor, setReaderAnnotationColor] = useState<string>(() =>
+		loadReaderAnnotationColor(),
+	)
+	const [readerAnnotationRecall, setReaderAnnotationRecall] =
+		useState<ReaderAnnotationRecallState | null>(null)
+	const [isUndoingReaderAnnotationRecall, setIsUndoingReaderAnnotationRecall] = useState(false)
 	const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode())
 	const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
 	const [optimisticNotes, setOptimisticNotes] = useState<Note[]>([])
 	const [pdfRailLayout, setPdfRailLayout] = useState<PdfRailLayout | null>(null)
 	const [blocksRailLayout, setBlocksRailLayout] = useState<BlocksRailLayout | null>(null)
 	const editorRef = useRef<NoteEditorRef | null>(null)
+	const readerAnnotationRecallTimeoutRef = useRef<number | null>(null)
+	const readerAnnotationRecallExpiresAtRef = useRef<number | null>(null)
+	const readerAnnotationRecallRemainingMsRef = useRef(READER_ANNOTATION_RECALL_MS)
 	const [editorReadyVersion, setEditorReadyVersion] = useState(0)
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
 	const [pendingCiteAnnotation, setPendingCiteAnnotation] = useState<ReaderAnnotation | null>(null)
@@ -128,10 +152,24 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	}, [viewMode])
 
 	useEffect(() => {
+		if (typeof window !== "undefined") {
+			window.localStorage.setItem(READER_ANNOTATION_COLOR_KEY, readerAnnotationColor)
+		}
+	}, [readerAnnotationColor])
+
+	useEffect(() => {
 		setOptimisticNotes([])
 		setPdfRailLayout(null)
 		setBlocksRailLayout(null)
 	}, [paperId, workspace?.id])
+
+	useEffect(() => {
+		return () => {
+			if (readerAnnotationRecallTimeoutRef.current != null) {
+				window.clearTimeout(readerAnnotationRecallTimeoutRef.current)
+			}
+		}
+	}, [])
 
 	const upsertOptimisticNote = useCallback((note: Note) => {
 		setOptimisticNotes((current) => [note, ...current.filter((candidate) => candidate.id !== note.id)])
@@ -225,6 +263,65 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		setReaderSelection(undefined)
 		clearBrowserSelection()
 	}, [])
+
+	const dismissReaderAnnotationRecall = useCallback(() => {
+		if (readerAnnotationRecallTimeoutRef.current != null) {
+			window.clearTimeout(readerAnnotationRecallTimeoutRef.current)
+			readerAnnotationRecallTimeoutRef.current = null
+		}
+		readerAnnotationRecallExpiresAtRef.current = null
+		readerAnnotationRecallRemainingMsRef.current = READER_ANNOTATION_RECALL_MS
+		setReaderAnnotationRecall(null)
+		setIsUndoingReaderAnnotationRecall(false)
+	}, [])
+
+	const scheduleReaderAnnotationRecallDismiss = useCallback((delayMs: number) => {
+		if (readerAnnotationRecallTimeoutRef.current != null) {
+			window.clearTimeout(readerAnnotationRecallTimeoutRef.current)
+		}
+		const boundedDelay = Math.max(0, delayMs)
+		readerAnnotationRecallRemainingMsRef.current = boundedDelay
+		readerAnnotationRecallExpiresAtRef.current = Date.now() + boundedDelay
+		readerAnnotationRecallTimeoutRef.current = window.setTimeout(() => {
+			readerAnnotationRecallTimeoutRef.current = null
+			readerAnnotationRecallExpiresAtRef.current = null
+			readerAnnotationRecallRemainingMsRef.current = READER_ANNOTATION_RECALL_MS
+			setReaderAnnotationRecall(null)
+			setIsUndoingReaderAnnotationRecall(false)
+		}, boundedDelay)
+	}, [])
+
+	const queueReaderAnnotationRecall = useCallback(
+		(recall: ReaderAnnotationRecallState) => {
+			setIsUndoingReaderAnnotationRecall(false)
+			setReaderAnnotationRecall(recall)
+			scheduleReaderAnnotationRecallDismiss(READER_ANNOTATION_RECALL_MS)
+		},
+		[scheduleReaderAnnotationRecallDismiss],
+	)
+
+	const pauseReaderAnnotationRecall = useCallback(() => {
+		if (!readerAnnotationRecall || isUndoingReaderAnnotationRecall) return
+		if (readerAnnotationRecallTimeoutRef.current != null) {
+			window.clearTimeout(readerAnnotationRecallTimeoutRef.current)
+			readerAnnotationRecallTimeoutRef.current = null
+		}
+		const expiresAt = readerAnnotationRecallExpiresAtRef.current
+		readerAnnotationRecallRemainingMsRef.current = expiresAt
+			? Math.max(0, expiresAt - Date.now())
+			: READER_ANNOTATION_RECALL_MS
+		readerAnnotationRecallExpiresAtRef.current = null
+	}, [isUndoingReaderAnnotationRecall, readerAnnotationRecall])
+
+	const resumeReaderAnnotationRecall = useCallback(() => {
+		if (!readerAnnotationRecall || isUndoingReaderAnnotationRecall) return
+		if (readerAnnotationRecallTimeoutRef.current != null) return
+		scheduleReaderAnnotationRecallDismiss(readerAnnotationRecallRemainingMsRef.current)
+	}, [
+		isUndoingReaderAnnotationRecall,
+		readerAnnotationRecall,
+		scheduleReaderAnnotationRecallDismiss,
+	])
 
 	const handleCopyReaderSelection = useCallback((selection: ReaderSelectionContext) => {
 		void copyTextToClipboard(selection.selectedText)
@@ -584,21 +681,69 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const handleCreateReaderAnnotation = useCallback(
 		async (input: {
 			page: number
-			kind: ReaderAnnotationKind
+			kind: ReaderAnnotationTool
 			color: string
 			body: ReaderAnnotationBody
-		}) => {
-			if (!workspace) return
-			await createReaderAnnotation.mutateAsync({ workspaceId: workspace.id, ...input })
+		}, options?: { suppressRecall?: boolean }) => {
+			if (!workspace) return null
+			const saved = await createReaderAnnotation.mutateAsync({ workspaceId: workspace.id, ...input })
+			if (!options?.suppressRecall) {
+				queueReaderAnnotationRecall({
+					action: "created",
+					annotationId: saved.id,
+					annotation: {
+						kind: saved.kind,
+						color: saved.color,
+						body: saved.body,
+					},
+					page: saved.page,
+				})
+			}
+			return saved
 		},
-		[createReaderAnnotation, workspace],
+		[createReaderAnnotation, queueReaderAnnotationRecall, workspace],
+	)
+
+	const handleCreateReaderSelectionAnnotation = useCallback(
+		async (selection: ReaderSelectionContext, kind: ReaderAnnotationTool) => {
+			if (selection.mode !== "pdf" || !selection.annotationTarget) return
+			await handleCreateReaderAnnotation({
+				page: selection.annotationTarget.page,
+				kind,
+				color: readerAnnotationColor,
+				body: selection.annotationTarget.body,
+			})
+			setReaderSelection(undefined)
+			clearBrowserSelection()
+		},
+		[handleCreateReaderAnnotation, readerAnnotationColor],
 	)
 
 	const handleDeleteReaderAnnotation = useCallback(
-		async (annotationId: string) => {
-			await deleteReaderAnnotation.mutateAsync(annotationId)
+		async (annotationId: string, options?: { suppressRecall?: boolean }) => {
+			const snapshot =
+				readerAnnotations.find((candidate) => candidate.id === annotationId && candidate.deletedAt == null) ??
+				null
+			const result = await deleteReaderAnnotation.mutateAsync(annotationId)
+			if (!options?.suppressRecall && snapshot) {
+				queueReaderAnnotationRecall({
+					action: "deleted",
+					annotationId: snapshot.id,
+					annotation: {
+						kind: snapshot.kind,
+						color: snapshot.color,
+						body: snapshot.body,
+					},
+					page: snapshot.page,
+					softDeleted: result?.softDeleted === true,
+				})
+			}
+			return {
+				softDeleted: result?.softDeleted === true,
+				snapshot,
+			}
 		},
-		[deleteReaderAnnotation],
+		[deleteReaderAnnotation, queueReaderAnnotationRecall, readerAnnotations],
 	)
 
 	const handleRestoreReaderAnnotation = useCallback(
@@ -614,6 +759,56 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		},
 		[updateReaderAnnotationColor],
 	)
+
+	const handleUndoReaderAnnotationRecall = useCallback(async () => {
+		if (!readerAnnotationRecall || isUndoingReaderAnnotationRecall) return
+		setIsUndoingReaderAnnotationRecall(true)
+		try {
+			if (readerAnnotationRecall.action === "created") {
+				await handleDeleteReaderAnnotation(readerAnnotationRecall.annotationId, {
+					suppressRecall: true,
+				})
+			} else {
+				if (readerAnnotationRecall.softDeleted) {
+					await handleRestoreReaderAnnotation(readerAnnotationRecall.annotationId)
+				} else {
+					await handleCreateReaderAnnotation(
+						{
+							page: readerAnnotationRecall.page,
+							kind: readerAnnotationRecall.annotation.kind,
+							color: readerAnnotationRecall.annotation.color,
+							body: readerAnnotationRecall.annotation.body,
+						},
+						{ suppressRecall: true },
+					)
+				}
+			}
+			dismissReaderAnnotationRecall()
+		} catch {
+			setIsUndoingReaderAnnotationRecall(false)
+		}
+	}, [
+		dismissReaderAnnotationRecall,
+		handleCreateReaderAnnotation,
+		handleDeleteReaderAnnotation,
+		handleRestoreReaderAnnotation,
+		isUndoingReaderAnnotationRecall,
+		readerAnnotationRecall,
+	])
+
+	useEffect(() => {
+		if (!readerAnnotationRecall) return
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key.toLowerCase() !== "z") return
+			if (!event.metaKey && !event.ctrlKey) return
+			if (event.shiftKey || event.altKey) return
+			if (isEditableTarget(event.target)) return
+			event.preventDefault()
+			void handleUndoReaderAnnotationRecall()
+		}
+		window.addEventListener("keydown", handleKeyDown)
+		return () => window.removeEventListener("keydown", handleKeyDown)
+	}, [handleUndoReaderAnnotationRecall, readerAnnotationRecall])
 
 	const colorByBlock = useMemo(() => {
 		const map = new Map<string, string>()
@@ -871,7 +1066,6 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 			requestNonce={requestNonce}
 			selectedBlockId={selectedBlockId}
 			selectedBlockRequestNonce={selectedBlockRequestNonce}
-			handleCreateReaderAnnotation={handleCreateReaderAnnotation}
 			handleDeleteReaderAnnotation={handleDeleteReaderAnnotation}
 			handleRestoreReaderAnnotation={handleRestoreReaderAnnotation}
 			handleOpenCitationAnnotation={handleOpenCitationAnnotation}
@@ -945,12 +1139,34 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				onOpenCitationBlock={handleOpenCitationBlock}
 				onOpenCitationAnnotation={handleOpenCitationAnnotation}
 				paper={paper}
+				readerAnnotationActionToast={
+					readerAnnotationRecall ? (
+						<ReaderAnnotationActionToast
+							isUndoing={isUndoingReaderAnnotationRecall}
+							onDismiss={dismissReaderAnnotationRecall}
+							onPause={pauseReaderAnnotationRecall}
+							onResume={resumeReaderAnnotationRecall}
+							onUndo={() => {
+								void handleUndoReaderAnnotationRecall()
+							}}
+							recall={readerAnnotationRecall}
+						/>
+					) : null
+				}
 				selectedTextToolbar={
 					readerSelection ? (
 						<SelectedTextToolbar
+							annotationColor={readerAnnotationColor}
+							onChangeAnnotationColor={setReaderAnnotationColor}
 							onAskAgent={handleSummonAgentForReaderSelection}
 							onCopy={handleCopyReaderSelection}
 							onDismiss={handleDismissReaderSelection}
+							onHighlight={(selection) => {
+								void handleCreateReaderSelectionAnnotation(selection, "highlight")
+							}}
+							onUnderline={(selection) => {
+								void handleCreateReaderSelectionAnnotation(selection, "underline")
+							}}
 							selection={readerSelection}
 						/>
 					) : null
@@ -967,6 +1183,17 @@ function notesPaneFor(notes: ReturnType<typeof useNotes>["data"], optimisticNote
 	if (optimisticNotes.length === 0) return persisted
 	const persistedIds = new Set(persisted.map((note) => note.id))
 	return [...optimisticNotes.filter((note) => !persistedIds.has(note.id)), ...persisted]
+}
+
+function isEditableTarget(target: EventTarget | null) {
+	if (!(target instanceof HTMLElement)) return false
+	const tagName = target.tagName.toLowerCase()
+	return (
+		target.isContentEditable ||
+		tagName === "input" ||
+		tagName === "textarea" ||
+		tagName === "select"
+	)
 }
 
 // Pick the block whose bbox the annotation's center falls inside on the
@@ -1071,6 +1298,7 @@ interface WorkspaceContentProps {
 		yRatio?: number,
 	) => void
 	paper: Paper | undefined
+	readerAnnotationActionToast?: React.ReactNode
 	selectedTextToolbar?: React.ReactNode
 	viewMode: ViewMode
 }
@@ -1104,6 +1332,7 @@ function WorkspaceContent({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	paper,
+	readerAnnotationActionToast,
 	selectedTextToolbar,
 	viewMode,
 }: WorkspaceContentProps) {
@@ -1167,6 +1396,7 @@ function WorkspaceContent({
 					onRequestExpandNotesSidebar={() => setIsNotesSidebarCollapsed(false)}
 				/>
 			</div>
+			{readerAnnotationActionToast}
 			{selectedTextToolbar}
 		</div>
 	)
@@ -1347,12 +1577,6 @@ interface MainViewProps {
 	handleSelectBlock: (block: Block) => void
 	handleSelectBlockFromPane: (block: Block) => void
 	handleSetBlockHighlight: (blockId: string, color: string) => Promise<void> | void
-	handleCreateReaderAnnotation: (input: {
-		page: number
-		kind: ReaderAnnotationKind
-		color: string
-		body: ReaderAnnotationBody
-	}) => Promise<unknown> | unknown
 	handleDeleteReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
 	handleRestoreReaderAnnotation: (annotationId: string) => Promise<unknown> | unknown
 	handleOpenCitationAnnotation: (
@@ -1409,7 +1633,6 @@ const MainView = memo(function MainView(props: MainViewProps) {
 						colorByBlock={props.colorByBlock}
 						flashedAnnotationId={props.flashedAnnotationId}
 						onClearHighlight={props.handleClearBlockHighlight}
-						onCreateReaderAnnotation={props.handleCreateReaderAnnotation}
 						onDeleteReaderAnnotation={props.handleDeleteReaderAnnotation}
 						onRestoreReaderAnnotation={props.handleRestoreReaderAnnotation}
 						onUpdateReaderAnnotationColor={props.handleUpdateReaderAnnotationColor}

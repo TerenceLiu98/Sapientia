@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { ReaderAnnotationBody, ReaderAnnotationKind } from "@/lib/reader-annotations"
+import type {
+	ReaderAnnotationBody,
+	ReaderAnnotationKind,
+	ReaderAnnotationTool,
+} from "@/lib/reader-annotations"
 import { apiFetch } from "../client"
 
 export interface ReaderAnnotation {
@@ -22,7 +26,7 @@ export interface ReaderAnnotation {
 export interface CreateReaderAnnotationInput {
 	workspaceId: string
 	page: number
-	kind: ReaderAnnotationKind
+	kind: ReaderAnnotationTool
 	color: string
 	body: ReaderAnnotationBody
 }

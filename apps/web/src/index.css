@@ -112,8 +112,16 @@
 	--shell-header-height: 56px;
 	--shell-toolbar-height: 40px;
 
-	--table-row-height: 44px;
-}
+		--table-row-height: 44px;
+		--pdf-dark-display-filter: none;
+		--pdf-dark-display-opacity: 1;
+		--color-scrollbar-track: color-mix(in oklch, var(--color-bg-secondary) 78%, transparent);
+		--color-scrollbar-thumb: color-mix(in oklch, var(--color-border-default) 72%, transparent);
+		--color-scrollbar-thumb-hover: color-mix(in oklch, var(--color-text-secondary) 58%, transparent);
+		--color-reader-tag-bg: var(--color-neutral-700);
+		--color-reader-tag-border: var(--color-neutral-600);
+		--color-reader-tag-text: var(--color-neutral-50);
+	}
 
 /* Semantic block-highlight palette. Defined outside @theme because Tailwind
    v4 tree-shakes theme vars that aren't referenced in CSS source — these
@@ -256,31 +264,31 @@
    docs/DESIGN_TOKENS.md §2.4 and §2.5 — when the doc and this file
    disagree, the doc wins (treat this as derived). */
 [data-theme="dark"] {
-	--color-bg-primary: var(--color-neutral-950);
-	--color-bg-secondary: var(--color-neutral-900);
-	--color-bg-tertiary: var(--color-neutral-800);
-	--color-bg-overlay: oklch(0.18 0.008 65 / 0.95);
+	--color-bg-primary: oklch(0.095 0.008 58);
+	--color-bg-secondary: oklch(0.13 0.008 65);
+	--color-bg-tertiary: oklch(0.16 0.008 67);
+	--color-bg-overlay: oklch(0.21 0.008 70 / 0.94);
 	--color-bg-inverse: var(--color-neutral-100);
-	--color-reading-bg: oklch(0.155 0.008 70);
+		--color-reading-bg: rgb(53 53 53);
 
-	--color-surface-default: var(--color-neutral-900);
-	--color-surface-hover: var(--color-neutral-800);
-	--color-surface-active: var(--color-neutral-700);
-	--color-surface-selected: oklch(0.29 0.065 195 / 0.4);
+	--color-surface-default: oklch(0.16 0.008 67);
+	--color-surface-hover: oklch(0.19 0.009 69);
+	--color-surface-active: oklch(0.23 0.01 71);
+		--color-surface-selected: oklch(0.28 0.04 145 / 0.42);
 
-	--color-text-primary: var(--color-neutral-100);
-	--color-text-secondary: var(--color-neutral-400);
-	--color-text-tertiary: var(--color-neutral-500);
-	--color-text-disabled: var(--color-neutral-600);
+	--color-text-primary: oklch(0.94 0.004 78);
+	--color-text-secondary: oklch(0.74 0.008 78);
+	--color-text-tertiary: oklch(0.58 0.008 78);
+	--color-text-disabled: oklch(0.46 0.008 78);
 	--color-text-inverse: var(--color-neutral-900);
-	--color-text-accent: var(--color-accent-300);
+	--color-text-accent: oklch(0.79 0.08 195);
 	--color-text-error: var(--color-error-100);
-	--color-reading-text: oklch(0.92 0.005 75);
-	--color-reading-selection: oklch(0.55 0.08 80 / 0.35);
+	--color-reading-text: oklch(0.95 0.004 80);
+	--color-reading-selection: oklch(0.68 0.06 85 / 0.34);
 
-	--color-border-subtle: var(--color-neutral-800);
-	--color-border-default: var(--color-neutral-700);
-	--color-border-strong: var(--color-neutral-600);
+	--color-border-subtle: oklch(0.23 0.008 70);
+	--color-border-default: oklch(0.32 0.01 72);
+	--color-border-strong: oklch(0.4 0.01 74);
 	--color-border-accent: var(--color-accent-400);
 
 	--color-interactive-default: var(--color-accent-400);
@@ -305,8 +313,25 @@
 	--note-original-text: oklch(0.85 0.06 145);
 	--note-pending-bg: oklch(0.4 0.09 195 / 0.3);
 	--note-pending-text: oklch(0.82 0.07 195);
-	--note-background-bg: var(--color-neutral-800);
-	--note-background-text: var(--color-neutral-300);
+		--note-background-bg: var(--color-neutral-800);
+		--note-background-text: var(--color-neutral-300);
+		--pdf-dark-display-filter: invert(1) hue-rotate(180deg) sepia(0.14) contrast(0.88) saturate(0.72)
+			brightness(0.93);
+		--pdf-dark-display-opacity: 0.84;
+		--color-scrollbar-track: color-mix(in oklch, var(--color-bg-primary) 78%, transparent);
+		--color-scrollbar-thumb: color-mix(in oklch, var(--color-border-strong) 64%, transparent);
+		--color-scrollbar-thumb-hover: color-mix(in oklch, var(--color-text-secondary) 72%, transparent);
+		--color-reader-tag-bg: color-mix(in oklch, var(--color-reading-bg) 58%, var(--color-neutral-600));
+		--color-reader-tag-border: color-mix(in oklch, var(--color-reading-bg) 26%, var(--color-neutral-400));
+		--color-reader-tag-text: var(--color-text-secondary);
+	}
+
+html[data-theme="dark"] body {
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklch, var(--color-bg-secondary) 78%, var(--color-bg-primary)) 0%,
+		var(--color-bg-primary) 100%
+	);
 }
 
 html,
@@ -489,6 +514,33 @@ kbd {
 }
 .scrollbar-none::-webkit-scrollbar {
 	display: none; /* WebKit */
+}
+
+.reader-scrollbar {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+.reader-scrollbar::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+.reader-scrollbar::-webkit-scrollbar-track {
+	background: var(--color-scrollbar-track);
+	border-radius: var(--radius-full);
+}
+
+.reader-scrollbar::-webkit-scrollbar-thumb {
+	background: var(--color-scrollbar-thumb);
+	border: 2px solid transparent;
+	border-radius: var(--radius-full);
+	background-clip: padding-box;
+}
+
+.reader-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: var(--color-scrollbar-thumb-hover);
+	background-clip: padding-box;
 }
 
 /* Overlay text is the selection target only — its character glyphs must

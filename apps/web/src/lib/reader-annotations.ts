@@ -1,10 +1,5 @@
-export type ReaderAnnotationKind = "highlight" | "underline" | "ink"
+export type ReaderAnnotationKind = "highlight" | "underline"
 export type ReaderAnnotationTool = ReaderAnnotationKind
-
-export interface ReaderAnnotationPoint {
-	x: number
-	y: number
-}
 
 export interface ReaderAnnotationRect {
 	x: number
@@ -13,35 +8,47 @@ export interface ReaderAnnotationRect {
 	h: number
 }
 
-export type ReaderAnnotationBody =
-	| { rect: ReaderAnnotationRect }
-	| { from: ReaderAnnotationPoint; to: ReaderAnnotationPoint }
-	| { points: ReaderAnnotationPoint[] }
+export interface ReaderTextMarkupBody {
+	rects: ReaderAnnotationRect[]
+	quote: string
+}
+
+export type ReaderAnnotationBody = ReaderTextMarkupBody
 
 export function annotationBodyBoundingBox(
-	kind: ReaderAnnotationKind,
+	_kind: ReaderAnnotationKind,
 	body: ReaderAnnotationBody,
 ): ReaderAnnotationRect | null {
-	if (kind === "highlight" && "rect" in body) {
-		return body.rect
-	}
-	if (kind === "underline" && "from" in body && "to" in body) {
-		const { from, to } = body
-		return {
-			x: Math.min(from.x, to.x),
-			y: Math.min(from.y, to.y),
-			w: Math.abs(to.x - from.x),
-			h: Math.abs(to.y - from.y),
-		}
-	}
-	if (kind === "ink" && "points" in body && body.points.length > 0) {
-		const xs = body.points.map((p) => p.x)
-		const ys = body.points.map((p) => p.y)
-		const x = Math.min(...xs)
-		const y = Math.min(...ys)
-		return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
-	}
-	return null
+	return boundingBoxForRects(body.rects)
+}
+
+export function boundingBoxForRects(rects: ReaderAnnotationRect[]): ReaderAnnotationRect | null {
+	const visibleRects = rects.filter((rect) => rect.w > 0 && rect.h > 0)
+	if (visibleRects.length === 0) return null
+	const x = Math.min(...visibleRects.map((rect) => rect.x))
+	const y = Math.min(...visibleRects.map((rect) => rect.y))
+	const right = Math.max(...visibleRects.map((rect) => rect.x + rect.w))
+	const bottom = Math.max(...visibleRects.map((rect) => rect.y + rect.h))
+	return { x, y, w: right - x, h: bottom - y }
+}
+
+export function normalizeAnnotationRects(rects: ReaderAnnotationRect[]) {
+	return compactAnnotationRects(
+		rects
+		.filter((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y) && Number.isFinite(rect.w) && Number.isFinite(rect.h))
+		.filter((rect) => rect.w > 0 && rect.h > 0)
+		.map((rect) => ({
+			x: clampUnit(rect.x),
+			y: clampUnit(rect.y),
+			w: Math.max(0, Math.min(1 - clampUnit(rect.x), rect.w)),
+			h: Math.max(0, Math.min(1 - clampUnit(rect.y), rect.h)),
+		}))
+		.filter((rect) => rect.w > 0 && rect.h > 0)
+		.sort((a, b) => {
+			if (Math.abs(a.y - b.y) > 0.002) return a.y - b.y
+			return a.x - b.x
+		}),
+	)
 }
 
 export interface ReaderAnnotationColor {
@@ -49,8 +56,8 @@ export interface ReaderAnnotationColor {
 	label: string
 }
 
-// Six fixed user-pickable swatches for the highlight / underline / ink
-// tools. These are user-presentation choices the reader picks at the
+// Six fixed user-pickable swatches for text markup creation + editing.
+// These are user-presentation choices the reader picks at the
 // toolbar; the chosen `value` is persisted on the annotation row and
 // later combined with alpha at render time (e.g. ${color}33 to dim a
 // citation chip). That alpha math requires a literal hex, so unlike
@@ -74,25 +81,28 @@ export function clampUnit(value: number) {
 	return Math.max(0, Math.min(1, value))
 }
 
-export function rectFromPoints(
-	start: ReaderAnnotationPoint,
-	end: ReaderAnnotationPoint,
-): ReaderAnnotationRect {
-	const x = Math.min(start.x, end.x)
-	const y = Math.min(start.y, end.y)
-	return {
-		x,
-		y,
-		w: Math.abs(end.x - start.x),
-		h: Math.abs(end.y - start.y),
+function compactAnnotationRects(rects: ReaderAnnotationRect[]) {
+	if (rects.length <= 1) return rects
+	const lines: ReaderAnnotationRect[][] = []
+	for (const rect of rects) {
+		const currentLine = lines.at(-1)
+		if (currentLine && shouldShareAnnotationLine(currentLine[0] as ReaderAnnotationRect, rect)) {
+			currentLine.push(rect)
+			continue
+		}
+		lines.push([rect])
 	}
+	return lines.map((lineRects) => {
+		const bbox = boundingBoxForRects(lineRects)
+		return bbox ?? lineRects[0]
+	})
 }
 
-export function distanceBetweenPoints(a: ReaderAnnotationPoint, b: ReaderAnnotationPoint) {
-	return Math.hypot(a.x - b.x, a.y - b.y)
-}
-
-export function pointsToSvgPath(points: ReaderAnnotationPoint[]) {
-	if (points.length === 0) return ""
-	return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
+function shouldShareAnnotationLine(a: ReaderAnnotationRect, b: ReaderAnnotationRect) {
+	const minHeight = Math.min(a.h, b.h)
+	if (minHeight <= 0) return false
+	const aCenterY = a.y + a.h / 2
+	const bCenterY = b.y + b.h / 2
+	const centerDelta = Math.abs(aCenterY - bCenterY)
+	return centerDelta <= minHeight * 0.45
 }

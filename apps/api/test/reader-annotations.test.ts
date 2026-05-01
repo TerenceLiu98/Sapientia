@@ -118,7 +118,8 @@ describe("reader annotations", () => {
 				kind: "highlight",
 				color: "#f4c84f",
 				body: {
-					rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+					quote: "Selected page 1 text",
+					rects: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.1 }],
 				},
 			}),
 		})

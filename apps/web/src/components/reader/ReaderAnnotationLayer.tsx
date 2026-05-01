@@ -3,43 +3,22 @@ import type { ReaderAnnotation } from "@/api/hooks/reader-annotations"
 import {
 	READER_ANNOTATION_COLORS,
 	annotationBodyBoundingBox,
-	distanceBetweenPoints,
-	type ReaderAnnotationBody,
-	type ReaderAnnotationPoint,
-	type ReaderAnnotationTool,
+	type ReaderAnnotationRect,
 } from "@/lib/reader-annotations"
-
-// Keep highlight bands slim enough to read like a text marker stroke
-// rather than a full-line block, even on very short drags / clicks.
-const HIGHLIGHT_MIN_H = 0.012
-const HIGHLIGHT_MIN_W = 0.01
 
 export function ReaderAnnotationShape({
 	annotation,
 	flashed,
 	H,
-	onSelect,
 	selected,
 	W,
 }: {
 	annotation: ReaderAnnotation
 	flashed?: boolean
 	H: number
-	onSelect?: (annotationId: string | null) => void
 	selected?: boolean
 	W: number
 }) {
-	// SVG viewBox is "0 0 W H" (pixel coordinates). 0..1-stored values
-	// are scaled by W or H so 1 SVG unit == 1 CSS pixel — strokes render
-	// at consistent pixel widths regardless of line direction.
-	const stopAndSelect = {
-		onClick: (event: React.MouseEvent) => event.stopPropagation(),
-		onPointerDown: (event: React.PointerEvent) => {
-			event.stopPropagation()
-			event.preventDefault()
-			onSelect?.(annotation.id)
-		},
-	}
 	// SMIL pulse used for the citation-jump flash. Mounting the <animate>
 	// element re-runs the animation each time `flashed` flips on, so a
 	// rapid second click on the same chip restarts the pulse instead of
@@ -60,120 +39,154 @@ export function ReaderAnnotationShape({
 	// "something used to live here" but it doesn't visually compete with
 	// live markup. Selection still works so the popover can offer Restore.
 	const isGhost = annotation.deletedAt != null
-	if (annotation.kind === "highlight" && "rect" in annotation.body) {
-		const { rect } = annotation.body
-		if (isGhost) {
-			return (
-				<rect
-					fill={annotation.color}
-					fillOpacity={selected ? 0.18 : 0.07}
-					height={rect.h * H}
-					rx={3}
-					ry={3}
-					stroke={annotation.color}
-					strokeDasharray="4 3"
-					strokeOpacity={selected ? 0.85 : 0.5}
-					strokeWidth={selected ? 1.5 : 1}
-					width={rect.w * W}
-					x={rect.x * W}
-					y={rect.y * H}
-					{...stopAndSelect}
-				>
-					{flashPulse}
-				</rect>
-			)
-		}
+	return annotation.kind === "highlight" ? (
+		<>
+			{annotation.body.rects.map((rect, index) => (
+				<ReaderTextHighlightRect
+					color={annotation.color}
+					flashed={flashPulse}
+					height={H}
+					isGhost={isGhost}
+					key={`${annotation.id}-rect-${index}`}
+					rect={rect}
+					selected={selected}
+					width={W}
+				/>
+			))}
+		</>
+	) : (
+		<>
+			{annotation.body.rects.map((rect, index) => (
+				<ReaderTextUnderline
+					color={annotation.color}
+					flashed={flashPulse}
+					height={H}
+					isGhost={isGhost}
+					key={`${annotation.id}-line-${index}`}
+					rect={rect}
+					selected={selected}
+					width={W}
+				/>
+			))}
+		</>
+	)
+}
+
+function ReaderTextHighlightRect({
+	color,
+	flashed,
+	height,
+	isGhost,
+	rect,
+	selected,
+	width,
+}: {
+	color: string
+	flashed: React.ReactNode
+	height: number
+	isGhost: boolean
+	rect: ReaderAnnotationRect
+	selected?: boolean
+	width: number
+}) {
+	const box = tightenHighlightBox(rect, width, height)
+	if (isGhost) {
 		return (
 			<rect
-				fill={annotation.color}
-				fillOpacity={selected ? 0.42 : 0.28}
-				height={rect.h * H}
-				rx={3}
-				ry={3}
-				stroke={selected ? annotation.color : "none"}
-				strokeOpacity={selected ? 0.95 : undefined}
-				strokeWidth={selected ? 1.5 : undefined}
-				width={rect.w * W}
-				x={rect.x * W}
-				y={rect.y * H}
-				{...stopAndSelect}
+				fill={color}
+				fillOpacity={selected ? 0.18 : 0.07}
+				height={box.h}
+				rx={2}
+				ry={2}
+				stroke={color}
+				strokeDasharray="4 3"
+				strokeOpacity={selected ? 0.85 : 0.5}
+				strokeWidth={selected ? 1.5 : 1}
+				width={box.w}
+				x={box.x}
+				y={box.y}
 			>
-				{flashPulse}
+				{flashed}
 			</rect>
 		)
 	}
-	if (annotation.kind === "underline" && "from" in annotation.body && "to" in annotation.body) {
-		const { from, to } = annotation.body
-		return (
-			<>
-				<line
-					pointerEvents="none"
-					stroke={annotation.color}
-					strokeDasharray={isGhost ? "5 4" : undefined}
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					strokeOpacity={isGhost ? (selected ? 0.7 : 0.4) : selected ? 1 : 0.95}
-					strokeWidth={isGhost ? (selected ? 3 : 2) : selected ? 4.5 : 3}
-					x1={from.x * W}
-					x2={to.x * W}
-					y1={from.y * H}
-					y2={to.y * H}
-				>
-					{flashPulse}
-				</line>
-				<line
-					{...stopAndSelect}
-					pointerEvents="stroke"
-					stroke="transparent"
-					strokeWidth={16}
-					x1={from.x * W}
-					x2={to.x * W}
-					y1={from.y * H}
-					y2={to.y * H}
-				/>
-			</>
-		)
-	}
-	if (annotation.kind === "ink" && "points" in annotation.body) {
-		const d = pointsToScaledPath(annotation.body.points, W, H)
-		return (
-			<>
-				<path
-					d={d}
-					fill="none"
-					pointerEvents="none"
-					stroke={annotation.color}
-					strokeDasharray={isGhost ? "5 4" : undefined}
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					strokeOpacity={isGhost ? (selected ? 0.7 : 0.4) : selected ? 1 : 0.95}
-					strokeWidth={isGhost ? (selected ? 3 : 2.5) : selected ? 4.5 : 3.5}
-				>
-					{flashPulse}
-				</path>
-				<path
-					{...stopAndSelect}
-					d={d}
-					fill="none"
-					pointerEvents="stroke"
-					stroke="transparent"
-					strokeWidth={16}
-				/>
-			</>
-		)
-	}
-	return null
+	return (
+		<rect
+			fill={color}
+			fillOpacity={selected ? 0.42 : 0.28}
+			height={box.h}
+			rx={2}
+			ry={2}
+			stroke={selected ? color : "none"}
+			strokeOpacity={selected ? 0.95 : undefined}
+			strokeWidth={selected ? 1.5 : undefined}
+			width={box.w}
+			x={box.x}
+			y={box.y}
+		>
+			{flashed}
+		</rect>
+	)
 }
 
-function pointsToScaledPath(points: ReaderAnnotationPoint[], W: number, H: number) {
-	if (points.length === 0) return ""
-	return points
-		.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`)
-		.join(" ")
+function ReaderTextUnderline({
+	color,
+	flashed,
+	height,
+	isGhost,
+	rect,
+	selected,
+	width,
+}: {
+	color: string
+	flashed: React.ReactNode
+	height: number
+	isGhost: boolean
+	rect: ReaderAnnotationRect
+	selected?: boolean
+	width: number
+}) {
+	const y = (rect.y + rect.h * 0.9) * height
+	const x1 = rect.x * width
+	const x2 = (rect.x + rect.w) * width
+	return (
+		<>
+			<line
+				pointerEvents="none"
+				stroke={color}
+				strokeDasharray={isGhost ? "5 4" : undefined}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeOpacity={isGhost ? (selected ? 0.68 : 0.38) : selected ? 0.98 : 0.92}
+				strokeWidth={isGhost ? (selected ? 2.4 : 1.6) : selected ? 3.4 : 2.3}
+				x1={x1}
+				x2={x2}
+				y1={y}
+				y2={y}
+			>
+				{flashed}
+			</line>
+		</>
+	)
 }
 
 function annotationBoundingBox(annotation: ReaderAnnotation) {
 	return annotationBodyBoundingBox(annotation.kind, annotation.body)
+}
+
+function tightenHighlightBox(rect: ReaderAnnotationRect, width: number, height: number) {
+	const rawX = rect.x * width
+	const rawY = rect.y * height
+	const rawW = rect.w * width
+	const rawH = rect.h * height
+	const insetX = Math.min(0.75, rawW * 0.025)
+	const insetY = Math.min(1.1, rawH * 0.12)
+	return {
+		x: rawX + insetX,
+		y: rawY + insetY,
+		w: Math.max(1, rawW - insetX * 2),
+		h: Math.max(1, rawH - insetY * 2),
+	}
 }
 
 export function ReaderAnnotationSelectionOutline({
@@ -245,7 +258,7 @@ export function ReaderAnnotationActionsPopover({
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: presentational; clicks within shouldn't bubble to the SVG and clear selection
 		<div
-			className="absolute z-[3] -translate-x-1/2 flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-1 shadow-[var(--shadow-popover)] backdrop-blur"
+			className="pointer-events-auto absolute z-[3] -translate-x-1/2 flex items-center gap-1 whitespace-nowrap rounded-md border border-border-subtle bg-bg-overlay/95 px-1.5 py-1 shadow-[var(--shadow-popover)] backdrop-blur"
 			onClick={(e) => e.stopPropagation()}
 			onMouseDown={(e) => e.stopPropagation()}
 			onPointerDown={(e) => e.stopPropagation()}
@@ -253,19 +266,22 @@ export function ReaderAnnotationActionsPopover({
 		>
 			{isGhost ? (
 				<>
-					<span className="px-1.5 text-[11px] uppercase tracking-[0.12em] text-text-tertiary">
-						deleted
+					<span
+						aria-label="Deleted annotation"
+						className="flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary"
+						title="Deleted annotation"
+					>
+						<GhostIcon />
 					</span>
 					{onRestore ? (
 						<button
 							aria-label="Restore annotation"
-							className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+							className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
 							onClick={onRestore}
 							title="Restore"
 							type="button"
 						>
 							<RestoreIcon />
-							<span>Restore</span>
 						</button>
 					) : null}
 				</>
@@ -306,95 +322,6 @@ export function ReaderAnnotationActionsPopover({
 	)
 }
 
-export function ReaderAnnotationDraft({
-	body,
-	color,
-	H,
-	kind,
-	W,
-}: {
-	body: ReaderAnnotationBody
-	color: string
-	H: number
-	kind: ReaderAnnotationTool
-	W: number
-}) {
-	if (kind === "highlight" && "rect" in body) {
-		return (
-			<rect
-				fill={color}
-				fillOpacity={0.22}
-				height={body.rect.h * H}
-				rx={3}
-				ry={3}
-				stroke={color}
-				strokeDasharray="8 5"
-				strokeOpacity={0.65}
-				strokeWidth={1.2}
-				width={body.rect.w * W}
-				x={body.rect.x * W}
-				y={body.rect.y * H}
-			/>
-		)
-	}
-	if (kind === "underline" && "from" in body && "to" in body) {
-		return (
-			<line
-				stroke={color}
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				strokeOpacity={0.8}
-				strokeWidth={3}
-				x1={body.from.x * W}
-				x2={body.to.x * W}
-				y1={body.from.y * H}
-				y2={body.to.y * H}
-			/>
-		)
-	}
-	if (kind === "ink" && "points" in body) {
-		return (
-			<path
-				d={pointsToScaledPath(body.points, W, H)}
-				fill="none"
-				stroke={color}
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				strokeOpacity={0.8}
-				strokeWidth={3.5}
-			/>
-		)
-	}
-	return null
-}
-
-export function bodyHasNoVisibleExtent(body: ReaderAnnotationBody) {
-	// Reject only true zero-extent shapes (accidental clicks). Highlights are
-	// intentionally thin bands; we no longer require a vertical drag.
-	if ("rect" in body) return body.rect.w < 0.002 && body.rect.h < 0.002
-	if ("from" in body && "to" in body) return distanceBetweenPoints(body.from, body.to) < 0.005
-	if ("points" in body) {
-		if (body.points.length < 2) return true
-		return body.points.every((point) => distanceBetweenPoints(point, body.points[0]!) < 0.005)
-	}
-	return true
-}
-
-// Highlights track a horizontal text drag, so the raw bbox is often
-// near-zero in one axis. Inflate to a visible band, clamped to the page.
-// Already-large rects pass through unchanged so we don't introduce
-// floating-point drift on a normal drag.
-export function padHighlightRect(rect: { x: number; y: number; w: number; h: number }) {
-	if (rect.w >= HIGHLIGHT_MIN_W && rect.h >= HIGHLIGHT_MIN_H) return rect
-	const w = Math.max(rect.w, HIGHLIGHT_MIN_W)
-	const h = Math.max(rect.h, HIGHLIGHT_MIN_H)
-	const cx = rect.x + rect.w / 2
-	const cy = rect.y + rect.h / 2
-	const x = Math.max(0, Math.min(1 - w, cx - w / 2))
-	const y = Math.max(0, Math.min(1 - h, cy - h / 2))
-	return { x, y, w, h }
-}
-
 function RestoreIcon() {
 	return (
 		<svg
@@ -410,6 +337,26 @@ function RestoreIcon() {
 		>
 			<path d="M3 12a9 9 0 1 0 3-6.7" />
 			<path d="M3 4v5h5" />
+		</svg>
+	)
+}
+
+function GhostIcon() {
+	return (
+		<svg
+			aria-hidden="true"
+			fill="none"
+			height="14"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			strokeWidth="1.6"
+			viewBox="0 0 24 24"
+			width="14"
+		>
+			<path d="M6 19V9a6 6 0 1 1 12 0v10l-3-2-3 2-3-2-3 2Z" />
+			<path d="M10 10h.01M14 10h.01" />
+			<path d="M10 14c.7.7 2.3.7 3 0" />
 		</svg>
 	)
 }

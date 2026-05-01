@@ -16,10 +16,6 @@ export const readerAnnotationRoutes = new Hono<AuthContext>()
 const UnitValueSchema = z.number().finite().min(0).max(1)
 const PageSchema = z.number().int().min(1)
 const ColorSchema = z.string().trim().min(1).max(32)
-const PointSchema = z.object({
-	x: UnitValueSchema,
-	y: UnitValueSchema,
-})
 const RectSchema = z
 	.object({
 		x: UnitValueSchema,
@@ -41,6 +37,10 @@ const RectSchema = z
 			})
 		}
 	})
+const TextMarkupBodySchema = z.object({
+	rects: z.array(RectSchema).min(1),
+	quote: z.string().trim().min(1),
+})
 
 const CreateReaderAnnotationSchema = z.discriminatedUnion("kind", [
 	z.object({
@@ -48,21 +48,14 @@ const CreateReaderAnnotationSchema = z.discriminatedUnion("kind", [
 		page: PageSchema,
 		kind: z.literal("highlight"),
 		color: ColorSchema,
-		body: z.object({ rect: RectSchema }),
+		body: TextMarkupBodySchema,
 	}),
 	z.object({
 		workspaceId: z.string().uuid(),
 		page: PageSchema,
 		kind: z.literal("underline"),
 		color: ColorSchema,
-		body: z.object({ from: PointSchema, to: PointSchema }),
-	}),
-	z.object({
-		workspaceId: z.string().uuid(),
-		page: PageSchema,
-		kind: z.literal("ink"),
-		color: ColorSchema,
-		body: z.object({ points: z.array(PointSchema).min(2) }),
+		body: TextMarkupBodySchema,
 	}),
 ])
 

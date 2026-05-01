@@ -128,18 +128,18 @@ export function BlocksPanel({
 		)
 	}
 
-	return (
-		<div className="flex h-full min-h-0 flex-col bg-[var(--color-reading-bg)]">
-			<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/75 px-4 py-3">
-				<div>
-					<div className="text-xs uppercase tracking-[0.16em] text-text-secondary">
-						Parsed blocks
+		return (
+			<div className="flex h-full min-h-0 flex-col bg-[var(--color-reading-bg)]">
+				<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_72%,var(--color-bg-secondary))] px-4 py-3">
+					<div>
+						<div className="text-xs uppercase tracking-[0.16em] text-text-secondary">
+							Parsed blocks
+						</div>
+					</div>
+					<div className="rounded-md border border-border-default bg-[color-mix(in_srgb,var(--color-reading-bg)_88%,var(--color-bg-overlay))] px-3 py-1 text-xs font-medium text-text-secondary">
+						{visiblePage}/{grouped.length}
 					</div>
 				</div>
-				<div className="rounded-md border border-border-default bg-bg-primary px-3 py-1 text-xs font-medium text-text-secondary">
-					{visiblePage}/{grouped.length}
-				</div>
-			</div>
 			<BlocksPanelScrollBody
 				citationCounts={citationCounts}
 				colorByBlock={colorByBlock}
@@ -673,13 +673,13 @@ function BlocksPanelScrollBody({
 						}
 					}}
 				>
-					<div
-						className={`mb-2 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-							currentPage === page
-								? "bg-surface-selected text-text-accent"
-								: "bg-bg-secondary text-text-secondary"
-						}`}
-					>
+						<div
+							className={`mb-2 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+								currentPage === page
+									? "bg-surface-selected text-text-primary"
+									: "bg-[color-mix(in_srgb,var(--color-reading-bg)_86%,var(--color-bg-overlay))] text-text-secondary"
+							}`}
+						>
 						Page {page}
 					</div>
 					{renderedPages.has(page) ? (
@@ -748,17 +748,17 @@ function estimatePageBodyHeight(pageBlocks: Block[], averageMeasuredBodyHeight: 
 }
 
 function PageBlockPlaceholder({ blockCount, height }: { blockCount: number; height: number }) {
-	return (
-		<div
-			aria-hidden="true"
-			className="overflow-hidden rounded-md border border-border-subtle/40 bg-bg-secondary/20"
-			style={{ height }}
-		>
-			<div className="flex h-full flex-col gap-3 p-3 opacity-40">
-				{Array.from({ length: Math.min(Math.max(blockCount, 2), 5) }, (_, index) => (
-					<div
-						className="rounded-sm bg-bg-secondary/70"
-						key={index}
+		return (
+			<div
+				aria-hidden="true"
+				className="overflow-hidden rounded-md border border-border-subtle/40 bg-[color-mix(in_srgb,var(--color-reading-bg)_92%,var(--color-bg-secondary))]"
+				style={{ height }}
+			>
+				<div className="flex h-full flex-col gap-3 p-3 opacity-40">
+					{Array.from({ length: Math.min(Math.max(blockCount, 2), 5) }, (_, index) => (
+						<div
+							className="rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_58%,var(--color-border-default))]"
+							key={index}
 						style={{
 							height: index === 0 ? 20 : 14,
 							width: `${92 - index * 9}%`,
@@ -985,7 +985,7 @@ const BlockRow = memo(function BlockRow({
 			 * (zero gap) keeps the toolbar a hover descendant so cursor
 			 * transit between row and toolbar doesn't fire mouseleave.
 			 */}
-			<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-bg-overlay/95 px-1 py-1 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+				<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-[var(--color-reading-bg)] px-1 py-1 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
 				{citationCount && citationCount > 0 ? (
 					<span className="relative">
 						<button
@@ -1190,16 +1190,16 @@ const EquationBlock = memo(function EquationBlock({ latex }: { latex: string }) 
 	const html = useMemo(() => renderKatex(normalizedLatex, true), [normalizedLatex])
 	if (!html) {
 		return (
-			<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-bg-secondary/70 px-3 py-2 font-mono text-sm text-text-primary">
+			<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-3 py-2 font-mono text-sm text-text-primary">
 				{latex || "[equation]"}
 			</pre>
 		)
 	}
 	return (
-		<div
-			className="my-2 overflow-x-auto rounded-sm bg-bg-secondary/40 px-3 py-3 text-text-primary"
-			dangerouslySetInnerHTML={{ __html: html }}
-		/>
+			<div
+				className="my-2 overflow-x-auto rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_88%,var(--color-bg-secondary))] px-3 py-3 text-text-primary"
+				dangerouslySetInnerHTML={{ __html: html }}
+			/>
 	)
 })
 
@@ -1240,13 +1240,13 @@ const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 				<figure className="my-2">
 					{block.imageUrl ? (
 						<img
-							alt={block.caption ?? `${block.type}`}
-							className="mx-auto max-h-[360px] w-auto max-w-full rounded-sm border border-border-subtle bg-bg-primary object-contain"
+								alt={block.caption ?? `${block.type}`}
+								className="mx-auto max-h-[360px] w-auto max-w-full rounded-sm border border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_92%,var(--color-bg-overlay))] object-contain"
 							loading="lazy"
 							src={block.imageUrl}
 						/>
 					) : (
-						<div className="rounded-sm border border-dashed border-border-subtle bg-bg-secondary px-3 py-2 text-xs italic text-text-tertiary">
+							<div className="rounded-sm border border-dashed border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_84%,var(--color-bg-secondary))] px-3 py-2 text-xs italic text-text-tertiary">
 							[{block.type} — no image extracted]
 						</div>
 					)}
@@ -1262,7 +1262,7 @@ const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 			return <EquationBlock latex={block.text || ""} />
 		case "code":
 			return (
-				<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-bg-secondary/70 px-3 py-2 font-mono text-sm text-text-primary">
+					<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-3 py-2 font-mono text-sm text-text-primary">
 					{block.text || `[${block.type}]`}
 				</pre>
 			)

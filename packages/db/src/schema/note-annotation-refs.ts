@@ -3,9 +3,9 @@ import { index, integer, pgTable, primaryKey, text, timestamp, uuid } from "driz
 import { notes } from "./notes"
 import { papers } from "./papers"
 
-// Bridge table between notes and cite-able reader annotations. We only admit
-// highlight + underline cites into this table; ink remains purely visual and
-// never participates in note anchoring/citation flows.
+// Bridge table between notes and cite-able reader annotations. Reader
+// annotations are text markup only, so every row here is a highlight or
+// underline citation.
 //
 // Deliberately no FK to reader_annotations(id): note citations should remain
 // visible even if the source annotation is deleted later. We preserve the id

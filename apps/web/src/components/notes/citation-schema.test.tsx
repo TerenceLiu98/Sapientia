@@ -88,7 +88,10 @@ describe("AnnotationCitationChip", () => {
 				page: 12,
 				kind: "highlight",
 				color: "#f4c84f",
-				body: { rect: { x: 0.1, y: 0.22, w: 0.3, h: 0.08 } },
+				body: {
+					quote: "Selected page 12 text",
+					rects: [{ x: 0.1, y: 0.22, w: 0.3, h: 0.08 }],
+				},
 				createdAt: "2026-04-27T00:00:00.000Z",
 				updatedAt: "2026-04-27T00:00:00.000Z",
 				deletedAt: null,

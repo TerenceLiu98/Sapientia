@@ -4,11 +4,6 @@ import { user } from "./auth"
 import { papers } from "./papers"
 import { workspaces } from "./workspaces"
 
-export interface ReaderAnnotationPoint {
-	x: number
-	y: number
-}
-
 export interface ReaderAnnotationRect {
 	x: number
 	y: number
@@ -16,12 +11,14 @@ export interface ReaderAnnotationRect {
 	h: number
 }
 
-export type ReaderAnnotationKind = "highlight" | "underline" | "ink"
+export interface ReaderTextMarkupBody {
+	rects: ReaderAnnotationRect[]
+	quote: string
+}
 
-export type ReaderAnnotationBody =
-	| { rect: ReaderAnnotationRect }
-	| { from: ReaderAnnotationPoint; to: ReaderAnnotationPoint }
-	| { points: ReaderAnnotationPoint[] }
+export type ReaderAnnotationKind = "highlight" | "underline"
+
+export type ReaderAnnotationBody = ReaderTextMarkupBody
 
 // Human-reading markup drawn over the PDF surface. These annotations are
 // page-relative and intentionally decoupled from block ids / bbox-driven
@@ -41,7 +38,7 @@ export const readerAnnotations = pgTable(
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 		page: integer("page").notNull(),
-		kind: text("kind", { enum: ["highlight", "underline", "ink"] }).notNull(),
+		kind: text("kind", { enum: ["highlight", "underline"] }).notNull(),
 		color: text("color").notNull(),
 		body: jsonb("body").$type<ReaderAnnotationBody>().notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -87,8 +87,8 @@ export function OverlayNoteCard({
 				type="button"
 			/>
 
-			<div
-				className="fixed left-1/2 top-1/2 z-[41] flex max-h-[70vh] w-[var(--overlay-card-w)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[18px] border border-border-default bg-bg-overlay shadow-[0_30px_80px_rgba(15,23,42,0.28)]"
+				<div
+					className="fixed left-1/2 top-1/2 z-[41] flex max-h-[70vh] w-[var(--overlay-card-w)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[18px] border border-border-default bg-[color-mix(in_srgb,var(--color-reading-bg)_90%,var(--color-bg-overlay))] shadow-[var(--shadow-xl)]"
 				data-overlay-note-id={note.id}
 				role="dialog"
 				aria-label={`Note · ${groupLabel || pageLabel}`}
@@ -99,7 +99,7 @@ export function OverlayNoteCard({
 					} as React.CSSProperties
 				}
 			>
-				<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-bg-primary/60 px-2.5 py-1.5 text-xs text-text-tertiary">
+					<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_70%,var(--color-bg-secondary))] px-2.5 py-1.5 text-xs text-text-tertiary">
 					<span className="truncate px-1.5 py-1">
 						{pageLabel}
 						{groupLabel ? ` · ${groupLabel}` : ""}

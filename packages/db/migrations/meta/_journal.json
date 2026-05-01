@@ -148,6 +148,13 @@
       "when": 1777521600000,
       "tag": "0020_agent_llm_model_name",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1777572000000,
+      "tag": "0021_sturdy_text_markup",
+      "breakpoints": true
     }
   ]
 }

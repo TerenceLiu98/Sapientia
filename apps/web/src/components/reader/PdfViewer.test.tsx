@@ -55,12 +55,14 @@ vi.mock("react-pdf", () => ({
 	},
 	Page: ({
 		pageNumber,
+		pageColors,
 		scale,
 		renderTextLayer,
 		onLoadSuccess,
 		onRenderSuccess,
 	}: {
 		pageNumber: number
+		pageColors?: { background: string; foreground: string }
 		scale: number
 		renderTextLayer?: boolean
 		onLoadSuccess?: (page: { view: number[] }) => void
@@ -69,7 +71,11 @@ vi.mock("react-pdf", () => ({
 		queueMicrotask(() => onLoadSuccess?.({ view: [0, 0, 600, 800] }))
 		queueMicrotask(() => onRenderSuccess?.())
 		return (
-			<div data-testid={`pdf-page-${pageNumber}`} data-scale={scale}>
+			<div
+				data-page-colors={pageColors ? JSON.stringify(pageColors) : ""}
+				data-testid={`pdf-page-${pageNumber}`}
+				data-scale={scale}
+			>
 				<canvas data-testid={`pdf-canvas-${pageNumber}`} />
 				{renderTextLayer ? (
 					<div className="react-pdf__Page__textContent">
@@ -118,6 +124,7 @@ beforeEach(async () => {
 afterEach(() => {
 	vi.clearAllMocks()
 	delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+	delete document.documentElement.dataset.theme
 	Object.defineProperty(window, "getSelection", {
 		configurable: true,
 		value: originalGetSelection,
@@ -191,6 +198,94 @@ describe("PdfViewer", () => {
 		expect(screen.getByTestId("pdf-document")).toBeInTheDocument()
 	})
 
+	it("applies a dark-mode filter to rendered PDF canvases", async () => {
+		document.documentElement.dataset.theme = "dark"
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+
+		render(
+			<Wrapper>
+				<PdfViewer paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		const canvas = await screen.findByTestId("pdf-canvas-1")
+		expect((canvas as HTMLCanvasElement).style.filter).toBe("var(--pdf-dark-display-filter)")
+		expect((canvas as HTMLCanvasElement).style.opacity).toBe("var(--pdf-dark-display-opacity)")
+	})
+
+	it("reapplies the dark-mode filter when react-pdf swaps the canvas element", async () => {
+		document.documentElement.dataset.theme = "dark"
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+
+		render(
+			<Wrapper>
+				<PdfViewer paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		const originalCanvas = await screen.findByTestId("pdf-canvas-1")
+		expect((originalCanvas as HTMLCanvasElement).style.filter).toBe(
+			"var(--pdf-dark-display-filter)",
+		)
+
+		const page = screen.getByTestId("pdf-page-1")
+		const replacementCanvas = document.createElement("canvas")
+		replacementCanvas.dataset.testid = "pdf-canvas-1-replacement"
+		originalCanvas.remove()
+		page.prepend(replacementCanvas)
+
+		await waitFor(() => {
+			expect(replacementCanvas.style.filter).toBe("var(--pdf-dark-display-filter)")
+			expect(replacementCanvas.style.opacity).toBe("var(--pdf-dark-display-opacity)")
+		})
+	})
+
+	it("targets the visible page canvas instead of a hidden measurement canvas", async () => {
+		document.documentElement.dataset.theme = "dark"
+		usePaperPdfUrlMock.mockReturnValue({
+			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
+			isLoading: false,
+			isError: false,
+			refetch: refetchMock,
+		})
+		const PdfViewer = await importPdfViewer()
+		const Wrapper = makeWrapper()
+
+		render(
+			<Wrapper>
+				<PdfViewer paperId="paper-1" />
+			</Wrapper>,
+		)
+
+		const page = await screen.findByTestId("pdf-page-1")
+		const visibleCanvas = screen.getByTestId("pdf-canvas-1") as HTMLCanvasElement
+		const hiddenCanvas = document.createElement("canvas")
+		hiddenCanvas.className = "hiddenCanvasElement"
+		page.prepend(hiddenCanvas)
+
+		fireEvent(document, new Event("selectionchange"))
+
+		await waitFor(() => {
+			expect(visibleCanvas.style.filter).toBe("var(--pdf-dark-display-filter)")
+			expect(visibleCanvas.style.opacity).toBe("var(--pdf-dark-display-opacity)")
+		})
+		expect(hiddenCanvas.style.filter).toBe("")
+	})
+
 	it("emits selected-text context for PDF text-layer selections", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
@@ -247,6 +342,19 @@ describe("PdfViewer", () => {
 			.closest("[data-page-number]")
 			?.querySelector(".react-pdf__Page__textContent") as HTMLElement | null
 		expect(textLayer).not.toBeNull()
+		const canvas = rail.closest("[data-page-number]")?.querySelector("canvas") as HTMLCanvasElement | null
+		expect(canvas).not.toBeNull()
+		vi.spyOn(canvas as HTMLCanvasElement, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 600,
+			bottom: 800,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
 
 		const selection = {
 			getRangeAt: vi.fn(() => ({
@@ -288,6 +396,13 @@ describe("PdfViewer", () => {
 					top: 130,
 					width: 120,
 					height: 18,
+				},
+				annotationTarget: {
+					body: {
+						quote: "Selected page 1 text",
+						rects: [{ x: 110 / 600, y: 130 / 800, w: 120 / 600, h: 18 / 800 }],
+					},
+					page: 1,
 				},
 				blockIds: ["block-1"],
 				mode: "pdf",
@@ -573,63 +688,6 @@ describe("PdfViewer", () => {
 		expect(onClearSelectedBlock).toHaveBeenCalledTimes(1)
 	})
 
-	it("creates a reader annotation in dedicated markup mode without relying on block ids", async () => {
-		usePaperPdfUrlMock.mockReturnValue({
-			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
-			isLoading: false,
-			isError: false,
-			refetch: refetchMock,
-		})
-		const onCreateReaderAnnotation = vi.fn().mockResolvedValue(undefined)
-		const PdfViewer = await importPdfViewer()
-		const Wrapper = makeWrapper()
-		const user = userEvent.setup()
-
-		render(
-			<Wrapper>
-				<PdfViewer
-					onCreateReaderAnnotation={onCreateReaderAnnotation}
-					paperId="paper-1"
-					readerAnnotations={[]}
-				/>
-			</Wrapper>,
-		)
-
-		await screen.findByTestId("pdf-page-1")
-		await user.click(screen.getByTitle("Enter markup mode"))
-		const layer = await screen.findByLabelText("Reader annotations page 1")
-		// Coordinate math reads the SVG's bounding rect via the ref, so
-		// keep mocking that, even though pointer events now fire on the
-		// backdrop rect inside the SVG.
-		vi.spyOn(layer, "getBoundingClientRect").mockReturnValue({
-			x: 0,
-			y: 0,
-			top: 0,
-			left: 0,
-			right: 600,
-			bottom: 800,
-			width: 600,
-			height: 800,
-			toJSON: () => ({}),
-		} as DOMRect)
-		const canvas = await screen.findByLabelText("Reader annotations canvas page 1")
-
-		fireEvent.pointerDown(canvas, { button: 0, clientX: 60, clientY: 80, pointerId: 1 })
-		fireEvent.pointerMove(canvas, { clientX: 240, clientY: 200, pointerId: 1 })
-		fireEvent.pointerUp(canvas, { clientX: 240, clientY: 200, pointerId: 1 })
-
-		expect(onCreateReaderAnnotation).toHaveBeenCalledTimes(1)
-		expect(onCreateReaderAnnotation.mock.calls[0]?.[0]).toMatchObject({
-			page: 1,
-			kind: "highlight",
-			color: "#f4c84f",
-			body: {
-				rect: { x: 0.1, y: 0.1, h: 0.15 },
-			},
-		})
-		expect(onCreateReaderAnnotation.mock.calls[0]?.[0]?.body.rect.w).toBeCloseTo(0.3)
-	})
-
 	it("renders persisted reader annotations as a separate overlay layer", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
@@ -653,7 +711,10 @@ describe("PdfViewer", () => {
 							page: 1,
 							kind: "highlight",
 							color: "#f4c84f",
-							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
+							body: {
+								quote: "Selected page 1 text",
+								rects: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.1 }],
+							},
 							createdAt: new Date().toISOString(),
 							updatedAt: new Date().toISOString(),
 							deletedAt: null,
@@ -692,7 +753,10 @@ describe("PdfViewer", () => {
 							page: 1,
 							kind: "highlight",
 							color: "#f4c84f",
-							body: { rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 } },
+							body: {
+								quote: "Selected page 1 text",
+								rects: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.1 }],
+							},
 							createdAt: new Date().toISOString(),
 							updatedAt: new Date().toISOString(),
 							deletedAt: null,
@@ -708,118 +772,145 @@ describe("PdfViewer", () => {
 		)
 
 		const layer = await screen.findByLabelText("Reader annotations page 1")
-		const shape = layer.querySelector("rect")
-		expect(shape).not.toBeNull()
-		fireEvent.pointerDown(shape as Element, { pointerId: 1 })
+		expect(layer).toHaveClass("pointer-events-none")
+		const pageWrap = document.querySelector("[data-page-number='1']") as HTMLElement | null
+		expect(pageWrap).not.toBeNull()
+		vi.spyOn(pageWrap as HTMLElement, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 600,
+			bottom: 800,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+		fireEvent.click(pageWrap as Element, { clientX: 120, clientY: 180 })
 
 		await user.click(await screen.findByRole("button", { name: "Add annotation note" }))
 		expect(onExtraAction).toHaveBeenCalledTimes(1)
 	})
 
-	it("hides block overlays while markup mode is active and restores them when markup mode closes", async () => {
+	it("deletes a selected annotation with Delete", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
 			isLoading: false,
 			isError: false,
 			refetch: refetchMock,
 		})
+		const onDeleteReaderAnnotation = vi.fn()
 		const PdfViewer = await importPdfViewer()
 		const Wrapper = makeWrapper()
-		const user = userEvent.setup()
-		const blocks: Block[] = [
-			{
-				paperId: "paper-1",
-				blockId: "block-1",
-				blockIndex: 0,
-				page: 1,
-				type: "text",
-				text: "Appendix E",
-				headingLevel: null,
-				caption: null,
-				imageObjectKey: null,
-				imageUrl: null,
-				metadata: null,
-				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
-			},
-		]
 
 		render(
 			<Wrapper>
-				<PdfViewer blocks={blocks} onCreateReaderAnnotation={vi.fn()} paperId="paper-1" />
+				<PdfViewer
+					onDeleteReaderAnnotation={onDeleteReaderAnnotation}
+					paperId="paper-1"
+					readerAnnotations={[
+						{
+							id: "annotation-1",
+							paperId: "paper-1",
+							workspaceId: "workspace-1",
+							userId: "user-1",
+							page: 1,
+							kind: "highlight",
+							color: "#f4c84f",
+							body: {
+								quote: "Selected page 1 text",
+								rects: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.1 }],
+							},
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+							deletedAt: null,
+						},
+					]}
+				/>
 			</Wrapper>,
 		)
 
-		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
+		await screen.findByLabelText("Reader annotations page 1")
+		const pageWrap = document.querySelector("[data-page-number='1']") as HTMLElement | null
+		expect(pageWrap).not.toBeNull()
+		vi.spyOn(pageWrap as HTMLElement, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 600,
+			bottom: 800,
+			width: 600,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect)
+		fireEvent.click(pageWrap as Element, { clientX: 120, clientY: 180 })
 
-		await user.click(screen.getByTitle("Enter markup mode"))
-		expect(screen.queryByTitle("Appendix E")).not.toBeInTheDocument()
-
-		await user.click(screen.getByTitle("Exit markup mode"))
-		expect(await screen.findByTitle("Appendix E")).toBeInTheDocument()
+		fireEvent.keyDown(window, { key: "Delete" })
+		expect(onDeleteReaderAnnotation).toHaveBeenCalledWith("annotation-1")
 	})
 
-	it("can enter markup mode directly from the block-level floating tools", async () => {
+	it("does not delete a selected annotation from inside an input", async () => {
 		usePaperPdfUrlMock.mockReturnValue({
 			data: { url: "http://test/pdf", expiresInSeconds: 3600 },
 			isLoading: false,
 			isError: false,
 			refetch: refetchMock,
 		})
+		const onDeleteReaderAnnotation = vi.fn()
 		const PdfViewer = await importPdfViewer()
 		const Wrapper = makeWrapper()
-		const blocks: Block[] = [
-			{
-				paperId: "paper-1",
-				blockId: "block-1",
-				blockIndex: 0,
-				page: 1,
-				type: "text",
-				text: "Appendix F",
-				headingLevel: null,
-				caption: null,
-				imageObjectKey: null,
-				imageUrl: null,
-				metadata: null,
-				bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
-			},
-		]
 
-		const { container } = render(
+		render(
 			<Wrapper>
-				<PdfViewer blocks={blocks} onCreateReaderAnnotation={vi.fn()} paperId="paper-1" />
+				<div>
+					<input aria-label="test-input" />
+					<PdfViewer
+						onDeleteReaderAnnotation={onDeleteReaderAnnotation}
+						paperId="paper-1"
+						readerAnnotations={[
+							{
+								id: "annotation-1",
+								paperId: "paper-1",
+								workspaceId: "workspace-1",
+								userId: "user-1",
+								page: 1,
+								kind: "highlight",
+								color: "#f4c84f",
+								body: {
+									quote: "Selected page 1 text",
+									rects: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.1 }],
+								},
+								createdAt: new Date().toISOString(),
+								updatedAt: new Date().toISOString(),
+								deletedAt: null,
+							},
+						]}
+					/>
+				</div>
 			</Wrapper>,
 		)
-		const viewer = container.firstElementChild as HTMLElement | null
-		expect(viewer).not.toBeNull()
-		Object.defineProperty(viewer!, "clientHeight", {
-			configurable: true,
-			value: 700,
-		})
-		vi.spyOn(viewer!, "getBoundingClientRect").mockReturnValue({
-			x: 100,
-			y: 50,
-			top: 50,
-			left: 100,
-			right: 1000,
-			bottom: 750,
-			width: 900,
-			height: 700,
+
+		await screen.findByLabelText("Reader annotations page 1")
+		const pageWrap = document.querySelector("[data-page-number='1']") as HTMLElement | null
+		expect(pageWrap).not.toBeNull()
+		vi.spyOn(pageWrap as HTMLElement, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 600,
+			bottom: 800,
+			width: 600,
+			height: 800,
 			toJSON: () => ({}),
 		} as DOMRect)
+		fireEvent.click(pageWrap as Element, { clientX: 120, clientY: 180 })
 
-		expect(await screen.findByTitle("Appendix F")).toBeInTheDocument()
-
-		fireEvent.click(screen.getByRole("button", { name: "Enter markup mode from block tools" }), {
-			clientX: 400,
-			clientY: 260,
-		})
-
-		expect(screen.getByTitle("Close markup palette")).toBeInTheDocument()
-		expect(screen.getByTestId("floating-markup-palette")).toHaveStyle({
-			left: "314px",
-			top: "192px",
-		})
-		expect(screen.queryByTitle("Appendix F")).not.toBeInTheDocument()
+		const input = screen.getByLabelText("test-input")
+		input.focus()
+		fireEvent.keyDown(input, { key: "Backspace" })
+		expect(onDeleteReaderAnnotation).not.toHaveBeenCalled()
 	})
 
 	it("uses internal destination coordinates to jump to the target position within a page", async () => {

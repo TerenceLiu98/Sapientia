@@ -1,4 +1,9 @@
-import { noteAnnotationRefs, notes, type ReaderAnnotation, readerAnnotations } from "@sapientia/db"
+import {
+	noteAnnotationRefs,
+	notes,
+	type ReaderAnnotation,
+	readerAnnotations,
+} from "@sapientia/db"
 import { and, eq, isNull, or, sql } from "drizzle-orm"
 import { db } from "../db"
 

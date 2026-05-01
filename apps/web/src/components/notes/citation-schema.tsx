@@ -221,11 +221,11 @@ export function BlockCitationChip({
 		// biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handler is wired alongside the click
 		// biome-ignore lint/a11y/useSemanticElements: Tiptap inline content cannot host a real <button>; role="button" on a span is the necessary escape hatch
 		<span
-			className={`note-editor__citation-tag mx-0.5 cursor-pointer select-none font-sans font-semibold tracking-[-0.015em] transition-colors ${
-				chipColors
-					? "shadow-sm ring-1 ring-inset ring-current/10 hover:brightness-[0.97]"
-					: "bg-accent-700 text-text-inverse hover:bg-accent-800"
-			}`}
+				className={`note-editor__citation-tag mx-0.5 cursor-pointer select-none font-sans font-semibold tracking-[-0.015em] transition-colors ${
+					chipColors
+						? "shadow-sm ring-1 ring-inset ring-current/10 hover:brightness-[0.97]"
+						: "bg-accent-700 text-[var(--color-neutral-50)] hover:bg-accent-800"
+				}`}
 			contentEditable={false}
 			onClick={(e) => {
 				e.stopPropagation()
