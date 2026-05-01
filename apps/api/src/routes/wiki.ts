@@ -124,6 +124,25 @@ wikiRoutes.get(
 			edgeEvidenceByEdgeId.set(item.edgeId, bucket)
 		}
 
+		const graphEdges = publicEdges.map((edge) => ({
+			id: edge.id,
+			sourceConceptId: edge.sourceConceptId,
+			targetConceptId: edge.targetConceptId,
+			relationType: edge.relationType,
+			confidence: edge.confidence,
+			evidence:
+				edgeEvidenceByEdgeId.get(edge.id)?.map((item) => ({
+					blockId: item.blockId,
+					snippet: item.snippet,
+					confidence: item.confidence,
+				})) ?? [],
+		}))
+
+		const relationCounts = graphEdges.reduce<Record<string, number>>((counts, edge) => {
+			counts[edge.relationType] = (counts[edge.relationType] ?? 0) + 1
+			return counts
+		}, {})
+
 		return c.json({
 			page: {
 				id: page.id,
@@ -161,19 +180,11 @@ wikiRoutes.get(
 						confidence: item.confidence,
 					})) ?? [],
 			})),
-			edges: publicEdges.map((edge) => ({
-				id: edge.id,
-				sourceConceptId: edge.sourceConceptId,
-				targetConceptId: edge.targetConceptId,
-				relationType: edge.relationType,
-				confidence: edge.confidence,
-				evidence:
-					edgeEvidenceByEdgeId.get(edge.id)?.map((item) => ({
-						blockId: item.blockId,
-						snippet: item.snippet,
-						confidence: item.confidence,
-					})) ?? [],
-			})),
+			innerGraph: {
+				edgeCount: graphEdges.length,
+				relationCounts,
+				edges: graphEdges,
+			},
 		})
 	},
 )

@@ -216,22 +216,28 @@ describe("wiki route", () => {
 					],
 				},
 			],
-			edges: [
-				{
-					id: "edge-1",
-					sourceConceptId: "concept-2",
-					targetConceptId: "concept-1",
-					relationType: "measured_by",
-					confidence: 0.93,
-					evidence: [
-						{
-							blockId: "blk-2",
-							snippet: "edge evidence snippet",
-							confidence: 0.93,
-						},
-					],
+			innerGraph: {
+				edgeCount: 1,
+				relationCounts: {
+					measured_by: 1,
 				},
-			],
+				edges: [
+					{
+						id: "edge-1",
+						sourceConceptId: "concept-2",
+						targetConceptId: "concept-1",
+						relationType: "measured_by",
+						confidence: 0.93,
+						evidence: [
+							{
+								blockId: "blk-2",
+								snippet: "edge evidence snippet",
+								confidence: 0.93,
+							},
+						],
+					},
+				],
+			},
 		})
 	})
 
@@ -315,7 +321,11 @@ describe("wiki route", () => {
 				referenceBlockIds: [],
 			},
 			concepts: [],
-			edges: [],
+			innerGraph: {
+				edgeCount: 0,
+				relationCounts: {},
+				edges: [],
+			},
 		})
 	})
 })

@@ -6,6 +6,15 @@ import { PaperWikiDebugPanel } from "./PaperWikiDebugPanel"
 
 const usePaperWikiMock = vi.fn()
 const useCompilePaperWikiMock = vi.fn()
+const { cytoscapeMock } = vi.hoisted(() => ({
+	cytoscapeMock: vi.fn(() => ({
+		destroy: vi.fn(),
+	})),
+}))
+
+vi.mock("cytoscape", () => ({
+	default: cytoscapeMock,
+}))
 
 vi.mock("@/api/hooks/papers", () => ({
 	usePaperWiki: (...args: Array<unknown>) => usePaperWikiMock(...args),
@@ -61,22 +70,28 @@ describe("PaperWikiDebugPanel", () => {
 						],
 					},
 				],
-				edges: [
-					{
-						id: "edge-1",
-						sourceConceptId: "concept-1",
-						targetConceptId: "concept-1",
-						relationType: "related_to",
-						confidence: 0.75,
-						evidence: [
-							{
-								blockId: "block-1",
-								snippet: "We introduce MSE-RPs to construct accurate approximations.",
-								confidence: 0.92,
-							},
-						],
+				innerGraph: {
+					edgeCount: 1,
+					relationCounts: {
+						related_to: 1,
 					},
-				],
+					edges: [
+						{
+							id: "edge-1",
+							sourceConceptId: "concept-1",
+							targetConceptId: "concept-1",
+							relationType: "related_to",
+							confidence: 0.75,
+							evidence: [
+								{
+									blockId: "block-1",
+									snippet: "We introduce MSE-RPs to construct accurate approximations.",
+									confidence: 0.92,
+								},
+							],
+						},
+					],
+				},
 			},
 			error: null,
 			isLoading: false,
@@ -102,6 +117,10 @@ describe("PaperWikiDebugPanel", () => {
 		expect(screen.getByText("method")).toBeInTheDocument()
 		expect(screen.getAllByText("block-1")).toHaveLength(2)
 		expect(screen.getByText(/Inner Graph Edges/)).toBeInTheDocument()
+		expect(screen.getByLabelText("Inner paper concept graph preview")).toBeInTheDocument()
+		expect(screen.getByText("related_to 1")).toBeInTheDocument()
+		expect(screen.getByText(/We introduce MSE-RPs/)).toBeInTheDocument()
+		expect(cytoscapeMock).toHaveBeenCalledOnce()
 	})
 
 	it("shows a not-found summary and can queue a recompile", async () => {

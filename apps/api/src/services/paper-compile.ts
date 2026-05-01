@@ -174,7 +174,10 @@ function coerceBlockIdArray(value: unknown) {
 	if (value == null) return []
 	const values = Array.isArray(value) ? value : [value]
 	return values.flatMap((item) => {
-		if (typeof item === "string") return [item]
+		if (typeof item === "string") {
+			const blockId = normalizeBlockIdReference(item)
+			return blockId ? [blockId] : []
+		}
 		if (!isRecord(item)) return []
 		const blockId = firstStringField(item, [
 			"blockId",
@@ -185,7 +188,8 @@ function coerceBlockIdArray(value: unknown) {
 			"referenceBlockId",
 			"reference_block_id",
 		])
-		return blockId ? [blockId] : []
+		const normalizedBlockId = blockId ? normalizeBlockIdReference(blockId) : null
+		return normalizedBlockId ? [normalizedBlockId] : []
 	})
 }
 
@@ -326,6 +330,21 @@ export async function compilePaper(args: {
 		blockIds,
 		MAX_PAGE_REFERENCE_BLOCK_IDS,
 	)
+	if (
+		paperBlocks.length > 0 &&
+		sanitizedConcepts.length === 0 &&
+		pageReferenceBlockIds.length === 0
+	) {
+		throw new Error(
+			[
+				`${COMPILE_PROMPT_ID} returned no usable concepts or source-page references`,
+				`rawConceptCount=${compiled.concepts.length}`,
+				`usableConceptCount=${sanitizedConcepts.length}`,
+				`rawReferenceBlockCount=${compiled.referenceBlockIds.length}`,
+				`usableReferenceBlockCount=${pageReferenceBlockIds.length}`,
+			].join("; "),
+		)
+	}
 
 	const generatedAt = new Date()
 	const sourcePageCanonicalName = `paper:${paperId}`
@@ -462,8 +481,8 @@ function sanitizeExtractedConcepts(
 	const deduped = new Map<string, SanitizedConcept>()
 
 	for (const concept of concepts) {
-		const canonicalName = normalizeCanonicalName(concept.canonicalName)
 		const displayName = concept.displayName.trim()
+		const canonicalName = chooseCanonicalName(concept.canonicalName, displayName)
 		if (!canonicalName || !displayName) continue
 
 		const evidence = uniqueByBlockId(
@@ -533,11 +552,97 @@ function uniqueValidBlockIds(
 }
 
 function normalizeCanonicalName(value: string) {
-	return value
+	const edgeTrimmed = value
 		.trim()
 		.toLowerCase()
 		.replace(/\s+/g, " ")
-		.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+		.replace(/^[^\p{L}\p{N}(]+|[^\p{L}\p{N})]+$/gu, "")
+
+	if (hasBalancedParentheses(edgeTrimmed)) return edgeTrimmed
+
+	return edgeTrimmed.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+}
+
+function hasBalancedParentheses(value: string) {
+	let depth = 0
+	for (const char of value) {
+		if (char === "(") {
+			depth += 1
+			continue
+		}
+		if (char !== ")") continue
+		depth -= 1
+		if (depth < 0) return false
+	}
+	return depth === 0
+}
+
+function normalizeBlockIdReference(value: string) {
+	const trimmed = value.trim()
+	if (!trimmed) return null
+
+	const blockHeaderMatch = trimmed.match(/\bBlock\s*#\s*([a-zA-Z0-9_-]+)/i)
+	if (blockHeaderMatch?.[1]) return blockHeaderMatch[1]
+
+	const blkCitationMatch = trimmed.match(/\bblk\s+([a-zA-Z0-9_-]+)/i)
+	if (blkCitationMatch?.[1]) return blkCitationMatch[1]
+
+	const hashMatch = trimmed.match(/^#\s*([a-zA-Z0-9_-]+)$/)
+	if (hashMatch?.[1]) return hashMatch[1]
+
+	const bracketedBareMatch = trimmed.match(/^\[\s*([a-zA-Z0-9_-]+)\s*\]$/)
+	if (bracketedBareMatch?.[1]) return bracketedBareMatch[1]
+
+	return trimmed
+}
+
+function chooseCanonicalName(canonicalName: string, displayName: string) {
+	const normalizedCanonical = normalizeCanonicalName(canonicalName)
+	const normalizedDisplay = normalizeCanonicalName(displayName)
+	if (!normalizedCanonical) return normalizedDisplay
+	if (!normalizedDisplay) return normalizedCanonical
+
+	if (
+		isSingleTokenAcronymishDisplay(displayName) &&
+		isNearMiss(normalizedCanonical, normalizedDisplay)
+	) {
+		return normalizedDisplay
+	}
+
+	return normalizedCanonical
+}
+
+function isSingleTokenAcronymishDisplay(value: string) {
+	const trimmed = value.trim()
+	if (!trimmed || /\s/.test(trimmed)) return false
+	if (!/^[\p{L}\p{N}._-]+$/u.test(trimmed)) return false
+	return /[A-Z]/.test(trimmed) && /[a-z]/.test(trimmed)
+}
+
+function isNearMiss(a: string, b: string) {
+	if (a === b) return false
+	const distance = levenshteinDistance(a, b)
+	return distance > 0 && distance <= Math.max(1, Math.floor(Math.min(a.length, b.length) * 0.2))
+}
+
+function levenshteinDistance(a: string, b: string) {
+	const previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+	const current = Array.from({ length: b.length + 1 }, () => 0)
+
+	for (let i = 1; i <= a.length; i += 1) {
+		current[0] = i
+		for (let j = 1; j <= b.length; j += 1) {
+			const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1
+			current[j] = Math.min(
+				current[j - 1] + 1,
+				previous[j] + 1,
+				previous[j - 1] + substitutionCost,
+			)
+		}
+		previous.splice(0, previous.length, ...current)
+	}
+
+	return previous[b.length]
 }
 
 function buildSnippet(text: string) {

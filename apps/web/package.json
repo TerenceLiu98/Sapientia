@@ -24,6 +24,7 @@
 		"@tiptap/starter-kit": "^2.27.2",
 		"ai": "^5.0.0",
 		"better-auth": "^1.6.9",
+		"cytoscape": "^3.33.3",
 		"katex": "^0.16.45",
 		"lucide-react": "^1.11.0",
 		"novel": "^1.0.2",

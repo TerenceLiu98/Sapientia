@@ -46,11 +46,11 @@ describe("paper compile", () => {
 		selectMock.mockReset()
 		transactionMock.mockReset()
 		getLlmCredentialMock.mockReset()
-	completeObjectMock.mockReset()
-	txDeleteWhereMock.mockReset()
-	txDeleteMock.mockClear()
-	txInsertValuesMock.mockReset()
-	txInsertMock.mockClear()
+		completeObjectMock.mockReset()
+		txDeleteWhereMock.mockReset()
+		txDeleteMock.mockClear()
+		txInsertValuesMock.mockReset()
+		txInsertMock.mockClear()
 	})
 
 	it("normalizes common JSON-mode aliases into the compile schema", async () => {
@@ -59,28 +59,28 @@ describe("paper compile", () => {
 
 		const parsed = paperCompileResultSchema.parse({
 			body: "A compact source page.",
-			reference_block_ids: [{ block_id: "blk-1" }, "blk-2"],
+			reference_block_ids: [{ block_id: "[Block #blk-1: text]" }, "Block #blk-2"],
 			local_concepts: [
 				{
 					type: "methods",
 					canonical_name: "  Sparse Autoencoder  ",
 					display_name: "Sparse Autoencoder",
-					evidence_block_ids: [{ block_id: "blk-1" }],
+					evidence_block_ids: [{ block_id: "[Block #blk-1: text]" }],
 				},
 				{
 					category: "metrics",
 					name: "F1 score",
-					evidence: [{ blockId: "blk-2" }],
+					evidence: [{ blockId: "Block #blk-2" }],
 				},
 				{
 					kind: "findings",
 					name: "Sparse feature findings",
-					block_ids: ["blk-2"],
+					block_ids: ["[blk blk-2]"],
 				},
 				{
 					kind: "baseline",
 					name: "BERTOPIC",
-					block_ids: ["blk-1"],
+					block_ids: ["#blk-1"],
 				},
 			],
 		})
@@ -159,6 +159,22 @@ describe("paper compile", () => {
 								text: "Metric block",
 								headingLevel: null,
 							},
+							{
+								paperId: "paper-1",
+								blockId: "blk-3",
+								blockIndex: 2,
+								type: "text",
+								text: "TinyRM block",
+								headingLevel: null,
+							},
+							{
+								paperId: "paper-1",
+								blockId: "blk-4",
+								blockIndex: 3,
+								type: "text",
+								text: "PEFT block",
+								headingLevel: null,
+							},
 						],
 					}),
 				}),
@@ -187,6 +203,18 @@ describe("paper compile", () => {
 						canonicalName: "f1 score",
 						displayName: "F1 score",
 						evidenceBlockIds: ["blk-2"],
+					},
+					{
+						kind: "method",
+						canonicalName: "tinysrm",
+						displayName: "TinyRM",
+						evidenceBlockIds: ["blk-3"],
+					},
+					{
+						kind: "concept",
+						canonicalName: "parameter-efficient fine-tuning (PEFT)",
+						displayName: "Parameter-Efficient Fine-Tuning (PEFT)",
+						evidenceBlockIds: ["blk-4"],
 					},
 				],
 			},
@@ -267,7 +295,7 @@ describe("paper compile", () => {
 		expect(result).toEqual({
 			paperId: "paper-1",
 			workspaceCount: 1,
-			conceptCount: 2,
+			conceptCount: 4,
 			summaryChars: "## Overview\n\nA compact source page.".length,
 			model: "claude-sonnet-4-6",
 		})
@@ -290,6 +318,16 @@ describe("paper compile", () => {
 				kind: "metric",
 				canonicalName: "f1 score",
 			}),
+			expect.objectContaining({
+				kind: "method",
+				canonicalName: "tinyrm",
+				displayName: "TinyRM",
+			}),
+			expect.objectContaining({
+				kind: "concept",
+				canonicalName: "parameter-efficient fine-tuning (peft)",
+				displayName: "Parameter-Efficient Fine-Tuning (PEFT)",
+			}),
 		])
 
 		const insertedEvidence = insertedRows.find((row) => row.table === "evidence")
@@ -304,6 +342,18 @@ describe("paper compile", () => {
 				paperId: "paper-1",
 				blockId: "blk-2",
 				snippet: "Metric block",
+				confidence: null,
+			}),
+			expect.objectContaining({
+				paperId: "paper-1",
+				blockId: "blk-3",
+				snippet: "TinyRM block",
+				confidence: null,
+			}),
+			expect.objectContaining({
+				paperId: "paper-1",
+				blockId: "blk-4",
+				snippet: "PEFT block",
 				confidence: null,
 			}),
 		])
@@ -325,6 +375,8 @@ describe("paper compile", () => {
 		expect(insertedReferences?.values).toEqual([
 			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-2" },
 			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-1" },
+			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-3" },
+			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-4" },
 		])
 	})
 
@@ -357,7 +409,66 @@ describe("paper compile", () => {
 		)
 	})
 
-	it("applies hard caps to concept evidence and page references", async () => {
+	it("rejects an otherwise successful compile that yields no usable substrate", async () => {
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [
+							{
+								id: "paper-1",
+								title: "A Paper",
+								authors: ["Ada Lovelace"],
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ workspaceId: "ws-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								paperId: "paper-1",
+								blockId: "blk-1",
+								blockIndex: 0,
+								type: "text",
+								text: "A block with enough content to compile.",
+								headingLevel: null,
+							},
+						],
+					}),
+				}),
+			})
+
+		getLlmCredentialMock.mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-test",
+			model: "claude-sonnet-4-6",
+			baseURL: null,
+		})
+		completeObjectMock.mockResolvedValueOnce({
+			object: {
+				summary: "A summary with no refs and no concepts.",
+				referenceBlockIds: [],
+				concepts: [],
+			},
+			model: "claude-sonnet-4-6",
+		})
+
+		const { compilePaper } = await import("./paper-compile")
+		await expect(compilePaper({ paperId: "paper-1", userId: "user-1" })).rejects.toThrow(
+			"rawConceptCount=0",
+		)
+		expect(transactionMock).not.toHaveBeenCalled()
+	})
+
+	it("applies hard caps to concept evidence and page references without capping concepts", async () => {
 		const insertedRows: Array<{ table: "concepts" | "evidence" | "pages" | "references"; values: unknown }> = []
 
 		const manyBlocks = Array.from({ length: 620 }, (_, index) => ({
@@ -414,6 +525,12 @@ describe("paper compile", () => {
 						displayName: "Large Concept",
 						evidenceBlockIds: Array.from({ length: 250 }, (_, index) => `blk-${index + 1}`),
 					},
+					...Array.from({ length: 60 }, (_, index) => ({
+						kind: "concept",
+						canonicalName: `extra concept ${index + 1}`,
+						displayName: `Extra Concept ${index + 1}`,
+						evidenceBlockIds: [`blk-${index + 1}`],
+					})),
 				],
 			},
 			model: "claude-sonnet-4-6",
@@ -490,9 +607,13 @@ describe("paper compile", () => {
 		const { compilePaper } = await import("./paper-compile")
 		await compilePaper({ paperId: "paper-1", userId: "user-1" })
 
+		const insertedConcepts = insertedRows.find((row) => row.table === "concepts")
+		expect(Array.isArray(insertedConcepts?.values)).toBe(true)
+		expect((insertedConcepts?.values as Array<unknown>).length).toBe(61)
+
 		const insertedEvidence = insertedRows.find((row) => row.table === "evidence")
 		expect(Array.isArray(insertedEvidence?.values)).toBe(true)
-		expect((insertedEvidence?.values as Array<unknown>).length).toBe(200)
+		expect((insertedEvidence?.values as Array<unknown>).length).toBe(260)
 
 		const insertedReferences = insertedRows.find((row) => row.table === "references")
 		expect(Array.isArray(insertedReferences?.values)).toBe(true)

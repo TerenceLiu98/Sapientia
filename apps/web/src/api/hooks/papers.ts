@@ -105,7 +105,11 @@ export interface PaperWikiEdge {
 export interface PaperWikiPayload {
 	page: PaperWikiPage
 	concepts: PaperWikiConcept[]
-	edges: PaperWikiEdge[]
+	innerGraph: {
+		edgeCount: number
+		relationCounts: Partial<Record<PaperWikiEdge["relationType"], number>>
+		edges: PaperWikiEdge[]
+	}
 }
 
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {

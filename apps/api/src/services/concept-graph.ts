@@ -14,7 +14,6 @@ import { completeObject, LlmCredentialMissingError } from "./llm-client"
 
 const INNER_GRAPH_PROMPT_ID = "wiki-extract-inner-graph-v1"
 const MAX_BLOCK_CONTENT_CHARS = 120_000
-const MAX_GRAPH_EDGES = 16
 const MAX_EDGE_EVIDENCE_BLOCK_IDS = 2
 const GRAPH_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric"] as const)
 
@@ -162,7 +161,10 @@ function coerceBlockIdArray(value: unknown) {
 	if (value == null) return []
 	const values = Array.isArray(value) ? value : [value]
 	return values.flatMap((item) => {
-		if (typeof item === "string") return [item]
+		if (typeof item === "string") {
+			const blockId = normalizeBlockIdReference(item)
+			return blockId ? [blockId] : []
+		}
 		if (!isRecord(item)) return []
 		const blockId = firstStringField(item, [
 			"blockId",
@@ -173,8 +175,28 @@ function coerceBlockIdArray(value: unknown) {
 			"referenceBlockId",
 			"reference_block_id",
 		])
-		return blockId ? [blockId] : []
+		const normalizedBlockId = blockId ? normalizeBlockIdReference(blockId) : null
+		return normalizedBlockId ? [normalizedBlockId] : []
 	})
+}
+
+function normalizeBlockIdReference(value: string) {
+	const trimmed = value.trim()
+	if (!trimmed) return null
+
+	const blockHeaderMatch = trimmed.match(/\bBlock\s*#\s*([a-zA-Z0-9_-]+)/i)
+	if (blockHeaderMatch?.[1]) return blockHeaderMatch[1]
+
+	const blkCitationMatch = trimmed.match(/\bblk\s+([a-zA-Z0-9_-]+)/i)
+	if (blkCitationMatch?.[1]) return blkCitationMatch[1]
+
+	const hashMatch = trimmed.match(/^#\s*([a-zA-Z0-9_-]+)$/)
+	if (hashMatch?.[1]) return hashMatch[1]
+
+	const bracketedBareMatch = trimmed.match(/^\[\s*([a-zA-Z0-9_-]+)\s*\]$/)
+	if (bracketedBareMatch?.[1]) return bracketedBareMatch[1]
+
+	return trimmed
 }
 
 function firstField(value: Record<string, unknown>, keys: string[]) {
@@ -407,8 +429,15 @@ function sanitizeEdges(args: {
 	const merged = new Map<string, SanitizedEdge>()
 
 	for (const edge of edges) {
-		const source = conceptByName.get(normalizeCanonicalName(edge.sourceCanonicalName))
-		const target = conceptByName.get(normalizeCanonicalName(edge.targetCanonicalName))
+		const rawSource = conceptByName.get(normalizeCanonicalName(edge.sourceCanonicalName))
+		const rawTarget = conceptByName.get(normalizeCanonicalName(edge.targetCanonicalName))
+		if (!rawSource || !rawTarget) continue
+
+		const { source, target, relationType } = normalizeEdgeDirection({
+			source: rawSource,
+			target: rawTarget,
+			relationType: edge.relationType,
+		})
 		if (!source || !target) continue
 		if (source.id === target.id) continue
 
@@ -419,7 +448,7 @@ function sanitizeEdges(args: {
 		)
 		if (evidenceBlockIds.length === 0) continue
 
-		const key = edgeKey(source.id, target.id, edge.relationType)
+		const key = edgeKey(source.id, target.id, relationType)
 		const nextEvidence = evidenceBlockIds.map((blockId) => ({
 			blockId,
 			snippet: blockTextById.get(blockId) ?? null,
@@ -430,7 +459,7 @@ function sanitizeEdges(args: {
 			merged.set(key, {
 				sourceConceptId: source.id,
 				targetConceptId: target.id,
-				relationType: edge.relationType,
+				relationType,
 				confidence: clampConfidence(edge.confidence ?? null),
 				evidence: nextEvidence,
 			})
@@ -444,7 +473,21 @@ function sanitizeEdges(args: {
 		)
 	}
 
-	return [...merged.values()].slice(0, MAX_GRAPH_EDGES)
+	return [...merged.values()]
+}
+
+function normalizeEdgeDirection(args: {
+	source: GraphConcept
+	target: GraphConcept
+	relationType: RelationType
+}) {
+	const { source, target, relationType } = args
+
+	if (relationType === "measured_by" && source.kind === "metric" && target.kind !== "metric") {
+		return { source: target, target: source, relationType }
+	}
+
+	return { source, target, relationType }
 }
 
 function mergeEvidence(

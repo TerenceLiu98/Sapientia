@@ -118,8 +118,8 @@ describe("concept graph compile", () => {
 			object: {
 				edges: [
 					{
-						sourceCanonicalName: "question answering",
-						targetCanonicalName: "f1 score",
+						sourceCanonicalName: "f1 score",
+						targetCanonicalName: "question answering",
 						relationType: "measured_by",
 						evidenceBlockIds: ["blk-1", "blk-missing"],
 						confidence: 0.93,
@@ -278,7 +278,7 @@ describe("concept graph compile", () => {
 						source_name: "Dynamic BERT-Reinforcement Learning Model",
 						target_name: "Intent Recognition",
 						relation_type: "solves",
-						evidence: [{ block_id: "blk-1" }],
+						evidence: [{ block_id: "[Block #blk-1: text]" }],
 						confidence: "0.88",
 					},
 				],
