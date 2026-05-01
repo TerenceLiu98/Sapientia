@@ -64,7 +64,7 @@ export function AgentPanel({
 	const helperText = useMemo(() => {
 		if (!error) return null
 		if (/api key|invalid/i.test(error.message)) {
-			return "API key invalid. Update your provider settings and retry."
+			return "API key invalid. Update your interface settings and retry."
 		}
 		return error.message
 	}, [error])
@@ -103,9 +103,9 @@ export function AgentPanel({
 
 			{!llmConfigured ? (
 				<div className="m-4 rounded-2xl border border-dashed border-border-default bg-bg-primary p-4">
-					<p className="font-serif text-lg text-text-primary">No LLM provider configured.</p>
+					<p className="font-serif text-lg text-text-primary">No LLM interface configured.</p>
 					<p className="mt-2 text-sm leading-6 text-text-secondary">
-						Configure your LLM provider, model name, and API key in{" "}
+						Configure your LLM interface, model name, and API key in{" "}
 						<Link className="text-text-accent hover:underline" to="/settings">
 							Settings
 						</Link>{" "}

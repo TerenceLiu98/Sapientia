@@ -64,7 +64,7 @@ describe("AgentPanel", () => {
 			/>,
 		)
 
-		expect(screen.getByText("No LLM provider configured.")).toBeInTheDocument()
+		expect(screen.getByText("No LLM interface configured.")).toBeInTheDocument()
 		expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument()
 	})
 
@@ -94,7 +94,7 @@ describe("AgentPanel", () => {
 			/>,
 		)
 
-		expect(screen.getByText("No LLM provider configured.")).toBeInTheDocument()
+		expect(screen.getByText("No LLM interface configured.")).toBeInTheDocument()
 	})
 
 	it("keeps the composer empty on summon and sends only the user message", async () => {
@@ -222,7 +222,7 @@ describe("AgentPanel", () => {
 			/>,
 		)
 
-		expect(screen.getByText("API key invalid. Update your provider settings and retry.")).toBeInTheDocument()
+		expect(screen.getByText("API key invalid. Update your interface settings and retry.")).toBeInTheDocument()
 		expect(screen.getByRole("link", { name: "Open Settings" })).toBeInTheDocument()
 
 		const retryButton = screen.getByRole("button", { name: "Retry once" })

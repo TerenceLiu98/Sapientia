@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 
 vi.mock("./credentials", () => ({
 	getLlmCredential: vi.fn(),
@@ -315,6 +316,119 @@ describe("llm-client", () => {
 		expect(String(requestUrl)).toContain("https://example.test/openai/chat/completions")
 	})
 
+	it("uses json_object mode for openai-compatible object generation", async () => {
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "openai",
+			apiKey: "sk-openai-test",
+			baseURL: "https://example.test/openai/",
+			model: "gpt-4o",
+		})
+
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						id: "chatcmpl_2",
+						object: "chat.completion",
+						choices: [
+							{
+								index: 0,
+								message: {
+									role: "assistant",
+									content: JSON.stringify({
+										body: "Structured fallback body",
+										referenceBlockIds: ["block-1"],
+									}),
+								},
+								finish_reason: "stop",
+							},
+						],
+						usage: { prompt_tokens: 21, completion_tokens: 34, total_tokens: 55 },
+						model: "gpt-4o",
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			)
+
+		const { completeObject } = await import("./llm-client")
+		const result = await completeObject({
+			userId: "u-1",
+			promptId: "paper-compile-v1",
+			model: "gpt-4o",
+			schema: z.object({
+				body: z.string(),
+				referenceBlockIds: z.array(z.string()),
+			}),
+			messages: [{ role: "user", content: SECRET_PROMPT_NEEDLE }],
+		})
+
+		expect(result.object).toEqual({
+			body: "Structured fallback body",
+			referenceBlockIds: ["block-1"],
+		})
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+		const [, requestInit] = fetchSpy.mock.calls[0] ?? []
+		const body = JSON.parse(String((requestInit as RequestInit)?.body ?? "{}"))
+		expect(body.response_format).toEqual({ type: "json_object" })
+	})
+
+	it("fails on malformed JSON from openai-compatible json_object mode without repair fallback", async () => {
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "openai",
+			apiKey: "sk-openai-test",
+			baseURL: "https://example.test/openai/",
+			model: "gpt-4o",
+		})
+
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						id: "chatcmpl_2",
+						object: "chat.completion",
+						choices: [
+							{
+								index: 0,
+								message: {
+									role: "assistant",
+									content: '{"body":"broken',
+								},
+								finish_reason: "length",
+							},
+						],
+						usage: { prompt_tokens: 21, completion_tokens: 34, total_tokens: 55 },
+						model: "gpt-4o",
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			)
+
+		const { completeObject } = await import("./llm-client")
+		await expect(
+			completeObject({
+				userId: "u-1",
+				promptId: "paper-compile-v1",
+				model: "gpt-4o",
+				schema: z.object({
+					body: z.string(),
+					referenceBlockIds: z.array(z.string()),
+				}),
+				messages: [{ role: "user", content: SECRET_PROMPT_NEEDLE }],
+			}),
+		).rejects.toMatchObject({
+			name: "LlmCallError",
+		})
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+		const serialized = JSON.stringify(loggerCalls)
+		expect(serialized).not.toContain("llm_object_fallback")
+		expect(serialized).not.toContain("llm_object_fallback_repair")
+		expect(serialized).not.toContain(SECRET_PROMPT_NEEDLE)
+	})
+
 	it("missing credentials throws LlmCredentialMissingError", async () => {
 		const { getLlmCredential } = await import("./credentials")
 		vi.mocked(getLlmCredential).mockResolvedValue(null)
@@ -405,6 +519,52 @@ describe("llm-client", () => {
 
 		const serialized = JSON.stringify(loggerCalls)
 		expect(serialized).not.toContain(SECRET_PROMPT_NEEDLE)
+	})
+
+	it("logs structured diagnostics for non-standard provider errors without leaking prompt content", async () => {
+		vi.resetModules()
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-ant-test",
+			baseURL: "https://example.test/anthropic/",
+			model: "mimo-v2.5-pro",
+		})
+
+		vi.doMock("ai", async () => {
+			const actual = await vi.importActual<typeof import("ai")>("ai")
+			return {
+				...actual,
+				generateText: vi.fn().mockRejectedValue({
+					type: "invalid_request_error",
+					code: "bad_stream_shape",
+					status: 400,
+					message: "provider payload mismatch",
+				}),
+			}
+		})
+
+		const { complete } = await import("./llm-client")
+		await expect(
+			complete({
+				userId: "u-1",
+				workspaceId: "w-1",
+				promptId: "agent-summon-v2",
+				model: "mimo-v2.5-pro",
+				messages: [{ role: "user", content: SECRET_PROMPT_NEEDLE }],
+			}),
+		).rejects.toMatchObject({
+			name: "LlmCallError",
+			message: "LLM request failed.",
+		})
+
+		const serialized = JSON.stringify(loggerCalls)
+		expect(serialized).toContain("invalid_request_error")
+		expect(serialized).toContain("bad_stream_shape")
+		expect(serialized).not.toContain(SECRET_PROMPT_NEEDLE)
+		expect(serialized).toContain("agent-summon-v2")
+
+		vi.doUnmock("ai")
 	})
 
 	it("streamComplete uses AI SDK streaming without telemetry and abort logs stay private", async () => {

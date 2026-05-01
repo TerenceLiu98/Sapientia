@@ -1,6 +1,12 @@
-import { blockHighlights, blocks as blocksTable, papers } from "@sapientia/db"
+import {
+	blockHighlights,
+	blocks as blocksTable,
+	compiledLocalConcepts,
+	papers,
+	wikiPages,
+} from "@sapientia/db"
 import { fillPrompt, formatBlocksForAgent, loadPrompt } from "@sapientia/shared"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, desc, eq, isNull } from "drizzle-orm"
 import { convertToModelMessages, type UIMessage } from "ai"
 import { db } from "../db"
 import { logger } from "../logger"
@@ -33,6 +39,42 @@ export async function buildAgentContext(args: {
 }): Promise<AgentContext> {
 	const [paper] = await db.select().from(papers).where(eq(papers.id, args.paperId)).limit(1)
 	if (!paper) throw new Error(`paper ${args.paperId} not found`)
+
+	const [sourcePage] = await db
+		.select({
+			body: wikiPages.body,
+			status: wikiPages.status,
+		})
+		.from(wikiPages)
+		.where(
+			and(
+				eq(wikiPages.sourcePaperId, args.paperId),
+				eq(wikiPages.workspaceId, args.workspaceId),
+				eq(wikiPages.ownerUserId, args.userId),
+				eq(wikiPages.type, "source"),
+				isNull(wikiPages.deletedAt),
+			),
+		)
+		.limit(1)
+
+	const topConcepts = await db
+		.select({
+			displayName: compiledLocalConcepts.displayName,
+			kind: compiledLocalConcepts.kind,
+			salienceScore: compiledLocalConcepts.salienceScore,
+			highlightCount: compiledLocalConcepts.highlightCount,
+			noteCitationCount: compiledLocalConcepts.noteCitationCount,
+		})
+		.from(compiledLocalConcepts)
+		.where(
+			and(
+				eq(compiledLocalConcepts.paperId, args.paperId),
+				eq(compiledLocalConcepts.workspaceId, args.workspaceId),
+				eq(compiledLocalConcepts.ownerUserId, args.userId),
+				isNull(compiledLocalConcepts.deletedAt),
+			),
+		)
+		.orderBy(desc(compiledLocalConcepts.salienceScore), asc(compiledLocalConcepts.displayName))
 
 	const paperBlocks = await db
 		.select()
@@ -118,15 +160,26 @@ export async function buildAgentContext(args: {
 			: "No active highlights for this user in this workspace."
 
 	const rawPaperSummary =
-		paper.summary?.trim() || "No source summary has been generated for this paper yet."
-	const paperSummary =
+		sourcePage?.status === "done" && sourcePage.body?.trim()
+			? sourcePage.body.trim()
+			: paper.summary?.trim() || "No source summary has been generated for this paper yet."
+	const normalizedPaperSummary =
 		rawPaperSummary === "No source summary has been generated for this paper yet."
 			? rawPaperSummary
-			: hasBlockCitations(rawPaperSummary)
+			: sourcePage?.status === "done" && sourcePage.body?.trim()
 				? rawPaperSummary
-				: `[Legacy summary without block citations — use as background only, not as sole evidence for specific claims.]
+				: hasBlockCitations(rawPaperSummary)
+					? rawPaperSummary
+					: `[Legacy summary without block citations — use as background only, not as sole evidence for specific claims.]
 
 ${rawPaperSummary}`
+	const salientConceptSummary = buildSalientConceptSummary(topConcepts)
+	const paperSummary = salientConceptSummary
+		? `${normalizedPaperSummary}
+
+Top salient concepts for this reader:
+${salientConceptSummary}`
+		: normalizedPaperSummary
 	const totalChars = paperSummary.length + focusContext.length + marginaliaSignal.length
 	if (totalChars > MAX_CONTEXT_CHARS) {
 		const overflow = totalChars - MAX_CONTEXT_CHARS
@@ -207,4 +260,36 @@ function truncateBlockText(text: string, maxChars = 240) {
 
 function hasBlockCitations(text: string) {
 	return /\[(?:blk|block)\s+[a-zA-Z0-9_-]+\]/i.test(text)
+}
+
+function buildSalientConceptSummary(
+	concepts: Array<{
+		displayName: string
+		kind:
+			| "concept"
+			| "method"
+			| "task"
+			| "metric"
+			| "dataset"
+			| "person"
+			| "organization"
+		salienceScore: number
+		highlightCount: number
+		noteCitationCount: number
+	}>,
+) {
+	const salient = concepts.filter((concept) => concept.salienceScore > 0).slice(0, 6)
+	if (salient.length === 0) return ""
+
+	return salient
+		.map((concept) => {
+			const parts = [
+				concept.kind,
+				`score ${concept.salienceScore.toFixed(2)}`,
+				`${concept.highlightCount} highlights`,
+				`${concept.noteCitationCount} note citations`,
+			]
+			return `- ${concept.displayName} (${parts.join("; ")})`
+		})
+		.join("\n")
 }

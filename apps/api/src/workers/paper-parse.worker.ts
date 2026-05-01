@@ -21,6 +21,7 @@ import {
 	submitFileBatch,
 	uploadFileToMineru,
 } from "../services/mineru-client"
+import { markPaperCompilePending } from "../services/paper-compile"
 import { extractMineruZip, parsePageSizes } from "../services/mineru-zip"
 import { readPdfPageSizes } from "../services/pdf-dims"
 import { downloadFromS3, s3Client } from "../services/s3-client"
@@ -198,7 +199,8 @@ async function processPaperParse(
 	// so a missing one is recoverable: re-enqueue manually or wait
 	// for the next time the user triggers something that uses it.
 	try {
-		await enqueuePaperSummarize({ paperId, userId })
+		await markPaperCompilePending({ paperId, userId })
+		await enqueuePaperSummarize({ paperId, userId, force: false })
 	} catch (err) {
 		log.warn(
 			{ err: err instanceof Error ? err.message : String(err) },
@@ -293,7 +295,7 @@ export function createPaperParseWorker() {
 		processPaperParse,
 		{
 			connection: queueConnection,
-			concurrency: 2,
+			concurrency: 4,
 			lockDuration: lockDurationMs,
 			stalledInterval: lockDurationMs,
 		},

@@ -70,6 +70,33 @@ describe("agent context builder", () => {
 			.mockReturnValueOnce({
 				from: () => ({
 					where: () => ({
+						limit: async () => [
+							{
+								body: "## Source page\n\nThis paper argues that grounded summaries matter. [blk blk-focus]",
+								status: "done",
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								displayName: "Grounded summaries",
+								kind: "concept",
+								salienceScore: 2.5,
+								highlightCount: 1,
+								noteCitationCount: 1,
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
 						orderBy: async () => blocks,
 					}),
 				}),
@@ -95,7 +122,10 @@ describe("agent context builder", () => {
 
 		expect(context.paperTitle).toBe("A Paper")
 		expect(context.paperAuthors).toContain("Ada Lovelace")
+		expect(context.paperSummary).toContain("## Source page")
 		expect(context.paperSummary).toContain("grounded summaries")
+		expect(context.paperSummary).toContain("Top salient concepts for this reader")
+		expect(context.paperSummary).toContain("Grounded summaries (concept; score 2.50; 1 highlights; 1 note citations)")
 		expect(context.focusContext).toContain('Selected text:\n"the method"')
 		expect(context.focusContext).toContain("blk-prev")
 		expect(context.focusContext).toContain("blk-focus")
@@ -128,6 +158,20 @@ describe("agent context builder", () => {
 				from: () => ({
 					where: () => ({
 						limit: async () => [paper],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [],
 					}),
 				}),
 			})
@@ -185,6 +229,20 @@ describe("agent context builder", () => {
 				from: () => ({
 					where: () => ({
 						limit: async () => [paper],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [],
 					}),
 				}),
 			})

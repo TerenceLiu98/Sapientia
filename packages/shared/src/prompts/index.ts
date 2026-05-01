@@ -1,7 +1,9 @@
 import { AGENT_SUMMON_V1 } from "./agent-summon-v1"
 import { AGENT_SUMMON_V2 } from "./agent-summon-v2"
+import { PAPER_COMPILE_V1 } from "./paper-compile-v1"
 import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
 import { SOURCE_SUMMARY_V2 } from "./source-summary-v2"
+import { WIKI_EXTRACT_INNER_GRAPH_V1 } from "./wiki-extract-inner-graph-v1"
 
 // Registry of prompt templates available across Sapientia. Each ID
 // corresponds to one filename in this directory; the suffix `-vN`
@@ -17,8 +19,10 @@ import { SOURCE_SUMMARY_V2 } from "./source-summary-v2"
 const PROMPTS = {
 	"agent-summon-v1": AGENT_SUMMON_V1,
 	"agent-summon-v2": AGENT_SUMMON_V2,
+	"paper-compile-v1": PAPER_COMPILE_V1,
 	"source-summary-v1": SOURCE_SUMMARY_V1,
 	"source-summary-v2": SOURCE_SUMMARY_V2,
+	"wiki-extract-inner-graph-v1": WIKI_EXTRACT_INNER_GRAPH_V1,
 } as const
 
 export type PromptId = keyof typeof PROMPTS

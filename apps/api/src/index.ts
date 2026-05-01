@@ -13,6 +13,7 @@ import { meRoutes } from "./routes/me"
 import { noteRoutes } from "./routes/notes"
 import { paperRoutes } from "./routes/papers"
 import { readerAnnotationRoutes } from "./routes/reader-annotations"
+import { wikiRoutes } from "./routes/wiki"
 import { workspaceRoutes } from "./routes/workspaces"
 import { checkS3Health } from "./services/s3-client"
 
@@ -61,6 +62,7 @@ apiV1.route("/", paperRoutes)
 apiV1.route("/", noteRoutes)
 apiV1.route("/", highlightRoutes)
 apiV1.route("/", readerAnnotationRoutes)
+apiV1.route("/", wikiRoutes)
 app.route("/api/v1", apiV1)
 
 appLogger.info({ port: config.PORT, env: config.NODE_ENV }, "api_starting")

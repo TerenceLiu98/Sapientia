@@ -2,9 +2,11 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
+import { enqueuePaperConceptRefine } from "../queues/paper-concept-refine"
 import {
 	clearBlockHighlight,
 	deleteHighlight,
+	getHighlightById,
 	listHighlightsForPaper,
 	setBlockHighlight,
 } from "../services/highlight"
@@ -60,6 +62,11 @@ highlightRoutes.put("/papers/:paperId/highlights", requireAuth, async (c) => {
 		workspaceId: parsed.data.workspaceId,
 		color: parsed.data.color,
 	})
+	await enqueuePaperConceptRefine({
+		paperId,
+		userId: user.id,
+		workspaceId: parsed.data.workspaceId,
+	})
 	return c.json(row)
 })
 
@@ -79,13 +86,28 @@ highlightRoutes.delete("/papers/:paperId/highlights", requireAuth, async (c) => 
 		userId: user.id,
 		workspaceId: parsed.data.workspaceId,
 	})
+	if (removed) {
+		await enqueuePaperConceptRefine({
+			paperId,
+			userId: user.id,
+			workspaceId: parsed.data.workspaceId,
+		})
+	}
 	return c.json({ removed })
 })
 
 highlightRoutes.delete("/highlights/:id", requireAuth, async (c) => {
 	const id = c.req.param("id")
 	const user = c.get("user")
+	const existing = await getHighlightById({ highlightId: id, userId: user.id })
 	const ok = await deleteHighlight({ highlightId: id, userId: user.id })
 	if (!ok) return c.json({ error: "not found" }, 404)
+	if (existing) {
+		await enqueuePaperConceptRefine({
+			paperId: existing.paperId,
+			userId: user.id,
+			workspaceId: existing.workspaceId,
+		})
+	}
 	return c.body(null, 204)
 })

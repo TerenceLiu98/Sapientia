@@ -10,6 +10,10 @@
 		"worker:dev": "bun src/worker.ts",
 		"worker:start": "bun src/worker.ts",
 		"audit:reader-annotations": "node --experimental-strip-types scripts/audit-reader-annotations.ts",
+		"audit:paper-compile": "bun scripts/audit-paper-compile.ts",
+		"audit:concept-salience": "bun scripts/audit-concept-salience.ts",
+		"backfill:paper-compile": "bun scripts/backfill-paper-compile.ts",
+		"backfill:concept-salience": "bun scripts/backfill-concept-salience.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run"
 	},

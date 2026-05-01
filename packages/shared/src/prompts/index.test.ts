@@ -18,6 +18,29 @@ describe("loadPrompt", () => {
 		expect(template).toContain("Evidence threshold")
 		expect(template).toContain("do not have enough evidence in the current paper context")
 	})
+
+	it("returns the paper-compile-v1 template", () => {
+		const template = loadPrompt("paper-compile-v1")
+		expect(template).toContain("\"summary\"")
+		expect(template).toContain("\"referenceBlockIds\"")
+		expect(template).toContain("\"concepts\"")
+		expect(template).toContain("one agent-facing summary")
+		expect(template).toContain("Return at most 50 concepts total")
+		expect(template).toContain("{{blocks}}")
+	})
+
+	it("returns the wiki-extract-inner-graph-v1 template", () => {
+		const template = loadPrompt("wiki-extract-inner-graph-v1")
+		expect(template).toContain("\"edges\"")
+		expect(template).toContain("\"sourceCanonicalName\"")
+		expect(template).toContain("\"targetCanonicalName\"")
+		expect(template).toContain("\"relationType\"")
+		expect(template).toContain("\"evidenceBlockIds\"")
+		expect(template).toContain("Return at most 16 edges total")
+		expect(template).toContain("{{concepts}}")
+		expect(template).toContain("{{blocks}}")
+	})
+
 })
 
 describe("fillPrompt", () => {

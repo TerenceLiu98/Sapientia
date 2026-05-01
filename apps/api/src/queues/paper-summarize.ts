@@ -12,6 +12,7 @@ export const PAPER_SUMMARIZE_QUEUE = "paper-summarize"
 export interface PaperSummarizeJobData {
 	paperId: string
 	userId: string
+	force?: boolean
 }
 
 export interface PaperSummarizeJobResult {
@@ -34,7 +35,18 @@ export const paperSummarizeQueue = new Queue<PaperSummarizeJobData, PaperSummari
 )
 
 export async function enqueuePaperSummarize(data: PaperSummarizeJobData) {
+	const jobId = `paper-summarize-${data.paperId}`
+	const existing = await paperSummarizeQueue.getJob(jobId)
+	if (existing) {
+		const state = await existing.getState()
+		if (state === "completed" || state === "failed") {
+			await existing.remove()
+		} else {
+			return existing
+		}
+	}
+
 	return paperSummarizeQueue.add(`summarize-${data.paperId}`, data, {
-		jobId: `paper-summarize-${data.paperId}`,
+		jobId,
 	})
 }

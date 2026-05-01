@@ -5,6 +5,12 @@ import {
 	useUpdateCredentials,
 } from "@/api/hooks/credentials"
 
+function providerLabel(provider: LlmProvider | null | undefined) {
+	if (provider === "anthropic") return "Anthropic"
+	if (provider === "openai") return "OpenAI"
+	return "unknown interface"
+}
+
 export function CredentialsForm() {
 	const status = useCredentialsStatus()
 	const update = useUpdateCredentials()
@@ -115,15 +121,16 @@ export function CredentialsForm() {
 					</div>
 					<h2 className="font-serif text-xl text-text-primary">Reading assistant API key</h2>
 					<p className="mt-1 text-sm text-text-secondary">
-						Used by the agent and the wiki ingestion pipeline. Save the provider, exact model
-						name, and API key your endpoint expects. Sapientia never sends your key anywhere
-						except the provider you choose.
+						Used by the agent and the wiki ingestion pipeline. Choose the API interface
+						family, then save the exact base URL, model name, and API key your endpoint
+						expects. Sapientia never sends your key anywhere except the interface endpoint
+						you configure.
 					</p>
 				</header>
 				<div className="grid gap-4 sm:grid-cols-[180px_1fr]">
 					<div className="space-y-1.5">
 						<label className="block text-sm font-medium text-text-primary" htmlFor="llm-provider">
-							Provider
+							Interface
 						</label>
 						<select
 							className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
@@ -140,7 +147,7 @@ export function CredentialsForm() {
 							API key{" "}
 							<span className="text-xs text-text-tertiary">
 								{data?.hasLlmKey
-									? `configured (${data.llmProvider ?? "unknown provider"})`
+									? `configured (${providerLabel(data.llmProvider)})`
 									: "not configured"}
 							</span>
 						</label>
@@ -179,8 +186,8 @@ export function CredentialsForm() {
 						value={llmBaseUrl}
 					/>
 					<p className="text-xs leading-5 text-text-secondary">
-						Optional. Use this for OpenAI-compatible endpoints or self-hosted Anthropic-compatible
-						proxies.
+						Optional. Override this when your key should hit a custom OpenAI or Anthropic
+						base URL instead of the default official endpoint.
 					</p>
 				</div>
 				<div className="space-y-1.5">
@@ -199,7 +206,8 @@ export function CredentialsForm() {
 						value={llmModel}
 					/>
 					<p className="text-xs leading-5 text-text-secondary">
-						Required. Enter the exact model or deployment name your provider endpoint expects.
+						Required. Enter the exact model or deployment name your configured interface
+						endpoint expects.
 					</p>
 				</div>
 			</section>

@@ -52,6 +52,62 @@ export interface FetchPaperMetadataInput {
 	arxivId?: string | null
 }
 
+export interface PaperWikiPage {
+	id: string
+	type: "source" | "entity" | "concept"
+	canonicalName: string
+	displayName: string
+	body: string | null
+	status: "pending" | "running" | "done" | "failed"
+	error: string | null
+	generatedAt: string | null
+	modelName: string | null
+	promptVersion: string | null
+	sourcePaperId: string | null
+	referenceBlockIds: string[]
+}
+
+export interface PaperWikiConcept {
+	id: string
+	kind: "concept" | "method" | "task" | "metric"
+	canonicalName: string
+	displayName: string
+	status: "pending" | "running" | "done" | "failed"
+	error: string | null
+	salienceScore: number
+	highlightCount: number
+	weightedHighlightScore: number
+	noteCitationCount: number
+	lastMarginaliaAt: string | null
+	generatedAt: string | null
+	modelName: string | null
+	promptVersion: string | null
+	evidence: Array<{
+		blockId: string
+		snippet: string | null
+		confidence: number | null
+	}>
+}
+
+export interface PaperWikiEdge {
+	id: string
+	sourceConceptId: string
+	targetConceptId: string
+	relationType: "addresses" | "uses" | "measured_by" | "improves_on" | "related_to"
+	confidence: number | null
+	evidence: Array<{
+		blockId: string
+		snippet: string | null
+		confidence: number | null
+	}>
+}
+
+export interface PaperWikiPayload {
+	page: PaperWikiPage
+	concepts: PaperWikiConcept[]
+	edges: PaperWikiEdge[]
+}
+
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
 	return status === "pending" || status === "parsing"
 }
@@ -114,6 +170,16 @@ export function usePaper(paperId: string) {
 		refetchInterval: (query) => {
 			return shouldPollPaper(query.state.data) ? 2000 : false
 		},
+	})
+}
+
+export function usePaperWiki(workspaceId: string | undefined, paperId: string) {
+	return useQuery<PaperWikiPayload>({
+		queryKey: ["paper-wiki", workspaceId ?? "", paperId],
+		queryFn: () =>
+			apiFetch<PaperWikiPayload>(`/api/v1/workspaces/${workspaceId}/papers/${paperId}/wiki`),
+		enabled: Boolean(workspaceId) && Boolean(paperId),
+		retry: false,
 	})
 }
 
@@ -222,6 +288,23 @@ export function useFetchPaperMetadata(workspaceId: string, paperId: string) {
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper", paperId] })
+		},
+	})
+}
+
+export function useCompilePaperWiki(workspaceId: string | undefined, paperId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: () =>
+			apiFetch<{ ok: true; status: "queued"; paperId: string; queue: string }>(
+				`/api/v1/papers/${paperId}/compile-wiki`,
+				{ method: "POST" },
+			),
+		onSuccess: () => {
+			if (workspaceId) {
+				qc.invalidateQueries({ queryKey: ["paper-wiki", workspaceId, paperId] })
+			}
 			qc.invalidateQueries({ queryKey: ["paper", paperId] })
 		},
 	})

@@ -13,8 +13,10 @@ import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { enqueuePaperSummarize } from "../queues/paper-summarize"
 import { paperToBibtex, papersToBibtex } from "../services/bibtex"
 import { buildDisplayFilename } from "../services/filename"
+import { markPaperCompilePending } from "../services/paper-compile"
 import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
 import { applyEnrichedMetadataToPaper, mergeMetadataEditedFlags } from "../services/paper-metadata"
 import {
@@ -215,6 +217,34 @@ paperRoutes.post("/papers/:id/fetch-metadata", requireAuth, async (c) => {
 		.returning()
 
 	return c.json(updated)
+})
+
+paperRoutes.post("/papers/:id/compile-wiki", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	if (paper.parseStatus !== "done") {
+		return c.json({ error: "paper parse not ready" }, 409)
+	}
+
+	await markPaperCompilePending({ paperId: paper.id, userId: user.id })
+	await enqueuePaperSummarize({ paperId: paper.id, userId: user.id, force: true })
+
+	return c.json(
+		{
+			ok: true,
+			status: "queued",
+			paperId: paper.id,
+			queue: "paper-summarize",
+		},
+		202,
+	)
 })
 
 paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {

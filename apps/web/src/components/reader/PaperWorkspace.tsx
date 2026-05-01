@@ -35,6 +35,7 @@ import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
+import { PaperWikiDebugPanel } from "@/components/reader/PaperWikiDebugPanel"
 import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
 import {
 	ReaderAnnotationActionToast,
@@ -1139,6 +1140,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				onOpenCitationBlock={handleOpenCitationBlock}
 				onOpenCitationAnnotation={handleOpenCitationAnnotation}
 				paper={paper}
+				workspaceId={workspace?.id}
 				readerAnnotationActionToast={
 					readerAnnotationRecall ? (
 						<ReaderAnnotationActionToast
@@ -1298,6 +1300,7 @@ interface WorkspaceContentProps {
 		yRatio?: number,
 	) => void
 	paper: Paper | undefined
+	workspaceId?: string
 	readerAnnotationActionToast?: React.ReactNode
 	selectedTextToolbar?: React.ReactNode
 	viewMode: ViewMode
@@ -1332,6 +1335,7 @@ function WorkspaceContent({
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
 	paper,
+	workspaceId,
 	readerAnnotationActionToast,
 	selectedTextToolbar,
 	viewMode,
@@ -1366,6 +1370,7 @@ function WorkspaceContent({
 			</div>
 
 			<div className="min-h-0 flex-1 p-3 sm:p-4 lg:p-6">
+				<PaperWikiDebugPanel paperId={paper.id} workspaceId={workspaceId} />
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockNumberByBlockId={blockNumberByBlockId}

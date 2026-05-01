@@ -248,6 +248,11 @@ export async function softDeleteNote(noteId: string): Promise<void> {
 		.where(eq(notes.id, noteId))
 }
 
+export async function getNoteRow(noteId: string): Promise<Note | null> {
+	const [note] = await db.select().from(notes).where(eq(notes.id, noteId)).limit(1)
+	return note ?? null
+}
+
 // A user can read/edit a note iff they are a member of the note's workspace.
 // We deliberately don't filter out soft-deleted notes here so the route
 // layer can return a clean 404 (via getNote) instead of 403 — the access

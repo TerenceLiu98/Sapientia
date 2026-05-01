@@ -3,8 +3,10 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { enqueuePaperConceptRefine } from "../queues/paper-concept-refine"
 import {
 	createNote,
+	getNoteRow,
 	getNote,
 	listNotes,
 	softDeleteNote,
@@ -121,6 +123,13 @@ noteRoutes.post(
 			anchorBlockId: body.data.anchorBlockId ?? null,
 			anchorAnnotationId: body.data.anchorAnnotationId ?? null,
 		})
+		if (note.paperId) {
+			await enqueuePaperConceptRefine({
+				paperId: note.paperId,
+				userId: user.id,
+				workspaceId,
+			})
+		}
 		return c.json(publicNote(note), 201)
 	},
 )
@@ -160,6 +169,13 @@ noteRoutes.put("/notes/:id", requireAuth, async (c) => {
 		anchorBlockId: body.data.anchorBlockId,
 		anchorAnnotationId: body.data.anchorAnnotationId,
 	})
+	if (updated.paperId) {
+		await enqueuePaperConceptRefine({
+			paperId: updated.paperId,
+			userId: user.id,
+			workspaceId: updated.workspaceId,
+		})
+	}
 	return c.json(publicNote(updated))
 })
 
@@ -169,6 +185,14 @@ noteRoutes.delete("/notes/:id", requireAuth, async (c) => {
 	if (!(await userCanAccessNote(user.id, id))) {
 		return c.json({ error: "forbidden" }, 403)
 	}
+	const existing = await getNoteRow(id)
 	await softDeleteNote(id)
+	if (existing?.paperId) {
+		await enqueuePaperConceptRefine({
+			paperId: existing.paperId,
+			userId: user.id,
+			workspaceId: existing.workspaceId,
+		})
+	}
 	return c.body(null, 204)
 })

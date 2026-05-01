@@ -3,7 +3,9 @@ import { config } from "./config"
 import { closeDb } from "./db"
 import { logger } from "./logger"
 import { queueConnection } from "./queues/connection"
+import { createPaperConceptRefineWorker } from "./workers/paper-concept-refine.worker"
 import { createPaperEnrichWorker } from "./workers/paper-enrich.worker"
+import { createPaperInnerGraphCompileWorker } from "./workers/paper-inner-graph-compile.worker"
 import { createPaperParseWorker } from "./workers/paper-parse.worker"
 import { createPaperSummarizeWorker } from "./workers/paper-summarize.worker"
 
@@ -11,6 +13,8 @@ logger.info({ env: config.NODE_ENV }, "worker_starting")
 
 const paperParseWorker = createPaperParseWorker()
 const paperEnrichWorker = createPaperEnrichWorker()
+const paperConceptRefineWorker = createPaperConceptRefineWorker()
+const paperInnerGraphCompileWorker = createPaperInnerGraphCompileWorker()
 const paperSummarizeWorker = createPaperSummarizeWorker()
 
 // Tiny worker for /health/queue-roundtrip diagnostic pings.
@@ -28,6 +32,8 @@ const shutdown = async (signal: string) => {
 	logger.info({ signal }, "worker_shutdown_initiated")
 	await paperParseWorker.close()
 	await paperEnrichWorker.close()
+	await paperConceptRefineWorker.close()
+	await paperInnerGraphCompileWorker.close()
 	await paperSummarizeWorker.close()
 	await healthcheckWorker.close()
 	await queueConnection.quit()

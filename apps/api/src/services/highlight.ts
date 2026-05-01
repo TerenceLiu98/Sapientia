@@ -76,9 +76,28 @@ export async function deleteHighlight(args: {
 	highlightId: string
 	userId: string
 }): Promise<boolean> {
+	const [existing] = await db
+		.select()
+		.from(blockHighlights)
+		.where(and(eq(blockHighlights.id, args.highlightId), eq(blockHighlights.userId, args.userId)))
+		.limit(1)
+	if (!existing) return false
+
 	const result = await db
 		.delete(blockHighlights)
 		.where(and(eq(blockHighlights.id, args.highlightId), eq(blockHighlights.userId, args.userId)))
 		.returning({ id: blockHighlights.id })
 	return result.length > 0
+}
+
+export async function getHighlightById(args: {
+	highlightId: string
+	userId: string
+}): Promise<BlockHighlight | null> {
+	const [row] = await db
+		.select()
+		.from(blockHighlights)
+		.where(and(eq(blockHighlights.id, args.highlightId), eq(blockHighlights.userId, args.userId)))
+		.limit(1)
+	return row ?? null
 }
