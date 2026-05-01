@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const selectMock = vi.fn()
+const loggerWarnMock = vi.fn()
 
 vi.mock("../db", () => ({
 	db: {
@@ -8,9 +9,16 @@ vi.mock("../db", () => ({
 	},
 }))
 
+vi.mock("../logger", () => ({
+	logger: {
+		warn: (...args: Array<unknown>) => loggerWarnMock(...args),
+	},
+}))
+
 describe("agent context builder", () => {
 	beforeEach(() => {
 		selectMock.mockReset()
+		loggerWarnMock.mockReset()
 	})
 
 	it("assembles layer 1 + layer 2 context from a paper fixture", async () => {
@@ -147,5 +155,71 @@ describe("agent context builder", () => {
 
 		expect(context.paperSummary).toContain("Legacy summary without block citations")
 		expect(context.paperSummary).toContain("This summary predates block citations.")
+	})
+
+	it("logs and truncates marginalia when assembled context exceeds the cap", async () => {
+		const paper = {
+			id: "paper-1",
+			title: "A Paper",
+			authors: ["Ada Lovelace"],
+			summary: "Short summary.",
+		}
+		const repeated = "very long highlighted content ".repeat(20)
+		const blocks = Array.from({ length: 260 }, (_, index) => ({
+			paperId: "paper-1",
+			blockId: `blk-${index}`,
+			blockIndex: index,
+			type: "text",
+			text: repeated,
+			caption: null,
+			headingLevel: null,
+		}))
+		const highlights = blocks.map((block, index) => ({
+			blockId: block.blockId,
+			color: index % 2 === 0 ? "important" : "questioning",
+			createdAt: new Date(2026, 0, index + 1),
+		}))
+
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [paper],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => blocks,
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => highlights,
+					}),
+				}),
+			})
+
+		const { buildAgentContext } = await import("./agent")
+		const context = await buildAgentContext({
+			paperId: "paper-1",
+			workspaceId: "00000000-0000-0000-0000-000000000001",
+			userId: "user-1",
+		})
+
+		expect(context.marginaliaSignal).toContain("[marginalia truncated to fit context window]")
+		expect(loggerWarnMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				paperId: "paper-1",
+				workspaceId: "00000000-0000-0000-0000-000000000001",
+				userId: "user-1",
+				overflow: expect.any(Number),
+				totalChars: expect.any(Number),
+			}),
+			"agent_context_truncated",
+		)
 	})
 })

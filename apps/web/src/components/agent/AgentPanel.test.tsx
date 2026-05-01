@@ -142,4 +142,93 @@ describe("AgentPanel", () => {
 			text: "What is the key claim?",
 		})
 	})
+
+	it("stops the upstream stream before closing when the panel is closed mid-response", async () => {
+		useCredentialsStatusMock.mockReturnValue({
+			data: {
+				hasLlmKey: true,
+				llmProvider: "anthropic",
+				llmBaseUrl: null,
+				llmModel: "claude-sonnet-4-5",
+			},
+		})
+
+		const stop = vi.fn().mockResolvedValue(undefined)
+		const onClose = vi.fn()
+		useAgentChatMock.mockReturnValue({
+			messages: [],
+			sendMessage: vi.fn(),
+			regenerate: vi.fn(),
+			stop,
+			status: "streaming",
+			error: undefined,
+			clearError: vi.fn(),
+		})
+
+		render(
+			<AgentPanel
+				chat={new Chat<AgentUIMessage>({})}
+				blockNumberByBlockId={new Map()}
+				isOpen
+				onClose={onClose}
+				onOpenBlock={() => {}}
+				paperTitle="A Paper"
+				summonNonce={0}
+			/>,
+		)
+
+		await userEvent.click(screen.getByRole("button", { name: "Close" }))
+
+		expect(stop).toHaveBeenCalledOnce()
+		expect(onClose).toHaveBeenCalledOnce()
+	})
+
+	it("shows invalid-key copy and allows one retry for failed turns", async () => {
+		useCredentialsStatusMock.mockReturnValue({
+			data: {
+				hasLlmKey: true,
+				llmProvider: "anthropic",
+				llmBaseUrl: null,
+				llmModel: "claude-sonnet-4-5",
+			},
+		})
+
+		const regenerate = vi.fn().mockResolvedValue(undefined)
+		useAgentChatMock.mockReturnValue({
+			messages: [
+				{
+					id: "user-1",
+					role: "user",
+					parts: [{ type: "text", text: "What does this claim mean?" }],
+				},
+			],
+			sendMessage: vi.fn(),
+			regenerate,
+			stop: vi.fn(),
+			status: "error",
+			error: new Error("invalid api key"),
+			clearError: vi.fn(),
+		})
+
+		render(
+			<AgentPanel
+				chat={new Chat<AgentUIMessage>({})}
+				blockNumberByBlockId={new Map()}
+				isOpen
+				onClose={() => {}}
+				onOpenBlock={() => {}}
+				paperTitle="A Paper"
+				summonNonce={0}
+			/>,
+		)
+
+		expect(screen.getByText("API key invalid. Update your provider settings and retry.")).toBeInTheDocument()
+		expect(screen.getByRole("link", { name: "Open Settings" })).toBeInTheDocument()
+
+		const retryButton = screen.getByRole("button", { name: "Retry once" })
+		await userEvent.click(retryButton)
+
+		expect(regenerate).toHaveBeenCalledOnce()
+		expect(screen.queryByRole("button", { name: "Retry once" })).not.toBeInTheDocument()
+	})
 })

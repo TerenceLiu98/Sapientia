@@ -210,6 +210,111 @@ describe("llm-client", () => {
 		).rejects.toMatchObject({ name: "LlmCallError", permanent: false, status: 429 })
 	})
 
+	it("invalid custom baseURL throws permanent LlmCallError without making a network call", async () => {
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "openai",
+			apiKey: "sk-openai-test",
+			baseURL: "not-a-valid-url",
+			model: "gpt-4o",
+		})
+
+		const fetchSpy = vi.spyOn(globalThis, "fetch")
+		const { complete } = await import("./llm-client")
+		await expect(
+			complete({
+				userId: "u-1",
+				promptId: "test-prompt-v1",
+				model: "gpt-4o",
+				messages: [{ role: "user", content: "x" }],
+			}),
+		).rejects.toMatchObject({
+			name: "LlmCallError",
+			permanent: true,
+			message: "Invalid base URL in Settings.",
+		})
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it("passes custom baseURL through to anthropic requests", async () => {
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-ant-test",
+			baseURL: "https://example.test/anthropic/",
+			model: "claude-sonnet-4-6",
+		})
+
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					id: "msg_1",
+					type: "message",
+					role: "assistant",
+					content: [{ type: "text", text: SECRET_RESPONSE_NEEDLE }],
+					model: "claude-sonnet-4-6",
+					stop_reason: "end_turn",
+					usage: { input_tokens: 1, output_tokens: 1 },
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			),
+		)
+
+		const { complete } = await import("./llm-client")
+		await complete({
+			userId: "u-1",
+			promptId: "test-prompt-v1",
+			model: "claude-sonnet-4-6",
+			messages: [{ role: "user", content: "x" }],
+		})
+
+		expect(fetchSpy).toHaveBeenCalled()
+		const [requestUrl] = fetchSpy.mock.calls[0] ?? []
+		expect(String(requestUrl)).toContain("https://example.test/anthropic/messages")
+	})
+
+	it("passes custom baseURL through to openai-compatible requests", async () => {
+		const { getLlmCredential } = await import("./credentials")
+		vi.mocked(getLlmCredential).mockResolvedValue({
+			provider: "openai",
+			apiKey: "sk-openai-test",
+			baseURL: "https://example.test/openai/",
+			model: "gpt-4o",
+		})
+
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					id: "chatcmpl_1",
+					object: "chat.completion",
+					choices: [
+						{
+							index: 0,
+							message: { role: "assistant", content: SECRET_RESPONSE_NEEDLE },
+							finish_reason: "stop",
+						},
+					],
+					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					model: "gpt-4o",
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			),
+		)
+
+		const { complete } = await import("./llm-client")
+		await complete({
+			userId: "u-1",
+			promptId: "test-prompt-v1",
+			model: "gpt-4o",
+			messages: [{ role: "user", content: "x" }],
+		})
+
+		expect(fetchSpy).toHaveBeenCalled()
+		const [requestUrl] = fetchSpy.mock.calls[0] ?? []
+		expect(String(requestUrl)).toContain("https://example.test/openai/chat/completions")
+	})
+
 	it("missing credentials throws LlmCredentialMissingError", async () => {
 		const { getLlmCredential } = await import("./credentials")
 		vi.mocked(getLlmCredential).mockResolvedValue(null)

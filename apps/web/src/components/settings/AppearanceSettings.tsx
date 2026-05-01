@@ -12,7 +12,7 @@ const THEME_OPTIONS: Array<{
 ]
 
 export function AppearanceSettings() {
-	const { resolvedTheme, setThemePreference, themePreference } = useTheme()
+	const { setThemePreference, themePreference } = useTheme()
 
 	return (
 		<section className="mb-10 space-y-3">

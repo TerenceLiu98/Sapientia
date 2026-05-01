@@ -130,13 +130,13 @@ export function BlocksPanel({
 
 		return (
 			<div className="flex h-full min-h-0 flex-col bg-[var(--color-reading-bg)]">
-				<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_72%,var(--color-bg-secondary))] px-4 py-3">
+				<div className="flex shrink-0 items-center justify-between border-b border-border-subtle bg-[var(--color-reader-md-header-bg)] px-4 py-3">
 					<div>
 						<div className="text-xs uppercase tracking-[0.16em] text-text-secondary">
 							Parsed blocks
 						</div>
 					</div>
-					<div className="rounded-md border border-border-default bg-[color-mix(in_srgb,var(--color-reading-bg)_88%,var(--color-bg-overlay))] px-3 py-1 text-xs font-medium text-text-secondary">
+					<div className="rounded-md border border-border-default bg-[var(--color-reader-md-page-badge-bg)] px-3 py-1 text-xs font-medium text-text-secondary">
 						{visiblePage}/{grouped.length}
 					</div>
 				</div>
@@ -677,7 +677,7 @@ function BlocksPanelScrollBody({
 							className={`mb-2 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
 								currentPage === page
 									? "bg-surface-selected text-text-primary"
-									: "bg-[color-mix(in_srgb,var(--color-reading-bg)_86%,var(--color-bg-overlay))] text-text-secondary"
+									: "bg-[var(--color-reader-md-page-chip-bg)] text-text-secondary"
 							}`}
 						>
 						Page {page}
@@ -751,13 +751,13 @@ function PageBlockPlaceholder({ blockCount, height }: { blockCount: number; heig
 		return (
 			<div
 				aria-hidden="true"
-				className="overflow-hidden rounded-md border border-border-subtle/40 bg-[color-mix(in_srgb,var(--color-reading-bg)_92%,var(--color-bg-secondary))]"
+				className="overflow-hidden rounded-md border border-border-subtle/40 bg-[var(--color-reader-md-placeholder-bg)]"
 				style={{ height }}
 			>
 				<div className="flex h-full flex-col gap-3 p-3 opacity-40">
 					{Array.from({ length: Math.min(Math.max(blockCount, 2), 5) }, (_, index) => (
 						<div
-							className="rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_58%,var(--color-border-default))]"
+							className="rounded-sm bg-[var(--color-reader-md-placeholder-bar)]"
 							key={index}
 						style={{
 							height: index === 0 ? 20 : 14,
@@ -985,7 +985,7 @@ const BlockRow = memo(function BlockRow({
 			 * (zero gap) keeps the toolbar a hover descendant so cursor
 			 * transit between row and toolbar doesn't fire mouseleave.
 			 */}
-				<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-[var(--color-reading-bg)] px-1 py-1 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+				<div className="pointer-events-none absolute left-1/2 top-full z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border-subtle bg-[var(--color-reader-md-toolbar-bg)] px-1 py-1 opacity-0 shadow-[var(--shadow-popover)] backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
 				{citationCount && citationCount > 0 ? (
 					<span className="relative">
 						<button
@@ -1166,7 +1166,7 @@ const RichTextContent = memo(function RichTextContent({
 				if (!html) {
 					return (
 						<span
-							className={segment.displayMode ? "block whitespace-pre-wrap" : ""}
+							className={segment.displayMode ? "reader-md__math-display" : ""}
 							key={`math-fallback-${index}`}
 						>
 							{segment.displayMode ? `$$${segment.value}$$` : `$${segment.value}$`}
@@ -1189,17 +1189,10 @@ const EquationBlock = memo(function EquationBlock({ latex }: { latex: string }) 
 	const normalizedLatex = useMemo(() => normalizeEquationLatex(latex), [latex])
 	const html = useMemo(() => renderKatex(normalizedLatex, true), [normalizedLatex])
 	if (!html) {
-		return (
-			<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-3 py-2 font-mono text-sm text-text-primary">
-				{latex || "[equation]"}
-			</pre>
-		)
+		return <pre className="reader-md__equation-fallback">{latex || "[equation]"}</pre>
 	}
 	return (
-			<div
-				className="my-2 overflow-x-auto rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_88%,var(--color-bg-secondary))] px-3 py-3 text-text-primary"
-				dangerouslySetInnerHTML={{ __html: html }}
-			/>
+		<div className="reader-md__equation" dangerouslySetInnerHTML={{ __html: html }} />
 	)
 })
 
@@ -1210,11 +1203,7 @@ const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 		case "heading": {
 			const level = block.headingLevel ?? 2
 			const cls =
-				level <= 1
-					? "mt-4 mb-2 font-serif text-2xl font-semibold text-text-primary"
-					: level === 2
-						? "mt-3 mb-2 font-serif text-xl font-semibold text-text-primary"
-						: "mt-2 mb-1.5 font-serif text-lg font-semibold text-text-primary"
+				level <= 1 ? "reader-md__heading-1" : level === 2 ? "reader-md__heading-2" : "reader-md__heading-3"
 			const text = block.text || "[heading]"
 			if (level <= 1)
 				return (
@@ -1237,23 +1226,21 @@ const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 		case "figure":
 		case "table": {
 			return (
-				<figure className="my-2">
+				<figure className="reader-md__figure">
 					{block.imageUrl ? (
 						<img
-								alt={block.caption ?? `${block.type}`}
-								className="mx-auto max-h-[360px] w-auto max-w-full rounded-sm border border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_92%,var(--color-bg-overlay))] object-contain"
+							alt={block.caption ?? `${block.type}`}
+							className="reader-md__figure-image"
 							loading="lazy"
 							src={block.imageUrl}
 						/>
 					) : (
-							<div className="rounded-sm border border-dashed border-border-subtle bg-[color-mix(in_srgb,var(--color-reading-bg)_84%,var(--color-bg-secondary))] px-3 py-2 text-xs italic text-text-tertiary">
+						<div className="reader-md__fallback">
 							[{block.type} — no image extracted]
 						</div>
 					)}
 					{block.caption ? (
-						<figcaption className="mt-1.5 text-center text-sm text-text-secondary">
-							{block.caption}
-						</figcaption>
+						<figcaption className="reader-md__caption">{block.caption}</figcaption>
 					) : null}
 				</figure>
 			)
@@ -1261,38 +1248,32 @@ const BlockBody = memo(function BlockBody({ block }: { block: Block }) {
 		case "equation":
 			return <EquationBlock latex={block.text || ""} />
 		case "code":
-			return (
-					<pre className="my-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-3 py-2 font-mono text-sm text-text-primary">
-					{block.text || `[${block.type}]`}
-				</pre>
-			)
+			return <pre className="reader-md__code">{block.text || `[${block.type}]`}</pre>
 		case "list": {
 			const items = (block.metadata?.listItems as unknown[] | undefined) ?? []
 			if (items.length === 0 && block.text) {
 				return (
-					<p className="my-1 whitespace-pre-wrap font-serif text-[0.97rem] leading-7 text-text-primary">
-						<RichTextContent text={block.text} displayClassName="my-2 block overflow-x-auto" />
+					<p className="reader-md__body">
+						<RichTextContent text={block.text} displayClassName="reader-md__math-display" />
 					</p>
 				)
 			}
 			return (
-				<ul className="my-2 list-disc pl-6 font-serif text-[0.97rem] leading-7 text-text-primary">
+				<ul className="reader-md__list">
 					{items.map((item) => (
-						<li key={`${block.blockId}-${String(item)}`}>
-							<RichTextContent text={String(item)} displayClassName="my-2 block overflow-x-auto" />
+						<li className="reader-md__list-item" key={`${block.blockId}-${String(item)}`}>
+							<RichTextContent text={String(item)} displayClassName="reader-md__math-display" />
 						</li>
 					))}
 				</ul>
 			)
 		}
 		case "other":
-			return (
-				<p className="my-1 text-sm italic text-text-tertiary">{block.text || `[${block.type}]`}</p>
-			)
+			return <p className="reader-md__other">{block.text || `[${block.type}]`}</p>
 		default:
 			return (
-				<p className="my-1 whitespace-pre-wrap font-serif text-[0.97rem] leading-7 text-text-primary">
-					<RichTextContent text={block.text || "[empty]"} displayClassName="my-2 block overflow-x-auto" />
+				<p className="reader-md__body">
+					<RichTextContent text={block.text || "[empty]"} displayClassName="reader-md__math-display" />
 				</p>
 			)
 	}

@@ -113,11 +113,21 @@
 	--shell-toolbar-height: 40px;
 
 		--table-row-height: 44px;
-		--pdf-dark-display-filter: none;
-		--pdf-dark-display-opacity: 1;
-		--color-scrollbar-track: color-mix(in oklch, var(--color-bg-secondary) 78%, transparent);
-		--color-scrollbar-thumb: color-mix(in oklch, var(--color-border-default) 72%, transparent);
-		--color-scrollbar-thumb-hover: color-mix(in oklch, var(--color-text-secondary) 58%, transparent);
+	--pdf-dark-display-filter: none;
+	--pdf-dark-display-opacity: 1;
+	--color-scrollbar-track: color-mix(in oklch, var(--color-bg-secondary) 78%, transparent);
+	--color-scrollbar-thumb: color-mix(in oklch, var(--color-border-default) 72%, transparent);
+	--color-scrollbar-thumb-hover: color-mix(in oklch, var(--color-text-secondary) 58%, transparent);
+	--color-reader-md-header-bg: color-mix(in srgb, var(--color-reading-bg) 72%, var(--color-bg-secondary));
+	--color-reader-md-page-badge-bg: color-mix(in srgb, var(--color-reading-bg) 88%, var(--color-bg-overlay));
+	--color-reader-md-page-chip-bg: color-mix(in srgb, var(--color-reading-bg) 86%, var(--color-bg-overlay));
+	--color-reader-md-placeholder-bg: color-mix(in srgb, var(--color-reading-bg) 92%, var(--color-bg-secondary));
+	--color-reader-md-placeholder-bar: color-mix(in srgb, var(--color-reading-bg) 58%, var(--color-border-default));
+	--color-reader-md-toolbar-bg: var(--color-reading-bg);
+	--color-reader-md-code-bg: color-mix(in srgb, var(--color-reading-bg) 82%, var(--color-bg-secondary));
+	--color-reader-md-equation-bg: color-mix(in srgb, var(--color-reading-bg) 88%, var(--color-bg-secondary));
+	--color-reader-md-figure-bg: color-mix(in srgb, var(--color-reading-bg) 92%, var(--color-bg-overlay));
+	--color-reader-md-fallback-bg: color-mix(in srgb, var(--color-reading-bg) 84%, var(--color-bg-secondary));
 		--color-reader-tag-bg: var(--color-neutral-700);
 		--color-reader-tag-border: var(--color-neutral-600);
 		--color-reader-tag-text: var(--color-neutral-50);
@@ -324,6 +334,16 @@
 		--color-reader-tag-bg: color-mix(in oklch, var(--color-reading-bg) 58%, var(--color-neutral-600));
 		--color-reader-tag-border: color-mix(in oklch, var(--color-reading-bg) 26%, var(--color-neutral-400));
 		--color-reader-tag-text: var(--color-text-secondary);
+		--color-reader-md-header-bg: color-mix(in srgb, var(--color-reading-bg) 72%, var(--color-bg-secondary));
+		--color-reader-md-page-badge-bg: color-mix(in srgb, var(--color-reading-bg) 88%, var(--color-bg-overlay));
+		--color-reader-md-page-chip-bg: color-mix(in srgb, var(--color-reading-bg) 86%, var(--color-bg-overlay));
+		--color-reader-md-placeholder-bg: color-mix(in srgb, var(--color-reading-bg) 92%, var(--color-bg-secondary));
+		--color-reader-md-placeholder-bar: color-mix(in srgb, var(--color-reading-bg) 58%, var(--color-border-default));
+		--color-reader-md-toolbar-bg: var(--color-reading-bg);
+		--color-reader-md-code-bg: color-mix(in srgb, var(--color-reading-bg) 82%, var(--color-bg-secondary));
+		--color-reader-md-equation-bg: color-mix(in srgb, var(--color-reading-bg) 88%, var(--color-bg-secondary));
+		--color-reader-md-figure-bg: color-mix(in srgb, var(--color-reading-bg) 92%, var(--color-bg-overlay));
+		--color-reader-md-fallback-bg: color-mix(in srgb, var(--color-reading-bg) 84%, var(--color-bg-secondary));
 	}
 
 html[data-theme="dark"] body {
@@ -495,6 +515,273 @@ kbd {
 	line-height: 1;
 	vertical-align: middle;
 	white-space: nowrap;
+}
+
+.markdown-prose__citation-tag {
+	background: var(--color-accent-700);
+	color: var(--color-text-inverse);
+	box-shadow: var(--shadow-sm);
+}
+
+.markdown-prose__link {
+	color: var(--color-text-accent);
+	text-decoration: none;
+}
+
+.markdown-prose__link:hover {
+	text-decoration: underline;
+}
+
+.markdown-prose__p {
+	margin-bottom: 0.75rem;
+}
+
+.markdown-prose__p:last-child {
+	margin-bottom: 0;
+}
+
+.markdown-prose__code-inline {
+	border-radius: 0.375rem;
+	background: var(--color-bg-secondary);
+	padding: 0.125rem 0.375rem;
+	font-family: var(--font-family-mono);
+	font-size: 13px;
+}
+
+.markdown-prose__code-block {
+	font-family: var(--font-family-mono);
+	font-size: 13px;
+}
+
+.markdown-prose__math-display {
+	display: block;
+	margin: 0.75rem 0;
+	overflow-x: auto;
+}
+
+.markdown-prose__pre {
+	margin: 0.75rem 0;
+	overflow-x: auto;
+	border-radius: 0.75rem;
+	background: var(--color-bg-secondary);
+	padding: 0.75rem;
+	font-size: 13px;
+	line-height: 1.25rem;
+}
+
+.markdown-prose__ul,
+.markdown-prose__ol {
+	margin-top: 0;
+	margin-right: 0;
+	margin-bottom: 0.75rem;
+	margin-left: 1.25rem;
+}
+
+.markdown-prose__ul:last-child,
+.markdown-prose__ol:last-child {
+	margin-bottom: 0;
+}
+
+.markdown-prose__ul {
+	list-style: disc;
+}
+
+.markdown-prose__ol {
+	list-style: decimal;
+}
+
+.markdown-prose__li + .markdown-prose__li {
+	margin-top: 0.25rem;
+}
+
+.markdown-prose__blockquote {
+	margin: 0.75rem 0;
+	border-left: 3px solid var(--color-border-subtle);
+	padding-left: 1rem;
+	color: var(--color-text-secondary);
+	font-style: italic;
+}
+
+.markdown-prose__h1,
+.markdown-prose__h2,
+.markdown-prose__h3 {
+	color: var(--color-text-primary);
+	font-weight: 700;
+}
+
+.markdown-prose__h1 {
+	margin-top: 1rem;
+	margin-bottom: 0.75rem;
+	font-size: 1.125rem;
+}
+
+.markdown-prose__h2 {
+	margin-top: 1rem;
+	margin-bottom: 0.5rem;
+	font-size: 1rem;
+}
+
+.markdown-prose__h3 {
+	margin-top: 0.75rem;
+	margin-bottom: 0.5rem;
+	font-size: 0.875rem;
+}
+
+.markdown-prose > :first-child.markdown-prose__h1,
+.markdown-prose > :first-child.markdown-prose__h2,
+.markdown-prose > :first-child.markdown-prose__h3 {
+	margin-top: 0;
+}
+
+.markdown-prose__table-wrap {
+	margin: 0.75rem 0;
+	overflow-x: auto;
+}
+
+.markdown-prose__table {
+	width: 100%;
+	border-collapse: collapse;
+	border: 1px solid var(--color-border-default);
+	font-size: 13px;
+}
+
+.markdown-prose__thead {
+	background: var(--color-bg-secondary);
+}
+
+.markdown-prose__th,
+.markdown-prose__td {
+	border: 1px solid var(--color-border-default);
+	padding: 0.5rem 0.75rem;
+	text-align: left;
+}
+
+.markdown-prose__th {
+	font-weight: 600;
+}
+
+.markdown-prose__hr {
+	margin: 1rem 0;
+	border: 0;
+	border-top: 1px solid var(--color-border-subtle);
+}
+
+.reader-md__heading-1,
+.reader-md__heading-2,
+.reader-md__heading-3 {
+	font-family: var(--font-serif);
+	font-weight: var(--font-weight-semibold);
+	color: var(--color-text-primary);
+	line-height: var(--leading-tight);
+}
+
+.reader-md__heading-1 {
+	margin-top: 1rem;
+	margin-bottom: 0.5rem;
+	font-size: var(--text-2xl);
+}
+
+.reader-md__heading-2 {
+	margin-top: 0.75rem;
+	margin-bottom: 0.5rem;
+	font-size: var(--text-xl);
+}
+
+.reader-md__heading-3 {
+	margin-top: 0.5rem;
+	margin-bottom: 0.375rem;
+	font-size: var(--text-lg);
+}
+
+.reader-md__body,
+.reader-md__list {
+	font-family: var(--font-serif);
+	font-size: var(--text-base);
+	line-height: var(--leading-relaxed);
+	color: var(--color-text-primary);
+}
+
+.reader-md__body {
+	margin: 0.25rem 0;
+	white-space: pre-wrap;
+}
+
+.reader-md__list {
+	margin: 0.5rem 0;
+	padding-left: 1.5rem;
+	list-style: disc;
+}
+
+.reader-md__list-item + .reader-md__list-item {
+	margin-top: 0.125rem;
+}
+
+.reader-md__code,
+.reader-md__equation-fallback {
+	margin: 0.5rem 0;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	border-radius: 0.125rem;
+	background: var(--color-reader-md-code-bg);
+	padding: 0.5rem 0.75rem;
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	color: var(--color-text-primary);
+}
+
+.reader-md__equation {
+	margin: 0.5rem 0;
+	overflow-x: auto;
+	border-radius: 0.125rem;
+	background: var(--color-reader-md-equation-bg);
+	padding: 0.75rem;
+	color: var(--color-text-primary);
+}
+
+.reader-md__math-display {
+	display: block;
+	margin: 0.5rem 0;
+	overflow-x: auto;
+}
+
+.reader-md__figure {
+	margin: 0.5rem 0;
+}
+
+.reader-md__figure-image {
+	margin-left: auto;
+	margin-right: auto;
+	max-height: 360px;
+	width: auto;
+	max-width: 100%;
+	border-radius: 0.125rem;
+	border: 1px solid var(--color-border-subtle);
+	background: var(--color-reader-md-figure-bg);
+	object-fit: contain;
+}
+
+.reader-md__fallback {
+	border-radius: 0.125rem;
+	border: 1px dashed var(--color-border-subtle);
+	background: var(--color-reader-md-fallback-bg);
+	padding: 0.5rem 0.75rem;
+	font-size: var(--text-xs);
+	color: var(--color-text-tertiary);
+	font-style: italic;
+}
+
+.reader-md__caption {
+	margin-top: 0.375rem;
+	text-align: center;
+	font-size: var(--text-sm);
+	color: var(--color-text-secondary);
+}
+
+.reader-md__other {
+	margin: 0.25rem 0;
+	font-size: var(--text-sm);
+	color: var(--color-text-tertiary);
+	font-style: italic;
 }
 
 .note-editor__inline-math-editor:focus-within {

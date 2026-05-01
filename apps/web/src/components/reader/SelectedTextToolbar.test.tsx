@@ -72,4 +72,23 @@ describe("SelectedTextToolbar", () => {
 		expect(screen.queryByRole("button", { name: "Highlight selected text" })).toBeNull()
 		expect(screen.queryByRole("button", { name: "Underline selected text" })).toBeNull()
 	})
+
+	it("calls onAskAgent with the current selection", async () => {
+		const user = userEvent.setup()
+		const onAskAgent = vi.fn()
+
+		render(
+			<SelectedTextToolbar
+				onAskAgent={onAskAgent}
+				onCopy={vi.fn()}
+				onDismiss={vi.fn()}
+				onHighlight={vi.fn()}
+				onUnderline={vi.fn()}
+				selection={pdfSelection}
+			/>,
+		)
+
+		await user.click(screen.getByRole("button", { name: "Ask the agent about this selected text" }))
+		expect(onAskAgent).toHaveBeenCalledWith(pdfSelection)
+	})
 })
