@@ -486,14 +486,15 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 					.select({
 						conceptId: compiledLocalConceptEvidence.conceptId,
 						blockId: compiledLocalConceptEvidence.blockId,
+						snippet: compiledLocalConceptEvidence.snippet,
 					})
 					.from(compiledLocalConceptEvidence)
 					.where(inArray(compiledLocalConceptEvidence.conceptId, graphConceptIds))
-	const evidenceBlockIdsByConceptId = new Map<string, string[]>()
+	const evidenceByConceptId = new Map<string, Array<{ blockId: string; snippet: string | null }>>()
 	for (const item of conceptEvidence) {
-		const bucket = evidenceBlockIdsByConceptId.get(item.conceptId) ?? []
-		bucket.push(item.blockId)
-		evidenceBlockIdsByConceptId.set(item.conceptId, uniqueBlockIds(bucket))
+		const bucket = evidenceByConceptId.get(item.conceptId) ?? []
+		bucket.push({ blockId: item.blockId, snippet: item.snippet })
+		evidenceByConceptId.set(item.conceptId, uniqueEvidenceSnippets(bucket))
 	}
 
 	const semanticCandidates =
@@ -553,8 +554,8 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 				rationale: `Shared ${sourceConcept.kind}: ${sourceConcept.displayName}`,
 				sourceDescription: sourceConcept.sourceLevelDescription,
 				targetDescription: targetConcept.sourceLevelDescription,
-				sourceEvidenceBlockIds: evidenceBlockIdsByConceptId.get(sourceConcept.id) ?? [],
-				targetEvidenceBlockIds: evidenceBlockIdsByConceptId.get(targetConcept.id) ?? [],
+				sourceEvidence: evidenceByConceptId.get(sourceConcept.id) ?? [],
+				targetEvidence: evidenceByConceptId.get(targetConcept.id) ?? [],
 			})
 		})
 	}
@@ -592,8 +593,8 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 			rationale: candidate.rationale,
 			sourceDescription: sourceConcept.sourceLevelDescription,
 			targetDescription: targetConcept.sourceLevelDescription,
-			sourceEvidenceBlockIds: evidenceBlockIdsByConceptId.get(sourceConcept.id) ?? [],
-			targetEvidenceBlockIds: evidenceBlockIdsByConceptId.get(targetConcept.id) ?? [],
+			sourceEvidence: evidenceByConceptId.get(sourceConcept.id) ?? [],
+			targetEvidence: evidenceByConceptId.get(targetConcept.id) ?? [],
 		})
 	}
 
@@ -660,8 +661,8 @@ type PaperGraphEvidence = {
 	rationale: string | null
 	sourceDescription: string | null
 	targetDescription: string | null
-	sourceEvidenceBlockIds: string[]
-	targetEvidenceBlockIds: string[]
+	sourceEvidence: Array<{ blockId: string; snippet: string | null }>
+	targetEvidence: Array<{ blockId: string; snippet: string | null }>
 }
 
 type PaperGraphEdgeDraft = {
@@ -729,8 +730,22 @@ function finalizePaperGraphEdge(draft: PaperGraphEdgeDraft) {
 			rationale: item.rationale,
 			sourceDescription: item.sourceDescription,
 			targetDescription: item.targetDescription,
-			sourceEvidenceBlockIds: item.sourceEvidenceBlockIds,
-			targetEvidenceBlockIds: item.targetEvidenceBlockIds,
+			sourceEvidenceBlockIds: item.sourceEvidence.map((evidence) => evidence.blockId),
+			targetEvidenceBlockIds: item.targetEvidence.map((evidence) => evidence.blockId),
+			sourceEvidenceSnippets: item.sourceEvidence
+				.filter((evidence) => evidence.snippet)
+				.slice(0, 1)
+				.map((evidence) => ({
+					blockId: evidence.blockId,
+					snippet: evidence.snippet as string,
+				})),
+			targetEvidenceSnippets: item.targetEvidence
+				.filter((evidence) => evidence.snippet)
+				.slice(0, 1)
+				.map((evidence) => ({
+					blockId: evidence.blockId,
+					snippet: evidence.snippet as string,
+				})),
 		})),
 	}
 }
@@ -784,6 +799,17 @@ function forEachPaperPair(paperIds: string[], callback: (source: string, target:
 
 function uniqueBlockIds(blockIds: string[]) {
 	return [...new Set(blockIds.filter(Boolean))]
+}
+
+function uniqueEvidenceSnippets(items: Array<{ blockId: string; snippet: string | null }>) {
+	const seen = new Set<string>()
+	const unique: Array<{ blockId: string; snippet: string | null }> = []
+	for (const item of items) {
+		if (!item.blockId || seen.has(item.blockId)) continue
+		seen.add(item.blockId)
+		unique.push(item)
+	}
+	return unique
 }
 
 function buildSemanticCandidateCounts(rows: Array<{ decisionStatus: string; count: number }>) {

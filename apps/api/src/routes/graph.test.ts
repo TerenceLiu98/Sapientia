@@ -114,10 +114,26 @@ describe("graph route", () => {
 			.mockReturnValueOnce({
 				from: () => ({
 					where: async () => [
-						{ conceptId: "concept-1", blockId: "blk-sae-source" },
-						{ conceptId: "concept-2", blockId: "blk-sae-target" },
-						{ conceptId: "concept-3", blockId: "blk-retrieval" },
-						{ conceptId: "concept-4", blockId: "blk-interpretability" },
+						{
+							conceptId: "concept-1",
+							blockId: "blk-sae-source",
+							snippet: "SAE features are used for retrieval.",
+						},
+						{
+							conceptId: "concept-2",
+							blockId: "blk-sae-target",
+							snippet: "SAE features explain model behavior.",
+						},
+						{
+							conceptId: "concept-3",
+							blockId: "blk-retrieval",
+							snippet: "Feature retrieval supports downstream analysis.",
+						},
+						{
+							conceptId: "concept-4",
+							blockId: "blk-interpretability",
+							snippet: "Feature interpretability studies activations.",
+						},
 					],
 				}),
 			})
@@ -199,14 +215,32 @@ describe("graph route", () => {
 					targetPaperId: "paper-2",
 					sourceConceptName: "Sparse Autoencoders",
 					sourceEvidenceBlockIds: ["blk-sae-source"],
+					sourceEvidenceSnippets: [
+						{ blockId: "blk-sae-source", snippet: "SAE features are used for retrieval." },
+					],
 					targetEvidenceBlockIds: ["blk-sae-target"],
+					targetEvidenceSnippets: [
+						{ blockId: "blk-sae-target", snippet: "SAE features explain model behavior." },
+					],
 				}),
 				expect.objectContaining({
 					matchMethod: "embedding",
 					sourceConceptName: "Feature Retrieval",
 					targetConceptName: "Feature Interpretability",
 					sourceEvidenceBlockIds: ["blk-retrieval"],
+					sourceEvidenceSnippets: [
+						{
+							blockId: "blk-retrieval",
+							snippet: "Feature retrieval supports downstream analysis.",
+						},
+					],
 					targetEvidenceBlockIds: ["blk-interpretability"],
+					targetEvidenceSnippets: [
+						{
+							blockId: "blk-interpretability",
+							snippet: "Feature interpretability studies activations.",
+						},
+					],
 				}),
 			]),
 		)

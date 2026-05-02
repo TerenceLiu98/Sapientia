@@ -26,6 +26,7 @@ type SigmaNodeAttributes = {
 	size: number
 	label: string
 	color: string
+	baseColor: string
 	kind: string
 	weight: number
 	forceLabel?: boolean
@@ -35,6 +36,7 @@ type SigmaEdgeAttributes = {
 	size: number
 	label: string
 	color: string
+	baseColor: string
 	relationType: string
 	confidence: number
 	zIndex?: number
@@ -74,7 +76,7 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 				<div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
 					<div>
 						<div className="text-xs uppercase tracking-[0.18em] text-text-tertiary">
-							Workspace Graph
+							Paper Relationship Map
 						</div>
 						<div className="mt-1 text-sm text-text-secondary">
 							{data.graph.nodeCount} {data.view === "papers" ? "papers" : "concepts"} ·{" "}
@@ -101,6 +103,7 @@ function WorkspaceGraphCanvas({
 	const containerRef = useRef<HTMLDivElement | null>(null)
 	const rendererRef = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null)
 	const selectionRef = useRef<Selection>(selection)
+	const draggedNodeRef = useRef<string | null>(null)
 
 	useEffect(() => {
 		selectionRef.current = selection
@@ -112,30 +115,40 @@ function WorkspaceGraphCanvas({
 		if (!container) return undefined
 
 		const computedStyle = getComputedStyle(document.documentElement)
-		const textPrimary = cssVar(computedStyle, "--color-text-primary", "#2f2a24")
-		const edgeDefault = cssVar(computedStyle, "--graph-edge-default", "rgba(100, 92, 82, 0.45)")
-		const edgeActive = cssVar(computedStyle, "--graph-edge-active", "#2f2a24")
+		const textPrimary = cssColorVar("--color-text-primary", "#2f2a24")
+		const edgeDefault = cssColorVar("--graph-edge-default", "rgba(100, 92, 82, 0.45)")
+		const edgeActive = cssColorVar("--graph-edge-active", "#2f7f8f")
+		const edgeMinWidth = cssNumberVar(computedStyle, "--graph-edge-width-min", 0.5)
+		const edgeMaxWidth = cssNumberVar(computedStyle, "--graph-edge-width-max", 3)
+		const nodeMinRadius = cssNumberVar(computedStyle, "--graph-node-radius-min", 4)
+		const nodeMaxRadius = cssNumberVar(computedStyle, "--graph-node-radius-max", 16)
 		const colors = {
-			paper: cssVar(computedStyle, "--graph-node-concept", "#2f7f8f"),
-			concept: cssVar(computedStyle, "--graph-node-concept", "#2f7f8f"),
-			method: "#8b6f47",
-			task: "#9a624f",
-			metric: "#7f7a72",
-			fallback: "#7f7a72",
+			paper: cssColorVar("--graph-node-source", "#7f7a72"),
+			concept: cssColorVar("--graph-node-concept", "#2f7f8f"),
+			method: cssColorVar("--graph-node-method", "#4f8f68"),
+			task: cssColorVar("--graph-node-task", "#a67a36"),
+			metric: cssColorVar("--graph-node-metric", "#9a4f43"),
+			entity: cssColorVar("--graph-node-entity", "#9a624f"),
+			fallback: cssColorVar("--graph-node-source", "#7f7a72"),
 			edgeDefault,
 			edgeActive,
 		}
 
-		const graph = buildSigmaGraph(data, colors)
+		const graph = buildSigmaGraph(data, colors, {
+			edgeMinWidth,
+			edgeMaxWidth,
+			nodeMinRadius,
+			nodeMaxRadius,
+		})
 		const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
 			allowInvalidContainer: true,
 			autoCenter: true,
 			autoRescale: true,
 			enableEdgeEvents: true,
 			labelColor: { color: textPrimary },
-			labelDensity: 0.08,
-			labelRenderedSizeThreshold: 8,
-			labelSize: 11,
+			labelDensity: 0,
+			labelRenderedSizeThreshold: 999,
+			labelSize: cssNumberVar(computedStyle, "--graph-label-font-size", 12),
 			renderEdgeLabels: false,
 			stagePadding: 40,
 			zIndex: true,
@@ -145,36 +158,85 @@ function WorkspaceGraphCanvas({
 				if (currentSelection.id === node) {
 					return {
 						...attributes,
-						color: edgeActive,
-						forceLabel: true,
-						size: attributes.size * 1.24,
+						color: attributes.baseColor,
+						forceLabel: false,
+						size: Math.min(attributes.size * 1.28, nodeMaxRadius + 3),
 						zIndex: 4,
 					}
 				}
-				return { ...attributes, color: fadeColor(attributes.color), zIndex: 1 }
+				return {
+					...attributes,
+					color: attributes.baseColor,
+					forceLabel: false,
+					size: Math.max(attributes.size * 0.92, nodeMinRadius),
+					zIndex: 1,
+				}
 			},
 			edgeReducer: (edge, attributes) => {
 				const currentSelection = selectionRef.current
-				if (currentSelection?.kind !== "edge") return attributes
-				if (currentSelection.id === edge) {
+				if (!currentSelection) return attributes
+				if (currentSelection.kind === "edge" && currentSelection.id === edge) {
 					return {
 						...attributes,
 						color: edgeActive,
-						size: Math.max(attributes.size * 1.6, 2.5),
+						size: Math.min(Math.max(attributes.size * 1.6, edgeMinWidth + 1.5), edgeMaxWidth + 1.4),
 						zIndex: 4,
 					}
 				}
-				return { ...attributes, color: fadeColor(attributes.color), zIndex: 1 }
+				if (currentSelection.kind === "node") {
+					const [source, target] = graph.extremities(edge)
+					if (source === currentSelection.id || target === currentSelection.id) {
+						return {
+							...attributes,
+							color: edgeActive,
+							size: Math.min(Math.max(attributes.size * 1.28, edgeMinWidth + 0.7), edgeMaxWidth + 0.8),
+							zIndex: 3,
+						}
+					}
+				}
+				return {
+					...attributes,
+					color: attributes.baseColor,
+					size: Math.max(attributes.size * 0.82, edgeMinWidth),
+					zIndex: 1,
+				}
 			},
 		})
 
+		const mouseCaptor = renderer.getMouseCaptor()
 		renderer.on("clickNode", ({ node }) => onSelect({ kind: "node", id: node }))
 		renderer.on("clickEdge", ({ edge }) => onSelect({ kind: "edge", id: edge }))
 		renderer.on("clickStage", () => onSelect(null))
+		renderer.on("downNode", (event) => {
+			draggedNodeRef.current = event.node
+			container.style.cursor = "grabbing"
+			event.preventSigmaDefault()
+		})
+		mouseCaptor.on("mousemovebody", (event) => {
+			const draggedNode = draggedNodeRef.current
+			if (!draggedNode) return
+			const position = renderer.viewportToGraph(event)
+			graph.setNodeAttribute(draggedNode, "x", position.x)
+			graph.setNodeAttribute(draggedNode, "y", position.y)
+			event.preventSigmaDefault()
+			event.original.preventDefault()
+			event.original.stopPropagation()
+		})
+		mouseCaptor.on("mouseup", () => {
+			if (!draggedNodeRef.current) return
+			draggedNodeRef.current = null
+			container.style.cursor = ""
+		})
+		mouseCaptor.on("mouseleave", () => {
+			if (!draggedNodeRef.current) return
+			draggedNodeRef.current = null
+			container.style.cursor = ""
+		})
 
 		rendererRef.current = renderer
 
 		return () => {
+			draggedNodeRef.current = null
 			renderer.kill()
 			rendererRef.current = null
 		}
@@ -357,6 +419,13 @@ function PaperGraphInspector({
 		() => new Map(data.graph.nodes.map((node) => [node.id, node] as const)),
 		[data.graph.nodes],
 	)
+	const selectedNodeEdges = useMemo(() => {
+		if (!selectedNode) return []
+		return data.graph.edges
+			.filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+			.sort((a, b) => b.weight - a.weight)
+			.slice(0, 5)
+	}, [data.graph.edges, selectedNode])
 	const topPapers = useMemo(
 		() =>
 			[...data.graph.nodes]
@@ -406,11 +475,33 @@ function PaperGraphInspector({
 							))}
 						</div>
 					) : null}
+					{selectedNodeEdges.length > 0 ? (
+						<div className="mt-4 space-y-2">
+							<div className="text-[11px] uppercase tracking-[0.14em] text-text-tertiary">
+								Connected Papers
+							</div>
+							{selectedNodeEdges.map((edge) => (
+								<PaperNodeConnectionButton
+									edge={edge}
+									key={edge.id}
+									onSelect={onSelect}
+									papersById={papersById}
+									selectedPaperId={selectedNode.id}
+								/>
+							))}
+						</div>
+					) : (
+						<p className="mt-4 rounded-lg border border-border-subtle bg-bg-secondary px-3 py-2 text-xs leading-5 text-text-secondary">
+							No confirmed paper links yet. Sapientia will add links when concept evidence is
+							strong enough.
+						</p>
+					)}
 				</div>
 			) : (
 				<p className="mt-3 text-sm leading-6 text-text-secondary">
-					Select a paper or connection. Edges are built from shared and semantically related
-					concepts, so the map stays grounded in paper evidence.
+					Select a paper or connection. This map shows paper relationships inferred from
+					AI-confirmed concept evidence, so it helps you decide what to read next without asking
+					you to curate the graph.
 				</p>
 			)}
 			<div className="mt-5 text-xs uppercase tracking-[0.18em] text-text-tertiary">
@@ -440,6 +531,41 @@ function PaperGraphInspector({
 				))}
 			</div>
 		</aside>
+	)
+}
+
+function PaperNodeConnectionButton({
+	edge,
+	papersById,
+	selectedPaperId,
+	onSelect,
+}: {
+	edge: PaperGraphPayload["graph"]["edges"][number]
+	papersById: Map<string, PaperGraphPayload["graph"]["nodes"][number]>
+	selectedPaperId: string
+	onSelect: (selection: Selection) => void
+}) {
+	const otherPaperId = edge.source === selectedPaperId ? edge.target : edge.source
+	const otherPaper = papersById.get(otherPaperId)
+	const strongestEvidence = edge.topEvidence[0]
+	return (
+		<button
+			className="block w-full rounded-lg border border-border-subtle bg-bg-secondary px-3 py-2 text-left text-xs transition-colors hover:bg-surface-hover"
+			onClick={() => onSelect({ kind: "edge", id: edge.id })}
+			type="button"
+		>
+			<span className="block truncate font-medium text-text-primary">
+				{otherPaper?.title ?? "Connected paper"}
+			</span>
+			<span className="mt-0.5 block text-text-tertiary">
+				{formatPaperEdgeKind(edge.edgeKind)} · strength {formatPercent(edge.weight)}
+			</span>
+			{strongestEvidence ? (
+				<span className="mt-1 line-clamp-2 block leading-5 text-text-secondary">
+					via {strongestEvidence.sourceConceptName} ↔ {strongestEvidence.targetConceptName}
+				</span>
+			) : null}
+		</button>
 	)
 }
 
@@ -489,7 +615,7 @@ function PaperEdgeCard({
 			</div>
 			<div className="mt-1 text-xs text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · {edge.evidenceCount} evidence ·{" "}
-				{edge.strongEvidenceCount} strong
+				{edge.strongEvidenceCount} strong · strength {formatPercent(edge.weight)}
 			</div>
 			<div className="mt-3 flex gap-2">
 				{source ? (
@@ -527,6 +653,20 @@ function PaperEdgeCard({
 								? ` · confidence ${formatPercent(evidence.llmConfidence)}`
 								: ""}
 						</div>
+						<div className="mt-2 grid gap-2">
+							<ConceptMeaningCard
+								description={evidence.sourceDescription}
+								label={papersById.get(evidence.sourcePaperId)?.title ?? "Source paper"}
+								name={evidence.sourceConceptName}
+								snippets={evidence.sourceEvidenceSnippets}
+							/>
+							<ConceptMeaningCard
+								description={evidence.targetDescription}
+								label={papersById.get(evidence.targetPaperId)?.title ?? "Target paper"}
+								name={evidence.targetConceptName}
+								snippets={evidence.targetEvidenceSnippets}
+							/>
+						</div>
 						{evidence.rationale ? (
 							<div className="mt-1 line-clamp-2 text-text-secondary">{evidence.rationale}</div>
 						) : null}
@@ -545,6 +685,36 @@ function PaperEdgeCard({
 					</div>
 				))}
 			</div>
+		</div>
+	)
+}
+
+function ConceptMeaningCard({
+	label,
+	name,
+	description,
+	snippets,
+}: {
+	label: string
+	name: string
+	description: string | null
+	snippets: Array<{ blockId: string; snippet: string }>
+}) {
+	return (
+		<div className="rounded-md border border-border-subtle bg-bg-primary px-2.5 py-2">
+			<div className="text-[11px] uppercase tracking-[0.12em] text-text-tertiary">{label}</div>
+			<div className="mt-1 font-medium text-text-primary">{name}</div>
+			{description ? (
+				<div className="mt-1 line-clamp-3 leading-5 text-text-secondary">{description}</div>
+			) : (
+				<div className="mt-1 text-text-tertiary">No source-level description yet.</div>
+			)}
+			{snippets.length > 0 ? (
+				<div className="mt-2 rounded border border-border-subtle bg-bg-secondary px-2 py-1.5 leading-5 text-text-secondary">
+					<span className="text-text-tertiary">Evidence: </span>
+					{snippets[0]?.snippet}
+				</div>
+			) : null}
 		</div>
 	)
 }
@@ -648,8 +818,15 @@ function buildSigmaGraph(
 		method: string
 		task: string
 		metric: string
+		entity: string
 		fallback: string
 		edgeDefault: string
+	},
+	sizing: {
+		edgeMinWidth: number
+		edgeMaxWidth: number
+		nodeMinRadius: number
+		nodeMaxRadius: number
 	},
 ): ConceptGraph {
 	const graph = new Graph<SigmaNodeAttributes, SigmaEdgeAttributes>({
@@ -665,21 +842,23 @@ function buildSigmaGraph(
 			graph.addNode(node.id, {
 				x: position.x,
 				y: position.y,
-				size: 6 + Math.sqrt(weight + 1) * 2.7,
-				label: node.label,
+				size: clampSize(6 + Math.sqrt(weight + 1) * 2.7, sizing.nodeMinRadius, sizing.nodeMaxRadius),
+				label: "",
 				color: colorForKind("paper", colors),
+				baseColor: colorForKind("paper", colors),
 				kind: "paper",
 				weight,
-				forceLabel: node.degree > 0,
+				forceLabel: false,
 				zIndex: Math.round(weight),
 			})
 		}
 		for (const edge of data.graph.edges) {
 			if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue
 			graph.addUndirectedEdgeWithKey(edge.id, edge.source, edge.target, {
-				size: 0.8 + edge.weight * 1.8,
+				size: edgeWidthForWeight(edge.weight, sizing.edgeMinWidth, sizing.edgeMaxWidth),
 				label: edge.edgeKind,
 				color: colors.edgeDefault,
+				baseColor: colors.edgeDefault,
 				relationType: edge.edgeKind,
 				confidence: edge.weight,
 				zIndex: Math.round(edge.weight * 10),
@@ -692,12 +871,13 @@ function buildSigmaGraph(
 			graph.addNode(node.id, {
 				x: position.x,
 				y: position.y,
-				size: 6 + Math.sqrt(weight + 1) * 2.7,
-				label: node.label,
+				size: clampSize(6 + Math.sqrt(weight + 1) * 2.7, sizing.nodeMinRadius, sizing.nodeMaxRadius),
+				label: "",
 				color: colorForKind(node.kind, colors),
+				baseColor: colorForKind(node.kind, colors),
 				kind: node.kind,
 				weight,
-				forceLabel: node.degree > 2 || node.paperCount > 1,
+				forceLabel: false,
 				zIndex: Math.round(weight),
 			})
 		}
@@ -705,9 +885,10 @@ function buildSigmaGraph(
 			if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue
 			const edgeWeight = edge.confidence ?? 0.5
 			graph.addUndirectedEdgeWithKey(edge.id, edge.source, edge.target, {
-				size: 0.8 + edgeWeight * 1.8,
+				size: edgeWidthForWeight(edgeWeight, sizing.edgeMinWidth, sizing.edgeMaxWidth),
 				label: edge.relationType,
 				color: colors.edgeDefault,
+				baseColor: colors.edgeDefault,
 				relationType: edge.relationType,
 				confidence: edgeWeight,
 				zIndex: Math.round(edgeWeight * 10),
@@ -792,6 +973,7 @@ function colorForKind(
 		method: string
 		task: string
 		metric: string
+		entity: string
 		fallback: string
 	},
 ) {
@@ -800,17 +982,16 @@ function colorForKind(
 	if (kind === "method") return colors.method
 	if (kind === "task") return colors.task
 	if (kind === "metric") return colors.metric
+	if (kind === "person" || kind === "organization" || kind === "dataset") return colors.entity
 	return colors.fallback
 }
 
-function fadeColor(color: string) {
-	if (color.startsWith("#") && color.length === 7) {
-		const r = Number.parseInt(color.slice(1, 3), 16)
-		const g = Number.parseInt(color.slice(3, 5), 16)
-		const b = Number.parseInt(color.slice(5, 7), 16)
-		return `rgba(${r}, ${g}, ${b}, 0.32)`
-	}
-	return color
+function edgeWidthForWeight(weight: number, min: number, max: number) {
+	return clampSize(min + (max - min) * Math.max(0, Math.min(1, weight)), min, max)
+}
+
+function clampSize(value: number, min: number, max: number) {
+	return Math.min(Math.max(value, min), max)
 }
 
 function formatPercent(value: number | null) {
@@ -827,7 +1008,19 @@ function formatPaperEdgeKind(kind: PaperGraphPayload["graph"]["edges"][number]["
 	return "mixed evidence"
 }
 
-function cssVar(style: CSSStyleDeclaration, name: string, fallback: string) {
-	const value = style.getPropertyValue(name).trim()
+function cssColorVar(name: string, fallback: string) {
+	if (typeof document === "undefined") return fallback
+	const probe = document.createElement("span")
+	probe.style.color = `var(${name})`
+	probe.style.display = "none"
+	document.body.appendChild(probe)
+	const value = getComputedStyle(probe).color
+	probe.remove()
 	return value || fallback
+}
+
+function cssNumberVar(style: CSSStyleDeclaration, name: string, fallback: number) {
+	const value = style.getPropertyValue(name).trim()
+	const number = Number.parseFloat(value)
+	return Number.isFinite(number) ? number : fallback
 }

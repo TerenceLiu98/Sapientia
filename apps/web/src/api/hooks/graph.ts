@@ -157,6 +157,14 @@ export type PaperGraphEdge = {
 		targetDescription: string | null
 		sourceEvidenceBlockIds: string[]
 		targetEvidenceBlockIds: string[]
+		sourceEvidenceSnippets: Array<{
+			blockId: string
+			snippet: string
+		}>
+		targetEvidenceSnippets: Array<{
+			blockId: string
+			snippet: string
+		}>
 	}>
 }
 

@@ -7,12 +7,34 @@ const useWorkspaceGraphMock = vi.fn()
 const reviewSemanticCandidateMock = vi.fn()
 type GraphEventPayload = { node?: string; edge?: string }
 type GraphHandler = (event: GraphEventPayload) => void
+type MouseHandler = (event: {
+	x: number
+	y: number
+	original: { preventDefault: () => void; stopPropagation: () => void }
+	preventSigmaDefault: () => void
+}) => void
 
 const { sigmaMock, handlers } = vi.hoisted(() => ({
 	sigmaMock: vi.fn(function SigmaMock() {
+		const mouseCaptor = {
+			on: vi.fn((eventName: string, handler: unknown) => {
+				if (eventName === "mousemovebody" && typeof handler === "function") {
+					handlers.mousemovebody = handler as MouseHandler
+				}
+				if (eventName === "mouseup" && typeof handler === "function") {
+					handlers.mouseup = handler as () => void
+				}
+				if (eventName === "mouseleave" && typeof handler === "function") {
+					handlers.mouseleave = handler as () => void
+				}
+				return undefined
+			}),
+		}
 		return {
+			getMouseCaptor: () => mouseCaptor,
 			kill: vi.fn(),
 			refresh: vi.fn(),
+			viewportToGraph: vi.fn((event: { x: number; y: number }) => ({ x: event.x, y: event.y })),
 			on: vi.fn((eventName: string, handler: unknown) => {
 				if (eventName === "clickNode" && typeof handler === "function") {
 					handlers.node = handler as GraphHandler
@@ -23,6 +45,9 @@ const { sigmaMock, handlers } = vi.hoisted(() => ({
 				if (eventName === "clickStage" && typeof handler === "function") {
 					handlers.stage = handler as GraphHandler
 				}
+				if (eventName === "downNode" && typeof handler === "function") {
+					handlers.downNode = handler as GraphHandler
+				}
 				return undefined
 			}),
 		}
@@ -31,6 +56,10 @@ const { sigmaMock, handlers } = vi.hoisted(() => ({
 		node: undefined as GraphHandler | undefined,
 		edge: undefined as GraphHandler | undefined,
 		stage: undefined as GraphHandler | undefined,
+		downNode: undefined as GraphHandler | undefined,
+		mousemovebody: undefined as MouseHandler | undefined,
+		mouseup: undefined as (() => void) | undefined,
+		mouseleave: undefined as (() => void) | undefined,
 	},
 }))
 
@@ -77,6 +106,10 @@ describe("WorkspaceGraphView", () => {
 		handlers.node = undefined
 		handlers.edge = undefined
 		handlers.stage = undefined
+		handlers.downNode = undefined
+		handlers.mousemovebody = undefined
+		handlers.mouseup = undefined
+		handlers.mouseleave = undefined
 	})
 
 	it("renders the paper graph and opens paper connection evidence", async () => {
@@ -149,12 +182,25 @@ describe("WorkspaceGraphView", () => {
 									matchMethod: "exact_cluster",
 									similarityScore: 1,
 									llmDecision: null,
+									llmConfidence: null,
 									rationale: "Shared method: Sparse Autoencoders",
 									sourceDescription: "Uses SAE features as retrieval signals.",
 									targetDescription: "Uses SAE features to explain model behavior.",
 									sourceEvidenceBlockIds: ["block-source-sae"],
+									sourceEvidenceSnippets: [
+										{
+											blockId: "block-source-sae",
+											snippet: "SAE features are used as retrieval signals.",
+										},
+									],
 									sourcePaperId: "paper-1",
 									targetEvidenceBlockIds: ["block-target-sae"],
+									targetEvidenceSnippets: [
+										{
+											blockId: "block-target-sae",
+											snippet: "SAE features explain model behavior.",
+										},
+									],
 									targetPaperId: "paper-2",
 								},
 								{
@@ -166,12 +212,25 @@ describe("WorkspaceGraphView", () => {
 									matchMethod: "lexical_source_description",
 									similarityScore: 0.84,
 									llmDecision: "related",
+									llmConfidence: 0.88,
 									rationale: "Both concepts connect feature evidence to paper interpretation.",
 									sourceDescription: "Retrieves features for downstream analysis.",
 									targetDescription: "Explains model internals.",
 									sourceEvidenceBlockIds: ["block-source-task"],
+									sourceEvidenceSnippets: [
+										{
+											blockId: "block-source-task",
+											snippet: "Feature retrieval supports downstream analysis.",
+										},
+									],
 									sourcePaperId: "paper-1",
 									targetEvidenceBlockIds: ["block-target-task"],
+									targetEvidenceSnippets: [
+										{
+											blockId: "block-target-task",
+											snippet: "Mechanistic interpretability explains internals.",
+										},
+									],
 									targetPaperId: "paper-2",
 								},
 							],
@@ -214,9 +273,12 @@ describe("WorkspaceGraphView", () => {
 			handlers.edge?.({ edge: "paper-edge:paper-1:paper-2" })
 		})
 
-		expect(screen.getByText("mixed evidence · 2 evidence · 1 strong")).toBeInTheDocument()
+		expect(screen.getByText("mixed evidence · 2 evidence · 1 strong · strength 91%")).toBeInTheDocument()
 		expect(screen.getByText(/Shared method/)).toBeInTheDocument()
 		expect(screen.getByText(/LLM: related/)).toBeInTheDocument()
+		expect(screen.getByText("Uses SAE features as retrieval signals.")).toBeInTheDocument()
+		expect(screen.getByText(/SAE features are used as retrieval signals/)).toBeInTheDocument()
+		expect(screen.getByText(/Feature retrieval supports downstream analysis/)).toBeInTheDocument()
 		expect(screen.getAllByRole("link", { name: "Open source evidence" })[0]).toHaveAttribute(
 			"href",
 			"/papers/paper-1?blockId=block-source-sae",
