@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BlockConceptLensPanel } from "./BlockConceptLensPanel"
 
 const usePaperBlockConceptLensMock = vi.fn()
-const reviewSemanticCandidateMock = vi.fn()
 
 vi.mock("@/api/hooks/papers", async () => {
 	const actual = await vi.importActual<typeof import("@/api/hooks/papers")>("@/api/hooks/papers")
@@ -14,17 +13,9 @@ vi.mock("@/api/hooks/papers", async () => {
 	}
 })
 
-vi.mock("@/api/hooks/graph", () => ({
-	useReviewSemanticCandidate: () => ({
-		isPending: false,
-		mutate: reviewSemanticCandidateMock,
-	}),
-}))
-
 describe("BlockConceptLensPanel", () => {
 	beforeEach(() => {
 		usePaperBlockConceptLensMock.mockReset()
-		reviewSemanticCandidateMock.mockReset()
 	})
 
 	it("does not render until a block is selected", () => {
@@ -37,8 +28,7 @@ describe("BlockConceptLensPanel", () => {
 		expect(container).toBeEmptyDOMElement()
 	})
 
-	it("renders grounded concepts and lets semantic candidates be reviewed", async () => {
-		const user = userEvent.setup()
+	it("renders grounded concepts and related semantic hints without creating a review task", () => {
 		usePaperBlockConceptLensMock.mockReturnValue({
 			isLoading: false,
 			isError: false,
@@ -86,7 +76,7 @@ describe("BlockConceptLensPanel", () => {
 						matchMethod: "embedding",
 						similarityScore: 0.88,
 						llmDecision: "related",
-						decisionStatus: "needs_review",
+						decisionStatus: "candidate",
 						rationale: "Both describe intervention methods, but with different objectives.",
 						relatedCluster: {
 							id: "cluster-2",
@@ -113,14 +103,12 @@ describe("BlockConceptLensPanel", () => {
 		expect(screen.getByText("Concept Lens")).toBeInTheDocument()
 		expect(screen.getByText("Block 7")).toBeInTheDocument()
 		expect(screen.getByText("Contrastive Activation Steering")).toBeInTheDocument()
+		expect(screen.getByText("Highlighted once and cited twice.")).toBeInTheDocument()
+		expect(screen.getByText("Related concept hints")).toBeInTheDocument()
 		expect(screen.getByText("Representation Steering")).toBeInTheDocument()
 		expect(screen.getByText(/LLM: related/)).toBeInTheDocument()
-
-		await user.click(screen.getByRole("button", { name: "Accept" }))
-		expect(reviewSemanticCandidateMock).toHaveBeenCalledWith({
-			candidateId: "candidate-1",
-			decisionStatus: "user_accepted",
-		})
+		expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument()
 	})
 
 	it("shows all concepts after opening the marginalia lens", async () => {

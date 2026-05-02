@@ -5,19 +5,19 @@ import {
 	workspaceConceptClusterCandidates,
 	workspaceConceptClusterMembers,
 } from "@sapientia/db"
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { db } from "../db"
 import { getEmbeddingCredential } from "./credentials"
 
 type ConceptKind = "concept" | "method" | "task" | "metric"
-type CandidateDecisionStatus = "needs_review"
+type CandidateDecisionStatus = "candidate"
 
 const CANDIDATE_KINDS = new Set<ConceptKind>(["concept", "method", "task", "metric"])
 const LEXICAL_PROMPT_VERSION = "semantic-candidate-lexical-v1"
 const EMBEDDING_PROMPT_VERSION = "semantic-candidate-embedding-v1"
-const NEEDS_REVIEW_THRESHOLD = 0.48
+const CANDIDATE_THRESHOLD = 0.48
 const MAX_CANDIDATES_PER_SOURCE = 6
-const EMBEDDING_NEEDS_REVIEW_THRESHOLD = 0.72
+const EMBEDDING_CANDIDATE_THRESHOLD = 0.7
 const EMBEDDING_TOP_K = 12
 
 export type LocalConceptForCandidate = {
@@ -114,49 +114,41 @@ export async function compileWorkspaceConceptClusterCandidates(args: {
 			? embeddingDrafts
 			: buildWorkspaceConceptClusterCandidates(graphConcepts, clusterIdByLocalConceptId)
 
+	let insertedCandidateCount = 0
 	await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${`workspace-concept-cluster-candidates:${workspaceId}:${userId}`}))`,
 		)
 
-		await tx
-			.delete(workspaceConceptClusterCandidates)
-			.where(
-				and(
-					eq(workspaceConceptClusterCandidates.workspaceId, workspaceId),
-					eq(workspaceConceptClusterCandidates.ownerUserId, userId),
-					or(
-						eq(workspaceConceptClusterCandidates.decisionStatus, "candidate"),
-						eq(workspaceConceptClusterCandidates.decisionStatus, "needs_review"),
-						eq(workspaceConceptClusterCandidates.decisionStatus, "auto_accepted"),
-					),
-				),
-			)
-
 		if (candidateDrafts.length === 0) return
 
-		await tx.insert(workspaceConceptClusterCandidates).values(
-			candidateDrafts.map((candidate) => ({
-				workspaceId,
-				ownerUserId: userId,
-				sourceLocalConceptId: candidate.sourceLocalConceptId,
-				targetLocalConceptId: candidate.targetLocalConceptId,
-				sourceClusterId: candidate.sourceClusterId,
-				targetClusterId: candidate.targetClusterId,
-				kind: candidate.kind,
-				matchMethod: candidate.matchMethod ?? ("lexical_source_description" as const),
-				similarityScore: candidate.similarityScore,
-				decisionStatus: candidate.decisionStatus,
-				rationale: candidate.rationale,
-				modelName: candidate.modelName ?? "deterministic",
-				promptVersion: candidate.promptVersion ?? LEXICAL_PROMPT_VERSION,
-			})),
-		)
+		const inserted = await tx
+			.insert(workspaceConceptClusterCandidates)
+			.values(
+				candidateDrafts.map((candidate) => ({
+					workspaceId,
+					ownerUserId: userId,
+					sourceLocalConceptId: candidate.sourceLocalConceptId,
+					targetLocalConceptId: candidate.targetLocalConceptId,
+					sourceClusterId: candidate.sourceClusterId,
+					targetClusterId: candidate.targetClusterId,
+					kind: candidate.kind,
+					matchMethod: candidate.matchMethod ?? ("lexical_source_description" as const),
+					similarityScore: candidate.similarityScore,
+					decisionStatus: candidate.decisionStatus,
+					rationale: candidate.rationale,
+					modelName: candidate.modelName ?? "deterministic",
+					promptVersion: candidate.promptVersion ?? LEXICAL_PROMPT_VERSION,
+				})),
+			)
+			.onConflictDoNothing()
+			.returning({ id: workspaceConceptClusterCandidates.id })
+		insertedCandidateCount = inserted.length
 	})
 
 	return {
 		workspaceId,
-		candidateCount: candidateDrafts.length,
+		candidateCount: insertedCandidateCount,
 	}
 }
 
@@ -197,7 +189,7 @@ async function buildWorkspaceConceptClusterCandidatesFromEmbeddings(args: {
 
 			const similarityScore = Number(row.similarity_score)
 			if (!Number.isFinite(similarityScore)) continue
-			if (similarityScore < EMBEDDING_NEEDS_REVIEW_THRESHOLD) continue
+			if (similarityScore < EMBEDDING_CANDIDATE_THRESHOLD) continue
 
 			const [orderedSource, orderedTarget, orderedSourceClusterId, orderedTargetClusterId] =
 				orderCandidatePair(source, target, sourceClusterId, targetClusterId)
@@ -206,13 +198,13 @@ async function buildWorkspaceConceptClusterCandidatesFromEmbeddings(args: {
 				sourceLocalConceptId: orderedSource.id,
 				targetLocalConceptId: orderedTarget.id,
 				sourceClusterId: orderedSourceClusterId,
-					targetClusterId: orderedTargetClusterId,
-					kind: orderedSource.kind,
-					similarityScore: roundScore(similarityScore),
-					decisionStatus: "needs_review",
-					rationale: `embedding=${roundScore(similarityScore)}`,
-					matchMethod: "embedding",
-					modelName: credential.model,
+				targetClusterId: orderedTargetClusterId,
+				kind: orderedSource.kind,
+				similarityScore: roundScore(similarityScore),
+				decisionStatus: "candidate",
+				rationale: `embedding=${roundScore(similarityScore)}`,
+				matchMethod: "embedding",
+				modelName: credential.model,
 				promptVersion: EMBEDDING_PROMPT_VERSION,
 			}
 			const existing = draftsByPairKey.get(pairKey)
@@ -290,7 +282,7 @@ export function buildWorkspaceConceptClusterCandidates(
 			if (sourceClusterId && targetClusterId && sourceClusterId === targetClusterId) continue
 
 			const similarity = scoreWorkspaceConceptClusterCandidateSimilarity(source, target)
-			if (similarity.score < NEEDS_REVIEW_THRESHOLD) continue
+			if (similarity.score < CANDIDATE_THRESHOLD) continue
 
 			const [orderedSource, orderedTarget, orderedSourceClusterId, orderedTargetClusterId] =
 				orderCandidatePair(source, target, sourceClusterId, targetClusterId)
@@ -298,12 +290,12 @@ export function buildWorkspaceConceptClusterCandidates(
 				sourceLocalConceptId: orderedSource.id,
 				targetLocalConceptId: orderedTarget.id,
 				sourceClusterId: orderedSourceClusterId,
-					targetClusterId: orderedTargetClusterId,
-					kind: orderedSource.kind,
-					similarityScore: roundScore(similarity.score),
-					decisionStatus: "needs_review",
-					rationale: similarity.rationale,
-				}
+				targetClusterId: orderedTargetClusterId,
+				kind: orderedSource.kind,
+				similarityScore: roundScore(similarity.score),
+				decisionStatus: "candidate",
+				rationale: similarity.rationale,
+			}
 
 			const bucket = draftsBySource.get(draft.sourceLocalConceptId) ?? []
 			bucket.push(draft)

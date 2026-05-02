@@ -52,6 +52,7 @@ export function BlockCitationsPopover({
 								hash={`note=${n.noteId}`}
 								onClick={onDismiss}
 								params={{ paperId }}
+								search={{ blockId: undefined }}
 								to="/papers/$paperId"
 							>
 								<div className="truncate font-medium">{n.title}</div>

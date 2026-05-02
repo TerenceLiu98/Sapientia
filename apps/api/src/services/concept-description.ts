@@ -42,6 +42,7 @@ interface ConceptForDescription {
 	displayName: string
 	sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
 	sourceLevelDescriptionInputHash: string | null
+	readerSignalSummaryInputHash: string | null
 }
 
 interface EvidenceForConcept {
@@ -86,6 +87,7 @@ export async function compilePaperConceptDescriptions(args: {
 			displayName: compiledLocalConcepts.displayName,
 			sourceLevelDescriptionStatus: compiledLocalConcepts.sourceLevelDescriptionStatus,
 			sourceLevelDescriptionInputHash: compiledLocalConcepts.sourceLevelDescriptionInputHash,
+			readerSignalSummaryInputHash: compiledLocalConcepts.readerSignalSummaryInputHash,
 		})
 		.from(compiledLocalConcepts)
 		.where(
@@ -290,6 +292,7 @@ async function refreshConceptReaderSignalSummaries(args: {
 			version: READER_SIGNAL_PROMPT_VERSION,
 		})
 		const summary = buildReaderSignalSummary(conceptHighlights, conceptNotes)
+		if (concept.readerSignalSummaryInputHash === inputHash) continue
 		await db
 			.update(compiledLocalConcepts)
 			.set({
@@ -303,7 +306,7 @@ async function refreshConceptReaderSignalSummaries(args: {
 				updatedAt: new Date(),
 			})
 			.where(eq(compiledLocalConcepts.id, concept.id))
-		if (summary) changedCount += 1
+		changedCount += 1
 	}
 
 	return changedCount

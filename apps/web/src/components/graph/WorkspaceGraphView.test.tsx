@@ -1,5 +1,4 @@
 import { act, render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceGraphView } from "./WorkspaceGraphView"
@@ -43,17 +42,23 @@ vi.mock("@tanstack/react-router", () => ({
 	Link: ({
 		children,
 		params,
+		search,
 		to,
 		...props
 	}: {
 		children: ReactNode
 		params?: { paperId?: string }
+		search?: { blockId?: string }
 		to: string
-	}) => (
-		<a href={to.replace("$paperId", params?.paperId ?? "")} {...props}>
-			{children}
-		</a>
-	),
+	}) => {
+		const href = to.replace("$paperId", params?.paperId ?? "")
+		const searchString = search?.blockId ? `?blockId=${search.blockId}` : ""
+		return (
+			<a href={`${href}${searchString}`} {...props}>
+				{children}
+			</a>
+		)
+	},
 }))
 
 vi.mock("@/api/hooks/graph", () => ({
@@ -66,148 +71,110 @@ vi.mock("@/api/hooks/graph", () => ({
 
 describe("WorkspaceGraphView", () => {
 	beforeEach(() => {
-			useWorkspaceGraphMock.mockReset()
-			reviewSemanticCandidateMock.mockReset()
+		useWorkspaceGraphMock.mockReset()
+		reviewSemanticCandidateMock.mockReset()
 		sigmaMock.mockClear()
 		handlers.node = undefined
 		handlers.edge = undefined
 		handlers.stage = undefined
 	})
 
-	it("renders the workspace graph and opens the selected concept paper", async () => {
-		const user = userEvent.setup()
+	it("renders the paper graph and opens paper connection evidence", async () => {
 		useWorkspaceGraphMock.mockReturnValue({
 			data: {
 				workspaceId: "workspace-1",
-				visibility: {
-					defaultNodeKinds: ["concept", "method", "task", "metric"],
-					supportingNodeKinds: ["dataset", "person", "organization"],
-				},
+				view: "papers",
 				graph: {
 					nodeCount: 2,
 					edgeCount: 1,
-					relationCounts: { addresses: 1 },
 					nodes: [
 						{
-							id: "cluster-1",
-							clusterId: "cluster-1",
-							conceptId: "cluster-1",
+							id: "paper-1",
+							paperId: "paper-1",
 							label: "Sparse Autoencoder Features",
-							kind: "concept",
-							canonicalName: "sparse autoencoder features",
-							status: "done",
-							memberCount: 2,
-							paperCount: 2,
-							salienceScore: 0.92,
-							confidence: 1,
-							updatedAt: "2026-05-01T12:00:00.000Z",
+							title: "Sparse Autoencoder Features",
+							authors: ["Ada"],
+							year: 2026,
+							venue: "arXiv",
+							summaryStatus: "completed",
+							conceptCount: 14,
 							degree: 1,
-							evidenceBlockIds: ["block-1"],
-							members: [
+							topConcepts: [
 								{
-									localConceptId: "concept-1a",
-									paperId: "paper-1",
-									paperTitle: "Feature Circuits",
-									displayName: "Sparse Autoencoder Features",
-									canonicalName: "sparse autoencoder features",
-									salienceScore: 0.92,
-									sourceLevelDescription:
-										"SAE features are treated as interpretable latent units in this paper.",
-									sourceLevelDescriptionStatus: "done",
-									readerSignalSummary: "Reader signal: highlighted on 1 evidence block(s): 1 important.",
-									evidenceBlockIds: ["block-1"],
-								},
-								{
-									localConceptId: "concept-1b",
-									paperId: "paper-2",
-									paperTitle: "SAE Survey",
-									displayName: "SAE Features",
-									canonicalName: "sparse autoencoder features",
-									salienceScore: 0.4,
-									sourceLevelDescription: null,
-									sourceLevelDescriptionStatus: "pending",
-									readerSignalSummary: null,
-									evidenceBlockIds: ["block-9"],
+									id: "concept-1",
+									displayName: "Sparse Autoencoders",
+									kind: "method",
 								},
 							],
 						},
 						{
-							id: "cluster-2",
-							clusterId: "cluster-2",
-							conceptId: "cluster-2",
+							id: "paper-2",
+							paperId: "paper-2",
 							label: "Mechanistic Interpretability",
-							kind: "task",
-							canonicalName: "mechanistic interpretability",
-							status: "done",
-							memberCount: 1,
-							paperCount: 1,
-							salienceScore: 0.71,
-							confidence: 1,
-							updatedAt: "2026-05-01T12:00:00.000Z",
+							title: "Mechanistic Interpretability",
+							authors: ["Grace"],
+							year: 2025,
+							venue: "ICLR",
+							summaryStatus: "completed",
+							conceptCount: 9,
 							degree: 1,
-							evidenceBlockIds: ["block-2"],
-							members: [
+							topConcepts: [
 								{
-									localConceptId: "concept-2",
-									paperId: "paper-3",
-									paperTitle: "Interpreting Transformers",
 									displayName: "Mechanistic Interpretability",
-									canonicalName: "mechanistic interpretability",
-									salienceScore: 0.71,
-									sourceLevelDescription:
-										"The paper frames mechanistic interpretability as a task for explaining model internals.",
-									sourceLevelDescriptionStatus: "done",
-									readerSignalSummary: null,
-									evidenceBlockIds: ["block-2"],
+									id: "concept-2",
+									kind: "task",
 								},
 							],
 						},
 					],
 					edges: [
 						{
-							id: "edge-1",
-							source: "cluster-1",
-							target: "cluster-2",
-							sourceConceptId: "cluster-1",
-							targetConceptId: "cluster-2",
-							relationType: "supports",
-							confidence: 0.81,
-							evidenceBlockIds: ["block-3"],
-							localEdgeCount: 1,
-						},
-						{
-							id: "edge-2",
-							source: "cluster-1",
-							target: "cluster-2",
-							sourceConceptId: "cluster-1",
-							targetConceptId: "cluster-2",
-							relationType: "contrasts",
-							confidence: 0.67,
-							evidenceBlockIds: ["block-4"],
-							localEdgeCount: 1,
-						},
-						],
-						semanticCandidateCounts: {
-							total: 3,
-							needsReview: 1,
-							userAccepted: 1,
-							userRejected: 1,
-						},
-						semanticCandidates: [
-						{
-							id: "candidate-1",
-							source: "cluster-1",
-							target: "cluster-2",
-							sourceConceptId: "cluster-1",
-							targetConceptId: "cluster-2",
-							sourceLocalConceptId: "concept-1a",
-							targetLocalConceptId: "concept-2",
-							kind: "concept",
-								matchMethod: "lexical_source_description",
-								similarityScore: 0.74,
-								llmDecision: "related",
-								decisionStatus: "needs_review",
-								rationale: "name=0.42; description=0.81; containment=0.5",
+							id: "paper-edge:paper-1:paper-2",
+							source: "paper-1",
+							target: "paper-2",
+							edgeKind: "mixed",
+							weight: 0.91,
+							evidenceCount: 2,
+							strongEvidenceCount: 1,
+							maxSimilarity: 1,
+							avgSimilarity: 0.92,
+							kinds: ["method", "task"],
+							topEvidence: [
+								{
+									kind: "method",
+									sourceConceptId: "concept-1",
+									targetConceptId: "concept-3",
+									sourceConceptName: "Sparse Autoencoders",
+									targetConceptName: "Sparse Autoencoders",
+									matchMethod: "exact_cluster",
+									similarityScore: 1,
+									llmDecision: null,
+									rationale: "Shared method: Sparse Autoencoders",
+									sourceDescription: "Uses SAE features as retrieval signals.",
+									targetDescription: "Uses SAE features to explain model behavior.",
+									sourceEvidenceBlockIds: ["block-source-sae"],
+									sourcePaperId: "paper-1",
+									targetEvidenceBlockIds: ["block-target-sae"],
+									targetPaperId: "paper-2",
+								},
+								{
+									kind: "task",
+									sourceConceptId: "concept-4",
+									targetConceptId: "concept-2",
+									sourceConceptName: "Feature Retrieval",
+									targetConceptName: "Mechanistic Interpretability",
+									matchMethod: "lexical_source_description",
+									similarityScore: 0.84,
+									llmDecision: "related",
+									rationale: "Both concepts connect feature evidence to paper interpretation.",
+									sourceDescription: "Retrieves features for downstream analysis.",
+									targetDescription: "Explains model internals.",
+									sourceEvidenceBlockIds: ["block-source-task"],
+									sourcePaperId: "paper-1",
+									targetEvidenceBlockIds: ["block-target-task"],
+									targetPaperId: "paper-2",
+								},
+							],
 						},
 					],
 				},
@@ -228,44 +195,35 @@ describe("WorkspaceGraphView", () => {
 			/>,
 		)
 
-		expect(screen.getByText("2 concepts · 1 links")).toBeInTheDocument()
-		expect(screen.getByLabelText("Workspace concept graph")).toBeInTheDocument()
+		expect(useWorkspaceGraphMock).toHaveBeenCalledWith("workspace-1", "papers")
+		expect(screen.getByText("2 papers · 1 links")).toBeInTheDocument()
+		expect(screen.getByLabelText("Workspace graph")).toBeInTheDocument()
 		expect(sigmaMock).toHaveBeenCalledOnce()
 
 		await act(async () => {
-			handlers.node?.({ node: "cluster-1" })
+			handlers.node?.({ node: "paper-1" })
 		})
 
-		expect(screen.getAllByText("Sparse Autoencoder Features").length).toBeGreaterThanOrEqual(2)
-		expect(screen.getByRole("link", { name: /Feature Circuits/ })).toHaveAttribute(
+		expect(screen.getAllByText("Sparse Autoencoder Features").length).toBeGreaterThanOrEqual(1)
+		expect(screen.getByRole("link", { name: "Open paper" })).toHaveAttribute(
 			"href",
 			"/papers/paper-1",
 		)
-		expect(screen.getByRole("link", { name: /SAE Survey/ })).toHaveAttribute(
-			"href",
-			"/papers/paper-2",
-		)
-		expect(screen.getByText(/interpretable latent units/)).toBeInTheDocument()
-			expect(screen.getByText("Similar Concepts to Review")).toBeInTheDocument()
-			expect(screen.getByText("1 to review · 1 accepted · 1 rejected")).toBeInTheDocument()
-			expect(screen.getByText("LLM: related")).toBeInTheDocument()
-		const mechanisticButtons = screen.getAllByRole("button", {
-			name: /Mechanistic Interpretability/,
-		})
-			expect(mechanisticButtons[0]).toHaveTextContent(
-				"74%",
-			)
-			await user.click(screen.getByRole("button", { name: "Accept" }))
-			expect(reviewSemanticCandidateMock).toHaveBeenCalledWith({
-				candidateId: "candidate-1",
-				decisionStatus: "user_accepted",
-			})
 
-			await user.click(mechanisticButtons[0])
-		expect(screen.getAllByText(/Interpreting Transformers/).length).toBeGreaterThanOrEqual(1)
-		expect(screen.getByRole("link", { name: /Interpreting Transformers/ })).toHaveAttribute(
+		await act(async () => {
+			handlers.edge?.({ edge: "paper-edge:paper-1:paper-2" })
+		})
+
+		expect(screen.getByText("mixed evidence · 2 evidence · 1 strong")).toBeInTheDocument()
+		expect(screen.getByText(/Shared method/)).toBeInTheDocument()
+		expect(screen.getByText(/LLM: related/)).toBeInTheDocument()
+		expect(screen.getAllByRole("link", { name: "Open source evidence" })[0]).toHaveAttribute(
 			"href",
-			"/papers/paper-3",
+			"/papers/paper-1?blockId=block-source-sae",
+		)
+		expect(screen.getAllByRole("link", { name: "Open target evidence" })[0]).toHaveAttribute(
+			"href",
+			"/papers/paper-2?blockId=block-target-sae",
 		)
 	})
 })

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const getCredentialsStatusMock = vi.fn()
 const updateCredentialsMock = vi.fn()
+const enqueueWorkspaceSemanticRefreshesForUserMock = vi.fn()
 
 type MockAuthContext = {
 	set: (key: string, value: unknown) => void
@@ -25,10 +26,27 @@ vi.mock("../services/credentials", () => ({
 	updateCredentials: (...args: unknown[]) => updateCredentialsMock(...args),
 }))
 
+vi.mock("../services/workspace-semantic-refresh", () => ({
+	enqueueWorkspaceSemanticRefreshesForUser: (...args: unknown[]) =>
+		enqueueWorkspaceSemanticRefreshesForUserMock(...args),
+	touchesEmbeddingCredentials: (updates: {
+		embeddingProvider?: unknown
+		embeddingApiKey?: unknown
+		embeddingBaseUrl?: unknown
+		embeddingModel?: unknown
+	}) =>
+		updates.embeddingProvider !== undefined ||
+		updates.embeddingApiKey !== undefined ||
+		updates.embeddingBaseUrl !== undefined ||
+		updates.embeddingModel !== undefined,
+}))
+
 describe("me routes", () => {
 	beforeEach(() => {
 		getCredentialsStatusMock.mockReset()
 		updateCredentialsMock.mockReset()
+		enqueueWorkspaceSemanticRefreshesForUserMock.mockReset()
+		enqueueWorkspaceSemanticRefreshesForUserMock.mockResolvedValue({ queuedCount: 1 })
 	})
 
 	it("accepts embedding credentials independently from chat credentials", async () => {
@@ -53,6 +71,11 @@ describe("me routes", () => {
 			embeddingApiKey: "embed-key",
 			embeddingBaseUrl: "https://embeddings.example.test/v1",
 			embeddingModel: "text-embedding-test",
+		})
+		expect(enqueueWorkspaceSemanticRefreshesForUserMock).toHaveBeenCalledWith({
+			userId: "user-1",
+			forceEmbeddings: true,
+			reason: "credentials-updated",
 		})
 	})
 })

@@ -6,12 +6,8 @@ import {
 	type PaperConceptDescriptionJobData,
 	type PaperConceptDescriptionJobResult,
 } from "../queues/paper-concept-description"
+import { enqueueWorkspaceSemanticRefresh } from "../queues/workspace-semantic-refresh"
 import { compilePaperConceptDescriptions } from "../services/concept-description"
-import {
-	compileWorkspaceConceptEmbeddings,
-	EmbeddingCredentialMissingError,
-} from "../services/concept-embeddings"
-import { compileWorkspaceConceptClusterCandidates } from "../services/workspace-concept-cluster-candidates"
 
 async function processPaperConceptDescription(
 	job: Job<PaperConceptDescriptionJobData, PaperConceptDescriptionJobResult>,
@@ -21,33 +17,19 @@ async function processPaperConceptDescription(
 
 	log.info({ reason: job.data.reason, force }, "paper_concept_description_job_started")
 	const result = await compilePaperConceptDescriptions({ paperId, userId, workspaceId, force })
-	let embeddedConceptCount = 0
-	try {
-		const embeddingResult = await compileWorkspaceConceptEmbeddings({
-			workspaceId,
-			userId,
-			force,
-		})
-		embeddedConceptCount = embeddingResult.embeddedConceptCount
-	} catch (error) {
-		if (error instanceof EmbeddingCredentialMissingError) {
-			log.info("paper_concept_description_embedding_skipped_no_credentials")
-		} else {
-			log.warn(
-				{ err: error instanceof Error ? error.message : "embedding generation failed" },
-				"paper_concept_description_embedding_failed",
-			)
-		}
-	}
-	const candidateResult = await compileWorkspaceConceptClusterCandidates({ workspaceId, userId })
+	const semanticRefreshJob = await enqueueWorkspaceSemanticRefresh({
+		workspaceId,
+		userId,
+		forceEmbeddings: force,
+		reason: "paper-concept-description",
+	})
 	log.info(
 		{
 			describedConceptCount: result.describedConceptCount,
 			skippedConceptCount: result.skippedConceptCount,
 			failedConceptCount: result.failedConceptCount,
 			readerSignalConceptCount: result.readerSignalConceptCount,
-			embeddedConceptCount,
-			candidateCount: candidateResult.candidateCount,
+			semanticRefreshJobId: semanticRefreshJob.id,
 		},
 		"paper_concept_description_job_completed",
 	)

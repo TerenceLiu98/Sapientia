@@ -1,8 +1,8 @@
 import { Link } from "@tanstack/react-router"
 import {
 	type Dispatch,
-	type SetStateAction,
 	memo,
+	type SetStateAction,
 	startTransition,
 	useCallback,
 	useEffect,
@@ -38,7 +38,7 @@ import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPa
 import { NotesPanel } from "@/components/reader/NotesPanel"
 import { PaperConceptGraphPanel } from "@/components/reader/PaperConceptGraphPanel"
 import { PaperWikiDebugPanel } from "@/components/reader/PaperWikiDebugPanel"
-import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
+import { type PdfRailLayout, PdfViewer } from "@/components/reader/PdfViewer"
 import {
 	ReaderAnnotationActionToast,
 	type ReaderAnnotationRecallState,
@@ -85,7 +85,13 @@ function loadReaderAnnotationColor() {
 		: (READER_ANNOTATION_COLORS[0]?.value ?? "#f4c84f")
 }
 
-export function PaperWorkspace({ paperId }: { paperId: string }) {
+export function PaperWorkspace({
+	paperId,
+	initialBlockId,
+}: {
+	paperId: string
+	initialBlockId?: string
+}) {
 	const { data: paper, isLoading } = usePaper(paperId)
 	const { data: workspace } = useCurrentWorkspace()
 	const { data: paperNotes = [] } = useNotes(workspace?.id ?? "", paperId)
@@ -175,7 +181,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	}, [])
 
 	const upsertOptimisticNote = useCallback((note: Note) => {
-		setOptimisticNotes((current) => [note, ...current.filter((candidate) => candidate.id !== note.id)])
+		setOptimisticNotes((current) => [
+			note,
+			...current.filter((candidate) => candidate.id !== note.id),
+		])
 	}, [])
 
 	const countsMap = useMemo(() => {
@@ -250,6 +259,18 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		},
 		[requestMainPaneFocus],
 	)
+	const initialBlockJumpKeyRef = useRef<string | null>(null)
+
+	useEffect(() => {
+		if (!initialBlockId || !blocks) return
+		const jumpKey = `${paperId}:${initialBlockId}`
+		if (initialBlockJumpKeyRef.current === jumpKey) return
+		const block = blocks.find((candidate) => candidate.blockId === initialBlockId)
+		if (!block) return
+		initialBlockJumpKeyRef.current = jumpKey
+		setAutoFollowLockUntil(Date.now() + AUTO_FOLLOW_LOCK_MS)
+		handleJumpToBlock(block)
+	}, [blocks, handleJumpToBlock, initialBlockId, paperId])
 
 	const handleClearSelectedBlock = useCallback(() => {
 		setSelectedBlockId(null)
@@ -682,14 +703,20 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	)
 
 	const handleCreateReaderAnnotation = useCallback(
-		async (input: {
-			page: number
-			kind: ReaderAnnotationTool
-			color: string
-			body: ReaderAnnotationBody
-		}, options?: { suppressRecall?: boolean }) => {
+		async (
+			input: {
+				page: number
+				kind: ReaderAnnotationTool
+				color: string
+				body: ReaderAnnotationBody
+			},
+			options?: { suppressRecall?: boolean },
+		) => {
 			if (!workspace) return null
-			const saved = await createReaderAnnotation.mutateAsync({ workspaceId: workspace.id, ...input })
+			const saved = await createReaderAnnotation.mutateAsync({
+				workspaceId: workspace.id,
+				...input,
+			})
 			if (!options?.suppressRecall) {
 				queueReaderAnnotationRecall({
 					action: "created",
@@ -725,8 +752,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 	const handleDeleteReaderAnnotation = useCallback(
 		async (annotationId: string, options?: { suppressRecall?: boolean }) => {
 			const snapshot =
-				readerAnnotations.find((candidate) => candidate.id === annotationId && candidate.deletedAt == null) ??
-				null
+				readerAnnotations.find(
+					(candidate) => candidate.id === annotationId && candidate.deletedAt == null,
+				) ?? null
 			const result = await deleteReaderAnnotation.mutateAsync(annotationId)
 			if (!options?.suppressRecall && snapshot) {
 				queueReaderAnnotationRecall({
@@ -878,7 +906,9 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 				if (ay !== by) return ay - by
 				return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 			})
-			sorted.forEach((annotation, index) => map.set(annotation.id, index + 1))
+			for (const [index, annotation] of sorted.entries()) {
+				map.set(annotation.id, index + 1)
+			}
 		}
 		return map
 	}, [readerAnnotations])
@@ -922,7 +952,8 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 
 	const previewedAnnotationId = useMemo(() => {
 		if (!expandedNote) return null
-		if (expandedNote.anchorKind !== "highlight" && expandedNote.anchorKind !== "underline") return null
+		if (expandedNote.anchorKind !== "highlight" && expandedNote.anchorKind !== "underline")
+			return null
 		return expandedNote.anchorAnnotationId ?? null
 	}, [expandedNote])
 
@@ -1042,7 +1073,10 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 		}
 	}, [editorReadyVersion, expandedNoteId, insertAnnotationCitation, pendingCiteAnnotation])
 
-	const notes = useMemo(() => notesPaneFor(paperNotes, optimisticNotes), [paperNotes, optimisticNotes])
+	const notes = useMemo(
+		() => notesPaneFor(paperNotes, optimisticNotes),
+		[paperNotes, optimisticNotes],
+	)
 
 	const main = (
 		<MainView
@@ -1346,14 +1380,13 @@ function WorkspaceContent({
 	viewMode,
 }: WorkspaceContentProps) {
 	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
-	const [isNotesSidebarCollapsed, setIsNotesSidebarCollapsed] = useState(() => loadNotesSidebarCollapsed())
+	const [isNotesSidebarCollapsed, setIsNotesSidebarCollapsed] = useState(() =>
+		loadNotesSidebarCollapsed(),
+	)
 
 	useEffect(() => {
 		if (typeof window === "undefined") return
-		window.localStorage.setItem(
-			NOTES_SIDEBAR_COLLAPSED_KEY,
-			isNotesSidebarCollapsed ? "1" : "0",
-		)
+		window.localStorage.setItem(NOTES_SIDEBAR_COLLAPSED_KEY, isNotesSidebarCollapsed ? "1" : "0")
 	}, [isNotesSidebarCollapsed])
 
 	return isLoading ? (
@@ -1387,19 +1420,21 @@ function WorkspaceContent({
 					blockAnchorsById={blockAnchorsById}
 					colorByAnnotation={colorByAnnotation}
 					annotationOrdinalById={annotationOrdinalById}
-						annotationBlockIdById={annotationBlockIdById}
-						blockTextById={blockTextById}
-						colorByBlock={colorByBlock}
-						contextPanel={
-							<BlockConceptLensPanel
-								blockId={selectedBlockId}
-								blockNumber={selectedBlockId ? (blockNumberByBlockId.get(selectedBlockId) ?? null) : null}
-								paperId={paper.id}
-								variant="marginalia"
-								workspaceId={workspaceId}
-							/>
-						}
-						dotColorsByNote={dotColorsByNote}
+					annotationBlockIdById={annotationBlockIdById}
+					blockTextById={blockTextById}
+					colorByBlock={colorByBlock}
+					contextPanel={
+						<BlockConceptLensPanel
+							blockId={selectedBlockId}
+							blockNumber={
+								selectedBlockId ? (blockNumberByBlockId.get(selectedBlockId) ?? null) : null
+							}
+							paperId={paper.id}
+							variant="marginalia"
+							workspaceId={workspaceId}
+						/>
+					}
+					dotColorsByNote={dotColorsByNote}
 					numPages={numPages}
 					pdfRailLayout={pdfRailLayout}
 					blocksRailLayout={blocksRailLayout}
@@ -1815,7 +1850,9 @@ function MainNotesSplit({
 	}
 	return (
 		<div className="relative h-full min-h-0 min-w-0" ref={splitRef}>
-			<div className={`h-full min-h-0 min-w-0 transition-[padding] duration-200 ease-out ${lgGutterPadClass}`}>
+			<div
+				className={`h-full min-h-0 min-w-0 transition-[padding] duration-200 ease-out ${lgGutterPadClass}`}
+			>
 				{main}
 			</div>
 			<div className="absolute inset-y-0 right-0 z-[5]">

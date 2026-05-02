@@ -142,6 +142,8 @@ export const workspaceConceptClusterCandidates = pgTable(
 		decisionStatus: text("decision_status", {
 			enum: [
 				"candidate",
+				"ai_confirmed",
+				"ai_rejected",
 				"auto_accepted",
 				"needs_review",
 				"rejected",
@@ -152,6 +154,7 @@ export const workspaceConceptClusterCandidates = pgTable(
 			.notNull()
 			.default("candidate"),
 		rationale: text("rationale"),
+		llmConfidence: doublePrecision("llm_confidence"),
 		modelName: text("model_name"),
 		promptVersion: text("prompt_version"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -181,7 +184,11 @@ export const workspaceConceptClusterCandidates = pgTable(
 		),
 		check(
 			"workspace_concept_cluster_candidates_decision_status_check",
-			sql`${table.decisionStatus} in ('candidate', 'auto_accepted', 'needs_review', 'rejected', 'user_accepted', 'user_rejected')`,
+			sql`${table.decisionStatus} in ('candidate', 'ai_confirmed', 'ai_rejected', 'auto_accepted', 'needs_review', 'rejected', 'user_accepted', 'user_rejected')`,
+		),
+		check(
+			"workspace_concept_cluster_candidates_llm_confidence_check",
+			sql`${table.llmConfidence} is null or (${table.llmConfidence} >= 0 and ${table.llmConfidence} <= 1)`,
 		),
 		check(
 			"workspace_concept_cluster_candidates_llm_decision_check",
@@ -265,7 +272,6 @@ export type WorkspaceConceptCluster = typeof workspaceConceptClusters.$inferSele
 export type NewWorkspaceConceptCluster = typeof workspaceConceptClusters.$inferInsert
 export type WorkspaceConceptClusterMember = typeof workspaceConceptClusterMembers.$inferSelect
 export type NewWorkspaceConceptClusterMember = typeof workspaceConceptClusterMembers.$inferInsert
-export type WorkspaceConceptClusterCandidate =
-	typeof workspaceConceptClusterCandidates.$inferSelect
+export type WorkspaceConceptClusterCandidate = typeof workspaceConceptClusterCandidates.$inferSelect
 export type NewWorkspaceConceptClusterCandidate =
 	typeof workspaceConceptClusterCandidates.$inferInsert

@@ -209,9 +209,12 @@ export interface PaperBlockConceptLensPayload {
 		matchMethod: "lexical_source_description" | "embedding" | "llm" | "user_confirmed"
 		similarityScore: number
 		llmDecision: "same" | "related" | "different" | "uncertain" | null
+		llmConfidence: number | null
 		decisionStatus:
 			| "candidate"
 			| "auto_accepted"
+			| "ai_confirmed"
+			| "ai_rejected"
 			| "needs_review"
 			| "rejected"
 			| "user_accepted"

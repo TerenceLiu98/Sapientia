@@ -32,6 +32,16 @@ Concept extraction rules:
 
 - Extract paper-local concepts/entities that are genuinely load-bearing within this window.
 - Do not emit every noun phrase.
+- Sapientia wants reading atoms, not a broad scientific keyphrase list.
+- Use this importance rubric before output:
+  - core: required to understand the paper's contribution, method, task, evaluation, or main claim as represented in this window.
+  - supporting: necessary context for evidence, baselines, datasets, metrics, assumptions, ablations, or limitations in this window.
+  - incidental: related-work-only mentions, generic tools/phrases, one-off noun phrases, section labels, or terms whose removal would not affect understanding.
+- Output only core and supporting candidates. Never output incidental candidates.
+- Window extraction may keep a single-window concept only when it is likely important to the whole paper or clearly important evidence for this window.
+- Concepts only mentioned in related work are usually incidental unless this window shows that the paper directly uses, extends, or compares against them.
+- Implementation details are included only when they affect the method, evidence, or conclusion.
+- Datasets, metrics, and tasks are included only when they participate in the paper's actual evaluation or central comparison.
 - Do not fuse across papers.
 - Do not invent facts beyond the supplied blocks.
 - Use exactly these kind values:

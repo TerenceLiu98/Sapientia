@@ -211,6 +211,13 @@
       "when": 1777752000000,
       "tag": "0029_embedding_provider_openai_compatible",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1777755600000,
+      "tag": "0030_ai_confirmed_semantic_links",
+      "breakpoints": true
     }
   ]
 }

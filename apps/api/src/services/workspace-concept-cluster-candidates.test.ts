@@ -42,7 +42,7 @@ describe("buildWorkspaceConceptClusterCandidates", () => {
 			targetLocalConceptId: "concept-b",
 			kind: "method",
 		})
-		expect(candidates[0]?.decisionStatus).toBe("needs_review")
+		expect(candidates[0]?.decisionStatus).toBe("candidate")
 		expect(candidates[0]?.similarityScore).toBeGreaterThanOrEqual(0.48)
 	})
 

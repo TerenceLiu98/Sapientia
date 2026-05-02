@@ -9,6 +9,7 @@ import { createPaperEnrichWorker } from "./workers/paper-enrich.worker"
 import { createPaperInnerGraphCompileWorker } from "./workers/paper-inner-graph-compile.worker"
 import { createPaperParseWorker } from "./workers/paper-parse.worker"
 import { createPaperSummarizeWorker } from "./workers/paper-summarize.worker"
+import { createWorkspaceSemanticRefreshWorker } from "./workers/workspace-semantic-refresh.worker"
 
 logger.info({ env: config.NODE_ENV }, "worker_starting")
 
@@ -18,6 +19,7 @@ const paperConceptRefineWorker = createPaperConceptRefineWorker()
 const paperConceptDescriptionWorker = createPaperConceptDescriptionWorker()
 const paperInnerGraphCompileWorker = createPaperInnerGraphCompileWorker()
 const paperSummarizeWorker = createPaperSummarizeWorker()
+const workspaceSemanticRefreshWorker = createWorkspaceSemanticRefreshWorker()
 
 // Tiny worker for /health/queue-roundtrip diagnostic pings.
 const healthcheckWorker = new Worker(
@@ -38,6 +40,7 @@ const shutdown = async (signal: string) => {
 	await paperConceptDescriptionWorker.close()
 	await paperInnerGraphCompileWorker.close()
 	await paperSummarizeWorker.close()
+	await workspaceSemanticRefreshWorker.close()
 	await healthcheckWorker.close()
 	await queueConnection.quit()
 	await closeDb()

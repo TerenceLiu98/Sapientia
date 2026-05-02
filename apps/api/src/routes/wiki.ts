@@ -310,7 +310,10 @@ async function loadBlockConceptLensPayload(args: {
 			clusterPaperCount: workspaceConceptClusters.paperCount,
 		})
 		.from(compiledLocalConceptEvidence)
-		.innerJoin(compiledLocalConcepts, eq(compiledLocalConcepts.id, compiledLocalConceptEvidence.conceptId))
+		.innerJoin(
+			compiledLocalConcepts,
+			eq(compiledLocalConcepts.id, compiledLocalConceptEvidence.conceptId),
+		)
 		.leftJoin(
 			workspaceConceptClusterMembers,
 			eq(workspaceConceptClusterMembers.localConceptId, compiledLocalConcepts.id),
@@ -326,7 +329,10 @@ async function loadBlockConceptLensPayload(args: {
 				eq(compiledLocalConcepts.workspaceId, workspaceId),
 				eq(compiledLocalConcepts.ownerUserId, userId),
 				isNull(compiledLocalConcepts.deletedAt),
-				or(isNull(workspaceConceptClusters.deletedAt), eq(workspaceConceptClusters.workspaceId, workspaceId)),
+				or(
+					isNull(workspaceConceptClusters.deletedAt),
+					eq(workspaceConceptClusters.workspaceId, workspaceId),
+				),
 			),
 		)
 		.orderBy(desc(compiledLocalConcepts.salienceScore), asc(compiledLocalConcepts.displayName))
@@ -349,6 +355,7 @@ async function loadBlockConceptLensPayload(args: {
 						matchMethod: workspaceConceptClusterCandidates.matchMethod,
 						similarityScore: workspaceConceptClusterCandidates.similarityScore,
 						llmDecision: workspaceConceptClusterCandidates.llmDecision,
+						llmConfidence: workspaceConceptClusterCandidates.llmConfidence,
 						decisionStatus: workspaceConceptClusterCandidates.decisionStatus,
 						rationale: workspaceConceptClusterCandidates.rationale,
 					})
@@ -358,17 +365,17 @@ async function loadBlockConceptLensPayload(args: {
 							eq(workspaceConceptClusterCandidates.workspaceId, workspaceId),
 							eq(workspaceConceptClusterCandidates.ownerUserId, userId),
 							isNull(workspaceConceptClusterCandidates.deletedAt),
-							or(
-								eq(workspaceConceptClusterCandidates.decisionStatus, "needs_review"),
-								eq(workspaceConceptClusterCandidates.decisionStatus, "user_accepted"),
-							),
+							eq(workspaceConceptClusterCandidates.decisionStatus, "ai_confirmed"),
 							or(
 								inArray(workspaceConceptClusterCandidates.sourceClusterId, clusterIds),
 								inArray(workspaceConceptClusterCandidates.targetClusterId, clusterIds),
 							),
 						),
 					)
-					.orderBy(desc(workspaceConceptClusterCandidates.similarityScore))
+					.orderBy(
+						desc(workspaceConceptClusterCandidates.llmConfidence),
+						desc(workspaceConceptClusterCandidates.similarityScore),
+					)
 	const candidateClusterIds = [
 		...new Set(
 			candidates.flatMap((candidate) =>
@@ -448,6 +455,7 @@ async function loadBlockConceptLensPayload(args: {
 					matchMethod: candidate.matchMethod,
 					similarityScore: candidate.similarityScore,
 					llmDecision: candidate.llmDecision,
+					llmConfidence: candidate.llmConfidence,
 					decisionStatus: candidate.decisionStatus,
 					rationale: candidate.rationale,
 					relatedCluster: relatedCluster

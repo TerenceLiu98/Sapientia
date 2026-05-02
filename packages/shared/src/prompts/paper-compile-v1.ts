@@ -36,6 +36,18 @@ Summary requirements:
 Concept extraction rules:
 
 - Extract only paper-local concepts/entities that are genuinely load-bearing for understanding this paper.
+- A concept is load-bearing only if removing it would make the paper's contribution, method, evaluation, main finding, caveat, or limitation harder to understand.
+- Sapientia wants reading atoms, not a broad scientific keyphrase list.
+- Internally classify candidates by importance:
+  - core: required to understand the paper's central claim, contribution, method, task, evaluation, or main result.
+  - supporting: necessary context for understanding evidence, baselines, datasets, metrics, assumptions, ablations, or limitations.
+  - incidental: related-work-only mentions, generic tools/phrases, one-off noun phrases, section labels, or terms whose removal would not affect understanding.
+- Output only core and supporting candidates. Never output incidental candidates.
+- Section-aware importance rules:
+  - Concepts in the title, abstract, introduction, method, experiments, results, or conclusion carry more weight.
+  - Concepts only mentioned in related work are usually incidental unless the paper directly uses, extends, or compares against them.
+  - Implementation details are included only when they affect the method, evidence, or conclusion.
+  - Datasets, metrics, and tasks are included only when they participate in the paper's actual evaluation or central comparison.
 - For a normal research paper, aim for roughly 12-35 concepts when enough evidence exists, but do not omit load-bearing concepts only to hit a fixed count.
 - Concepts must be derived from the parsed blocks, not from any imagined prior ontology.
 - Do not try to fuse concepts across papers.

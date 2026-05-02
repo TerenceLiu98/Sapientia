@@ -2,6 +2,10 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { getCredentialsStatus, updateCredentials } from "../services/credentials"
+import {
+	enqueueWorkspaceSemanticRefreshesForUser,
+	touchesEmbeddingCredentials,
+} from "../services/workspace-semantic-refresh"
 
 const UpdateCredentialsSchema = z.object({
 	mineruToken: z.string().nullable().optional(),
@@ -39,5 +43,12 @@ meRoutes.patch("/me/credentials", requireAuth, async (c) => {
 		return c.json({ error: "invalid body", issues: body.error.flatten().fieldErrors }, 400)
 	}
 	await updateCredentials(user.id, body.data)
+	if (touchesEmbeddingCredentials(body.data)) {
+		await enqueueWorkspaceSemanticRefreshesForUser({
+			userId: user.id,
+			forceEmbeddings: true,
+			reason: "credentials-updated",
+		})
+	}
 	return c.json({ ok: true })
 })

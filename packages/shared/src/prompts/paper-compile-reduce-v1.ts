@@ -35,6 +35,17 @@ Reduce rules:
 - Do not drop load-bearing concepts only because they appear late in the paper.
 - Prefer concepts supported by multiple windows or central evidence, but keep single-window concepts when they are important.
 - Remove local noise such as generic section labels, "experiment", "results", "paper", or incidental noun phrases.
+- Reduce is the final paper-level importance filter. A candidate that was useful within one window can still be too local for the final paper concept set.
+- Sapientia wants reading atoms, not a broad scientific keyphrase list.
+- Keep only candidates that are core or supporting at the whole-paper level:
+  - core: required to understand the paper's central claim, contribution, method, task, evaluation, or main result.
+  - supporting: necessary context for understanding evidence, baselines, datasets, metrics, assumptions, ablations, or limitations.
+- Drop incidental candidates:
+  - related-work-only mentions unless the paper directly uses, extends, or compares against them
+  - generic tools/phrases and one-off noun phrases
+  - section labels and ordinary academic terms
+  - implementation details that do not affect the method, evidence, or conclusion
+- Keep datasets, metrics, and tasks only when they participate in the paper's actual evaluation or central comparison.
 
 Taxonomy rules:
 
