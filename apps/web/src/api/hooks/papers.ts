@@ -26,7 +26,9 @@ export interface Paper {
 	parseProgressTotal: number | null
 	enrichmentStatus: PaperEnrichmentStatus
 	enrichmentSource: string | null
-	metadataEditedByUser: Partial<Record<"title" | "authors" | "year" | "doi" | "arxivId" | "venue", true>>
+	metadataEditedByUser: Partial<
+		Record<"title" | "authors" | "year" | "doi" | "arxivId" | "venue", true>
+	>
 	createdAt: string
 	updatedAt: string
 }
@@ -79,6 +81,9 @@ export interface PaperWikiConcept {
 	weightedHighlightScore: number
 	noteCitationCount: number
 	lastMarginaliaAt: string | null
+	sourceLevelDescription: string | null
+	sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
+	readerSignalSummary: string | null
 	generatedAt: string | null
 	modelName: string | null
 	promptVersion: string | null
@@ -110,6 +115,117 @@ export interface PaperWikiPayload {
 		relationCounts: Partial<Record<PaperWikiEdge["relationType"], number>>
 		edges: PaperWikiEdge[]
 	}
+}
+
+export interface PaperConceptGraphPayload {
+	workspaceId: string
+	paperId: string
+	sourcePage: Pick<
+		PaperWikiPage,
+		| "id"
+		| "displayName"
+		| "status"
+		| "error"
+		| "generatedAt"
+		| "modelName"
+		| "promptVersion"
+		| "referenceBlockIds"
+	>
+	visibility: {
+		defaultNodeKinds: PaperWikiConcept["kind"][]
+		supportingNodeKinds: Array<"dataset" | "person" | "organization">
+	}
+	graph: {
+		nodeCount: number
+		edgeCount: number
+		relationCounts: Partial<Record<PaperWikiEdge["relationType"], number>>
+		nodes: Array<{
+			id: string
+			conceptId: string
+			label: string
+			kind: PaperWikiConcept["kind"]
+			canonicalName: string
+			status: PaperWikiConcept["status"]
+			salienceScore: number
+			highlightCount: number
+			noteCitationCount: number
+			sourceLevelDescription: string | null
+			sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
+			readerSignalSummary: string | null
+			degree: number
+			evidenceBlockIds: string[]
+		}>
+		edges: Array<{
+			id: string
+			source: string
+			target: string
+			sourceConceptId: string
+			targetConceptId: string
+			relationType: PaperWikiEdge["relationType"]
+			confidence: number | null
+			evidenceBlockIds: string[]
+			evidence: PaperWikiEdge["evidence"]
+		}>
+	}
+}
+
+export interface PaperBlockConceptLensPayload {
+	workspaceId: string
+	paperId: string
+	blockId: string
+	concepts: Array<{
+		id: string
+		kind: PaperWikiConcept["kind"]
+		canonicalName: string
+		displayName: string
+		status: PaperWikiConcept["status"]
+		salienceScore: number
+		highlightCount: number
+		noteCitationCount: number
+		sourceLevelDescription: string | null
+		sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
+		readerSignalSummary: string | null
+		evidence: {
+			blockId: string
+			snippet: string | null
+			confidence: number | null
+		}
+		cluster: {
+			id: string
+			displayName: string | null
+			canonicalName: string | null
+			kind: PaperWikiConcept["kind"] | null
+			memberCount: number | null
+			paperCount: number | null
+		} | null
+	}>
+	semanticCandidates: Array<{
+		id: string
+		sourceClusterId: string
+		targetClusterId: string
+		sourceLocalConceptId: string
+		targetLocalConceptId: string
+		kind: PaperWikiConcept["kind"]
+		matchMethod: "lexical_source_description" | "embedding" | "llm" | "user_confirmed"
+		similarityScore: number
+		llmDecision: "same" | "related" | "different" | "uncertain" | null
+		decisionStatus:
+			| "candidate"
+			| "auto_accepted"
+			| "needs_review"
+			| "rejected"
+			| "user_accepted"
+			| "user_rejected"
+		rationale: string | null
+		relatedCluster: {
+			id: string
+			displayName: string
+			canonicalName: string
+			kind: PaperWikiConcept["kind"]
+			memberCount: number
+			paperCount: number
+		} | null
+	}>
 }
 
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
@@ -183,6 +299,34 @@ export function usePaperWiki(workspaceId: string | undefined, paperId: string) {
 		queryFn: () =>
 			apiFetch<PaperWikiPayload>(`/api/v1/workspaces/${workspaceId}/papers/${paperId}/wiki`),
 		enabled: Boolean(workspaceId) && Boolean(paperId),
+		retry: false,
+	})
+}
+
+export function usePaperConceptGraph(workspaceId: string | undefined, paperId: string) {
+	return useQuery<PaperConceptGraphPayload>({
+		queryKey: ["paper-concept-graph", workspaceId ?? "", paperId],
+		queryFn: () =>
+			apiFetch<PaperConceptGraphPayload>(
+				`/api/v1/workspaces/${workspaceId}/papers/${paperId}/concept-graph`,
+			),
+		enabled: Boolean(workspaceId) && Boolean(paperId),
+		retry: false,
+	})
+}
+
+export function usePaperBlockConceptLens(
+	workspaceId: string | undefined,
+	paperId: string,
+	blockId: string | null | undefined,
+) {
+	return useQuery<PaperBlockConceptLensPayload>({
+		queryKey: ["paper-block-concept-lens", workspaceId ?? "", paperId, blockId ?? ""],
+		queryFn: () =>
+			apiFetch<PaperBlockConceptLensPayload>(
+				`/api/v1/workspaces/${workspaceId}/papers/${paperId}/blocks/${blockId}/concepts`,
+			),
+		enabled: Boolean(workspaceId) && Boolean(paperId) && Boolean(blockId),
 		retry: false,
 	})
 }

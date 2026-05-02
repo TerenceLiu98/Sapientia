@@ -39,6 +39,9 @@ Relation rules:
   - "measured_by": source is a task or method; target is the metric used to evaluate it. Direction: evaluated thing -> metric.
   - "improves_on": source is the newer/proposed method; target is the older/baseline method it explicitly improves on. Direction: newer method -> older method.
   - "related_to": use only when a strong relation exists but none of the above fits cleanly.
+- Always output the canonical direction above even if the sentence in the paper is phrased in reverse.
+- Example: if the paper says "Task T is solved by Method M", output sourceCanonicalName = Method M, targetCanonicalName = Task T, relationType = "addresses".
+- Example: if the paper says "Metric F evaluates Task T", output sourceCanonicalName = Task T, targetCanonicalName = Metric F, relationType = "measured_by".
 - If a relation is weak, incidental, or unsupported, leave it out.
 - Prefer sparse, meaningful structure over dense connectivity.
 - Return zero edges when the provided concepts do not have strong block-supported relations.

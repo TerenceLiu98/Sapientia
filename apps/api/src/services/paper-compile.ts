@@ -1,4 +1,6 @@
 import {
+	type Block,
+	type Paper,
 	blocks as blocksTable,
 	compiledLocalConceptEvidence as compiledLocalConceptEvidenceTable,
 	compiledLocalConcepts as compiledLocalConceptsTable,
@@ -13,9 +15,14 @@ import { z } from "zod"
 import { db } from "../db"
 import { getLlmCredential } from "./credentials"
 import { completeObject, LlmCredentialMissingError } from "./llm-client"
+import { buildPaperCompileWindows, type PaperCompileWindow } from "./paper-compile-windows"
 
-const COMPILE_PROMPT_ID = "paper-compile-v1"
+export const PAPER_COMPILE_PROMPT_VERSION = "paper-compile-hierarchical-v1"
+const SINGLE_PASS_PROMPT_ID = "paper-compile-v1"
+const WINDOW_PROMPT_ID = "paper-compile-window-v1"
+const REDUCE_PROMPT_ID = "paper-compile-reduce-v1"
 const MAX_BLOCK_CONTENT_CHARS = 120_000
+const HIERARCHICAL_WINDOW_CONCURRENCY = 4
 const MAX_CONCEPT_EVIDENCE_BLOCK_IDS = 200
 const MAX_PAGE_REFERENCE_BLOCK_IDS = 500
 
@@ -42,6 +49,11 @@ const conceptKindAliasMap: Record<string, ConceptKind> = {
 	baselines: "method",
 	benchmark: "dataset",
 	benchmarks: "dataset",
+	corpora: "dataset",
+	corpus: "dataset",
+	data: "dataset",
+	"data source": "dataset",
+	"data sources": "dataset",
 	evaluation: "metric",
 	evaluations: "metric",
 	concepts: "concept",
@@ -49,22 +61,41 @@ const conceptKindAliasMap: Record<string, ConceptKind> = {
 	entities: "concept",
 	feature: "concept",
 	features: "concept",
+	finding: "concept",
+	findings: "concept",
 	framework: "method",
 	frameworks: "method",
+	intervention: "method",
+	interventions: "method",
 	measure: "metric",
 	measures: "metric",
+	measurement: "metric",
+	measurements: "metric",
 	model: "method",
 	models: "method",
 	methods: "method",
-	objective: "metric",
-	objectives: "metric",
+	objective: "task",
+	objectives: "task",
+	problem: "task",
+	problems: "task",
+	procedure: "method",
+	procedures: "method",
+	score: "metric",
+	scores: "metric",
+	system: "method",
+	systems: "method",
+	technique: "method",
+	techniques: "method",
+	author: "person",
 	tasks: "task",
 	metrics: "metric",
 	datasets: "dataset",
 	people: "person",
 	persons: "person",
 	authors: "person",
+	affiliation: "organization",
 	institutions: "organization",
+	institution: "organization",
 	organizations: "organization",
 	organisations: "organization",
 	affiliations: "organization",
@@ -84,7 +115,15 @@ export const paperCompileResultSchema = z.preprocess(normalizePaperCompileResult
 	concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
 }))
 
+const paperCompileWindowResultSchema = z.preprocess(normalizePaperCompileWindowResult, z.object({
+	windowSummary: z.string().min(1),
+	referenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
+	concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
+}))
+
 type ExtractedConcept = z.infer<typeof extractedConceptSchema>
+type PaperCompileResultObject = z.infer<typeof paperCompileResultSchema>
+type PaperCompileWindowResultObject = z.infer<typeof paperCompileWindowResultSchema>
 type SanitizedConcept = {
 	kind: ConceptKind
 	canonicalName: string
@@ -104,6 +143,30 @@ function normalizePaperCompileResult(value: unknown) {
 		summary:
 			firstStringField(value, ["summary", "body", "sourcePage", "source_page", "sourcePageBody"]) ??
 			value.summary,
+		referenceBlockIds:
+			firstField(value, [
+				"referenceBlockIds",
+				"reference_block_ids",
+				"referenceBlocks",
+				"reference_blocks",
+				"references",
+				"pageReferences",
+				"page_references",
+			]) ?? value.referenceBlockIds,
+		concepts:
+			firstField(value, ["concepts", "localConcepts", "local_concepts", "entities", "nodes"]) ??
+			value.concepts,
+	}
+}
+
+function normalizePaperCompileWindowResult(value: unknown) {
+	if (!isRecord(value)) return value
+
+	return {
+		...value,
+		windowSummary:
+			firstStringField(value, ["windowSummary", "window_summary", "summary", "body"]) ??
+			value.windowSummary,
 		referenceBlockIds:
 			firstField(value, [
 				"referenceBlockIds",
@@ -215,7 +278,11 @@ export interface CompilePaperResult {
 	conceptCount: number
 	summaryChars: number
 	model: string
+	compileStrategy: PaperCompileStrategy
+	windowCount: number
 }
+
+type PaperCompileStrategy = "single-pass" | "hierarchical"
 
 export async function markPaperCompilePending(args: { paperId: string; userId: string }) {
 	await upsertSourcePageStatus({
@@ -223,7 +290,7 @@ export async function markPaperCompilePending(args: { paperId: string; userId: s
 		userId: args.userId,
 		status: "pending",
 		error: null,
-		promptVersion: COMPILE_PROMPT_ID,
+		promptVersion: PAPER_COMPILE_PROMPT_VERSION,
 	})
 }
 
@@ -233,7 +300,7 @@ export async function markPaperCompileRunning(args: { paperId: string; userId: s
 		userId: args.userId,
 		status: "running",
 		error: null,
-		promptVersion: COMPILE_PROMPT_ID,
+		promptVersion: PAPER_COMPILE_PROMPT_VERSION,
 	})
 }
 
@@ -247,7 +314,7 @@ export async function markPaperCompileFailed(args: {
 		userId: args.userId,
 		status: "failed",
 		error: args.error.slice(0, 500),
-		promptVersion: COMPILE_PROMPT_ID,
+		promptVersion: PAPER_COMPILE_PROMPT_VERSION,
 	})
 }
 
@@ -281,63 +348,32 @@ export async function compilePaper(args: {
 	const blockIds = new Set(paperBlocks.map((block) => block.blockId))
 	const blockTextById = new Map(paperBlocks.map((block) => [block.blockId, block.text] as const))
 
-	let blockText = formatBlocksForAgent({
-		blocks: paperBlocks.map((b) => ({
-			blockId: b.blockId,
-			type: b.type,
-			text: b.text,
-			headingLevel: b.headingLevel,
-		})),
-		highlights: [],
-	})
-	if (blockText.length > MAX_BLOCK_CONTENT_CHARS) {
-		blockText = `${blockText.slice(0, MAX_BLOCK_CONTENT_CHARS)}\n\n[paper continues — content truncated for context window]`
-	}
-
-	const compilePrompt = fillPrompt(loadPrompt(COMPILE_PROMPT_ID), {
-		title: paper.title || "(untitled paper)",
-		authors:
-			Array.isArray(paper.authors) && paper.authors.length > 0
-				? paper.authors.join(", ")
-				: "(unknown)",
-		abstractBlock: "",
-		blocks: blockText,
-	})
-
-	const compileResult = await completeObject({
+	const compileResult = await runPaperCompile({
 		userId,
-		promptId: COMPILE_PROMPT_ID,
 		model: credential.model,
-		schema: paperCompileResultSchema,
-		messages: [{ role: "user", content: compilePrompt }],
-		maxTokens: 32_000,
-		temperature: 0.25,
+		paper,
+		paperBlocks,
 	})
 
 	const compiled = compileResult.object
 	const summaryText = compiled.summary.trim()
 	const sanitizedConcepts = sanitizeExtractedConcepts(compiled.concepts, blockIds, blockTextById)
 	const summaryReferenceBlockIds = extractBlockIdsFromSummary(summaryText)
-	const conceptEvidenceBlockIds = sanitizedConcepts.flatMap((concept) =>
-		concept.evidence.map((evidence) => evidence.blockId),
-	)
 	const pageReferenceBlockIds = uniqueValidBlockIds(
 		[
 			...compiled.referenceBlockIds,
 			...summaryReferenceBlockIds,
-			...conceptEvidenceBlockIds,
 		],
 		blockIds,
 		MAX_PAGE_REFERENCE_BLOCK_IDS,
 	)
 	if (
 		paperBlocks.length > 0 &&
-		sanitizedConcepts.length === 0 &&
-		pageReferenceBlockIds.length === 0
+		(sanitizedConcepts.length === 0 || pageReferenceBlockIds.length === 0)
 	) {
 		throw new Error(
 			[
-				`${COMPILE_PROMPT_ID} returned no usable concepts or source-page references`,
+				`${PAPER_COMPILE_PROMPT_VERSION} returned no usable concepts or source-page references`,
 				`rawConceptCount=${compiled.concepts.length}`,
 				`usableConceptCount=${sanitizedConcepts.length}`,
 				`rawReferenceBlockCount=${compiled.referenceBlockIds.length}`,
@@ -358,7 +394,7 @@ export async function compilePaper(args: {
 				summaryStatus: "done",
 				summaryGeneratedAt: generatedAt,
 				summaryModel: compileResult.model,
-				summaryPromptVersion: COMPILE_PROMPT_ID,
+				summaryPromptVersion: PAPER_COMPILE_PROMPT_VERSION,
 				summaryError: null,
 				updatedAt: new Date(),
 			})
@@ -400,7 +436,7 @@ export async function compilePaper(args: {
 									displayName: concept.displayName,
 									generatedAt,
 									modelName: compileResult.model,
-									promptVersion: COMPILE_PROMPT_ID,
+									promptVersion: PAPER_COMPILE_PROMPT_VERSION,
 									status: "done" as const,
 									error: null,
 								})),
@@ -446,7 +482,7 @@ export async function compilePaper(args: {
 					body: summaryText,
 					generatedAt,
 					modelName: compileResult.model,
-					promptVersion: COMPILE_PROMPT_ID,
+					promptVersion: PAPER_COMPILE_PROMPT_VERSION,
 					status: "done",
 					error: null,
 				})
@@ -470,7 +506,187 @@ export async function compilePaper(args: {
 		conceptCount: sanitizedConcepts.length,
 		summaryChars: summaryText.length,
 		model: compileResult.model,
+		compileStrategy: compileResult.compileStrategy,
+		windowCount: compileResult.windowCount,
 	}
+}
+
+type PaperCompileCallResult = {
+	object: PaperCompileResultObject
+	model: string
+	compileStrategy: PaperCompileStrategy
+	windowCount: number
+}
+
+async function runPaperCompile(args: {
+	userId: string
+	model: string
+	paper: Paper
+	paperBlocks: Block[]
+}): Promise<PaperCompileCallResult> {
+	const fullBlockText = formatBlocksForCompile(args.paperBlocks)
+	const pageCount = new Set(args.paperBlocks.map((block) => block.page)).size
+	const shouldUseHierarchical = pageCount > 1 || fullBlockText.length > MAX_BLOCK_CONTENT_CHARS
+
+	if (!shouldUseHierarchical) {
+		return runSinglePassCompile({ ...args, blockText: fullBlockText })
+	}
+
+	return runHierarchicalCompile(args)
+}
+
+async function runSinglePassCompile(args: {
+	userId: string
+	model: string
+	paper: Paper
+	paperBlocks: Block[]
+	blockText: string
+}): Promise<PaperCompileCallResult> {
+	const compilePrompt = fillPrompt(loadPrompt(SINGLE_PASS_PROMPT_ID), {
+		title: args.paper.title || "(untitled paper)",
+		authors: formatPaperAuthors(args.paper),
+		abstractBlock: "",
+		blocks: args.blockText,
+	})
+
+	const result = await completeObject({
+		userId: args.userId,
+		promptId: SINGLE_PASS_PROMPT_ID,
+		model: args.model,
+		schema: paperCompileResultSchema,
+		messages: [{ role: "user", content: compilePrompt }],
+		maxTokens: 32_000,
+		temperature: 0.25,
+	})
+
+	return {
+		object: result.object,
+		model: result.model,
+		compileStrategy: "single-pass",
+		windowCount: 1,
+	}
+}
+
+async function runHierarchicalCompile(args: {
+	userId: string
+	model: string
+	paper: Paper
+	paperBlocks: Block[]
+}): Promise<PaperCompileCallResult> {
+	const windows = buildPaperCompileWindows(args.paperBlocks)
+	const windowResults = await mapWithConcurrency(
+		windows,
+		HIERARCHICAL_WINDOW_CONCURRENCY,
+		(window) => runWindowCompile({ ...args, window }),
+	)
+
+	const windowArtifacts = windowResults.map(({ window, object }) => ({
+		windowId: window.windowId,
+		pageRange: window.pageRange,
+		headingPath: window.headingPath,
+		primaryBlockIds: window.primaryBlockIds,
+		contextBlockIds: window.contextBlockIds,
+		windowSummary: object.windowSummary,
+		referenceBlockIds: object.referenceBlockIds,
+		concepts: object.concepts,
+	}))
+
+	const reducePrompt = fillPrompt(loadPrompt(REDUCE_PROMPT_ID), {
+		title: args.paper.title || "(untitled paper)",
+		authors: formatPaperAuthors(args.paper),
+		windowArtifacts: JSON.stringify(windowArtifacts, null, 2),
+	})
+
+	const reduceResult = await completeObject({
+		userId: args.userId,
+		promptId: REDUCE_PROMPT_ID,
+		model: args.model,
+		schema: paperCompileResultSchema,
+		messages: [{ role: "user", content: reducePrompt }],
+		maxTokens: 32_000,
+		temperature: 0.2,
+	})
+
+	return {
+		object: reduceResult.object,
+		model: reduceResult.model,
+		compileStrategy: "hierarchical",
+		windowCount: windows.length,
+	}
+}
+
+async function runWindowCompile(args: {
+	userId: string
+	model: string
+	paper: Paper
+	window: PaperCompileWindow
+}): Promise<{ window: PaperCompileWindow; object: PaperCompileWindowResultObject; model: string }> {
+	const windowPrompt = fillPrompt(loadPrompt(WINDOW_PROMPT_ID), {
+		title: args.paper.title || "(untitled paper)",
+		authors: formatPaperAuthors(args.paper),
+		windowId: args.window.windowId,
+		pageRange: `${args.window.pageRange[0]}-${args.window.pageRange[1]}`,
+		headingPath: args.window.headingPath.length > 0 ? args.window.headingPath.join(" > ") : "(none)",
+		primaryBlockIds: JSON.stringify(args.window.primaryBlockIds),
+		contextBlockIds: JSON.stringify(args.window.contextBlockIds),
+		blocks: formatBlocksForCompile(args.window.blocks),
+	})
+
+	const result = await completeObject({
+		userId: args.userId,
+		promptId: WINDOW_PROMPT_ID,
+		model: args.model,
+		schema: paperCompileWindowResultSchema,
+		messages: [{ role: "user", content: windowPrompt }],
+		maxTokens: 12_000,
+		temperature: 0.2,
+	})
+
+	return {
+		window: args.window,
+		object: result.object,
+		model: result.model,
+	}
+}
+
+function formatPaperAuthors(paper: Paper) {
+	return Array.isArray(paper.authors) && paper.authors.length > 0
+		? paper.authors.join(", ")
+		: "(unknown)"
+}
+
+function formatBlocksForCompile(blocks: Pick<Block, "blockId" | "type" | "text" | "headingLevel">[]) {
+	return formatBlocksForAgent({
+		blocks: blocks.map((block) => ({
+			blockId: block.blockId,
+			type: block.type,
+			text: block.text,
+			headingLevel: block.headingLevel,
+		})),
+		highlights: [],
+	})
+}
+
+async function mapWithConcurrency<T, R>(
+	items: T[],
+	concurrency: number,
+	mapper: (item: T, index: number) => Promise<R>,
+) {
+	const results: R[] = new Array(items.length)
+	let nextIndex = 0
+	const workerCount = Math.min(Math.max(1, concurrency), items.length)
+
+	await Promise.all(
+		Array.from({ length: workerCount }, async () => {
+			while (nextIndex < items.length) {
+				const currentIndex = nextIndex
+				nextIndex += 1
+				results[currentIndex] = await mapper(items[currentIndex], currentIndex)
+			}
+		}),
+	)
+
+	return results
 }
 
 function sanitizeExtractedConcepts(

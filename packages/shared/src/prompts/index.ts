@@ -1,6 +1,10 @@
 import { AGENT_SUMMON_V1 } from "./agent-summon-v1"
 import { AGENT_SUMMON_V2 } from "./agent-summon-v2"
+import { CONCEPT_SOURCE_DESCRIPTION_V1 } from "./concept-source-description-v1"
 import { PAPER_COMPILE_V1 } from "./paper-compile-v1"
+import { PAPER_COMPILE_REDUCE_V1 } from "./paper-compile-reduce-v1"
+import { PAPER_COMPILE_WINDOW_V1 } from "./paper-compile-window-v1"
+import { SEMANTIC_CANDIDATE_JUDGEMENT_V1 } from "./semantic-candidate-judgement-v1"
 import { SOURCE_SUMMARY_V1 } from "./source-summary-v1"
 import { SOURCE_SUMMARY_V2 } from "./source-summary-v2"
 import { WIKI_EXTRACT_INNER_GRAPH_V1 } from "./wiki-extract-inner-graph-v1"
@@ -19,7 +23,11 @@ import { WIKI_EXTRACT_INNER_GRAPH_V1 } from "./wiki-extract-inner-graph-v1"
 const PROMPTS = {
 	"agent-summon-v1": AGENT_SUMMON_V1,
 	"agent-summon-v2": AGENT_SUMMON_V2,
+	"concept-source-description-v1": CONCEPT_SOURCE_DESCRIPTION_V1,
+	"paper-compile-reduce-v1": PAPER_COMPILE_REDUCE_V1,
 	"paper-compile-v1": PAPER_COMPILE_V1,
+	"paper-compile-window-v1": PAPER_COMPILE_WINDOW_V1,
+	"semantic-candidate-judgement-v1": SEMANTIC_CANDIDATE_JUDGEMENT_V1,
 	"source-summary-v1": SOURCE_SUMMARY_V1,
 	"source-summary-v2": SOURCE_SUMMARY_V2,
 	"wiki-extract-inner-graph-v1": WIKI_EXTRACT_INNER_GRAPH_V1,

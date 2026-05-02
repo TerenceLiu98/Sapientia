@@ -29,8 +29,12 @@ type RelationType = z.infer<typeof relationTypeSchema>
 const relationTypeAliasMap: Record<string, RelationType> = {
 	addresses: "addresses",
 	address: "addresses",
+	addressed_by: "addresses",
+	"addressed by": "addresses",
 	solves: "addresses",
 	solve: "addresses",
+	solved_by: "addresses",
+	"solved by": "addresses",
 	targets: "addresses",
 	target: "addresses",
 	tackles: "addresses",
@@ -482,6 +486,10 @@ function normalizeEdgeDirection(args: {
 	relationType: RelationType
 }) {
 	const { source, target, relationType } = args
+
+	if (relationType === "addresses" && source.kind === "task" && target.kind === "method") {
+		return { source: target, target: source, relationType }
+	}
 
 	if (relationType === "measured_by" && source.kind === "metric" && target.kind !== "metric") {
 		return { source: target, target: source, relationType }

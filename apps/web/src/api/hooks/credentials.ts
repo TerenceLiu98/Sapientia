@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../client"
 
 export type LlmProvider = "anthropic" | "openai"
+export type EmbeddingProvider = "openai-compatible" | "local"
 
 export interface CredentialsStatus {
 	hasMineruToken: boolean
@@ -9,6 +10,10 @@ export interface CredentialsStatus {
 	llmProvider: LlmProvider | null
 	llmBaseUrl: string | null
 	llmModel: string | null
+	hasEmbeddingKey: boolean
+	embeddingProvider: EmbeddingProvider | null
+	embeddingBaseUrl: string | null
+	embeddingModel: string | null
 }
 
 export interface CredentialsUpdate {
@@ -17,6 +22,10 @@ export interface CredentialsUpdate {
 	llmApiKey?: string | null
 	llmBaseUrl?: string | null
 	llmModel?: string | null
+	embeddingProvider?: EmbeddingProvider | null
+	embeddingApiKey?: string | null
+	embeddingBaseUrl?: string | null
+	embeddingModel?: string | null
 }
 
 export function useCredentialsStatus() {

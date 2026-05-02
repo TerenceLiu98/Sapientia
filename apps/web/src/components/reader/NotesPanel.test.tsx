@@ -74,6 +74,29 @@ afterEach(() => {
 })
 
 describe("NotesPanel", () => {
+	it("keeps the context panel visible when the notes sidebar is collapsed", async () => {
+		const NotesPanel = await importNotesPanel()
+		render(
+			<NotesPanel
+				activeCitingNoteIds={new Set()}
+				contextPanel={<button type="button">Concept Lens</button>}
+				currentAnchorYRatio={0.8}
+				currentPage={1}
+				expandedNoteId={null}
+				isSidebarCollapsed
+				notes={[]}
+				numPages={1}
+				onCreateAtCurrent={() => {}}
+				onExpand={() => {}}
+				onJumpToPage={() => {}}
+			/>,
+		)
+
+		const conceptLens = screen.getByRole("button", { name: "Concept Lens" })
+		expect(conceptLens).toBeInTheDocument()
+		expect(conceptLens.parentElement).toHaveClass("fixed", "right-[60px]", "z-[80]")
+	})
+
 	it("positions each dot at its anchor's normalized rail position", async () => {
 		// Rail is now a fixed-length progress bar, not a scroll container.
 		// Each dot lands at `((page - 1) + yRatio) / numPages` of the rail's

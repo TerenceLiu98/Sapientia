@@ -5,6 +5,7 @@ import { logger } from "../logger"
 import { decrypt, encrypt } from "./crypto"
 
 export type LlmProvider = "anthropic" | "openai"
+export type EmbeddingProvider = "openai-compatible" | "local"
 
 export interface CredentialsStatus {
 	hasMineruToken: boolean
@@ -12,6 +13,10 @@ export interface CredentialsStatus {
 	llmProvider: LlmProvider | null
 	llmBaseUrl: string | null
 	llmModel: string | null
+	hasEmbeddingKey: boolean
+	embeddingProvider: EmbeddingProvider | null
+	embeddingBaseUrl: string | null
+	embeddingModel: string | null
 }
 
 export async function getCredentialsStatus(userId: string): Promise<CredentialsStatus> {
@@ -28,6 +33,10 @@ export async function getCredentialsStatus(userId: string): Promise<CredentialsS
 			llmProvider: null,
 			llmBaseUrl: null,
 			llmModel: null,
+			hasEmbeddingKey: false,
+			embeddingProvider: null,
+			embeddingBaseUrl: null,
+			embeddingModel: null,
 		}
 	}
 
@@ -37,6 +46,10 @@ export async function getCredentialsStatus(userId: string): Promise<CredentialsS
 		llmProvider: row.llmProvider,
 		llmBaseUrl: row.llmBaseUrl ?? null,
 		llmModel: row.llmModel?.trim() ? row.llmModel.trim() : null,
+		hasEmbeddingKey: row.embeddingProvider === "local" || row.embeddingApiKeyCiphertext != null,
+		embeddingProvider: row.embeddingProvider,
+		embeddingBaseUrl: row.embeddingBaseUrl ?? null,
+		embeddingModel: row.embeddingModel?.trim() ? row.embeddingModel.trim() : null,
 	}
 }
 
@@ -70,12 +83,41 @@ export async function getLlmCredential(
 	}
 }
 
+export async function getEmbeddingCredential(
+	userId: string,
+): Promise<{
+	provider: EmbeddingProvider
+	apiKey: string | null
+	baseURL: string | null
+	model: string
+} | null> {
+	const [row] = await db
+		.select()
+		.from(userCredentials)
+		.where(eq(userCredentials.userId, userId))
+		.limit(1)
+
+	const model = row?.embeddingModel?.trim()
+	if (!row?.embeddingProvider || !model) return null
+	if (row.embeddingProvider === "openai-compatible" && !row.embeddingApiKeyCiphertext) return null
+	return {
+		provider: row.embeddingProvider,
+		apiKey: row.embeddingApiKeyCiphertext ? decrypt(row.embeddingApiKeyCiphertext) : null,
+		baseURL: row.embeddingBaseUrl?.trim() ? row.embeddingBaseUrl.trim() : null,
+		model,
+	}
+}
+
 export interface CredentialsUpdate {
 	mineruToken?: string | null
 	llmProvider?: LlmProvider | null
 	llmApiKey?: string | null
 	llmBaseUrl?: string | null
 	llmModel?: string | null
+	embeddingProvider?: EmbeddingProvider | null
+	embeddingApiKey?: string | null
+	embeddingBaseUrl?: string | null
+	embeddingModel?: string | null
 }
 
 export async function updateCredentials(userId: string, updates: CredentialsUpdate) {
@@ -98,6 +140,24 @@ export async function updateCredentials(userId: string, updates: CredentialsUpda
 	}
 	if (updates.llmModel !== undefined) {
 		dbValues.llmModel = updates.llmModel?.trim() ? updates.llmModel.trim() : null
+	}
+	if (updates.embeddingProvider !== undefined) {
+		dbValues.embeddingProvider = updates.embeddingProvider
+	}
+	if (updates.embeddingApiKey !== undefined) {
+		dbValues.embeddingApiKeyCiphertext = updates.embeddingApiKey
+			? encrypt(updates.embeddingApiKey)
+			: null
+	}
+	if (updates.embeddingBaseUrl !== undefined) {
+		dbValues.embeddingBaseUrl = updates.embeddingBaseUrl?.trim()
+			? updates.embeddingBaseUrl.trim()
+			: null
+	}
+	if (updates.embeddingModel !== undefined) {
+		dbValues.embeddingModel = updates.embeddingModel?.trim()
+			? updates.embeddingModel.trim()
+			: null
 	}
 
 	await db

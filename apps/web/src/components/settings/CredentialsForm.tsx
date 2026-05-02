@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react"
 import {
+	type EmbeddingProvider,
 	type LlmProvider,
 	useCredentialsStatus,
 	useUpdateCredentials,
@@ -9,6 +10,12 @@ function providerLabel(provider: LlmProvider | null | undefined) {
 	if (provider === "anthropic") return "Anthropic"
 	if (provider === "openai") return "OpenAI"
 	return "unknown interface"
+}
+
+function embeddingProviderLabel(provider: EmbeddingProvider | null | undefined) {
+	if (provider === "openai-compatible") return "OpenAI-compatible"
+	if (provider === "local") return "Local"
+	return "unknown provider"
 }
 
 export function CredentialsForm() {
@@ -22,6 +29,12 @@ export function CredentialsForm() {
 	const [llmBaseUrl, setLlmBaseUrl] = useState("")
 	const [llmModel, setLlmModel] = useState("")
 	const [showLlm, setShowLlm] = useState(false)
+	const [embeddingProvider, setEmbeddingProvider] =
+		useState<EmbeddingProvider>("openai-compatible")
+	const [embeddingApiKey, setEmbeddingApiKey] = useState("")
+	const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState("")
+	const [embeddingModel, setEmbeddingModel] = useState("")
+	const [showEmbedding, setShowEmbedding] = useState(false)
 	const [savedMessage, setSavedMessage] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 
@@ -34,6 +47,9 @@ export function CredentialsForm() {
 		const llmApiKeyValue = llmApiKey.trim()
 		const llmBaseUrlValue = llmBaseUrl.trim()
 		const llmModelValue = llmModel.trim()
+		const embeddingApiKeyValue = embeddingApiKey.trim()
+		const embeddingBaseUrlValue = embeddingBaseUrl.trim()
+		const embeddingModelValue = embeddingModel.trim()
 
 		if (mineruToken.trim()) updates.mineruToken = mineruToken.trim()
 		if (llmApiKeyValue && !llmModelValue && !data?.llmModel) {
@@ -50,6 +66,26 @@ export function CredentialsForm() {
 		if (llmModelValue) {
 			updates.llmModel = llmModelValue
 		}
+		if (embeddingApiKeyValue && !embeddingModelValue && !data?.embeddingModel) {
+			setError("Embedding model name is required when saving an embedding API key.")
+			return
+		}
+		if (embeddingProvider === "local" && embeddingBaseUrlValue && !embeddingModelValue && !data?.embeddingModel) {
+			setError("Embedding model name is required when saving a local embedding endpoint.")
+			return
+		}
+		if (embeddingApiKeyValue || embeddingBaseUrlValue || embeddingModelValue) {
+			updates.embeddingProvider = embeddingProvider
+		}
+		if (embeddingApiKeyValue) {
+			updates.embeddingApiKey = embeddingApiKeyValue
+		}
+		if (embeddingBaseUrlValue) {
+			updates.embeddingBaseUrl = embeddingBaseUrlValue
+		}
+		if (embeddingModelValue) {
+			updates.embeddingModel = embeddingModelValue
+		}
 
 		if (Object.keys(updates).length === 0) {
 			setError("Nothing to save — fill in at least one field.")
@@ -62,6 +98,9 @@ export function CredentialsForm() {
 			setLlmApiKey("")
 			setLlmBaseUrl("")
 			setLlmModel("")
+			setEmbeddingApiKey("")
+			setEmbeddingBaseUrl("")
+			setEmbeddingModel("")
 			setSavedMessage("Saved.")
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Save failed")
@@ -209,6 +248,126 @@ export function CredentialsForm() {
 						Required. Enter the exact model or deployment name your configured interface
 						endpoint expects.
 					</p>
+				</div>
+			</section>
+
+			<section className="space-y-3">
+				<header>
+					<div className="text-xs font-medium uppercase tracking-[0.16em] text-text-secondary">
+						Embeddings
+					</div>
+					<h2 className="font-serif text-xl text-text-primary">Concept similarity backend</h2>
+					<p className="mt-1 text-sm text-text-secondary">
+						Used for cross-paper concept candidate retrieval. This is configured separately
+						from the reading assistant model, because embedding endpoints and chat endpoints
+						are often different.
+					</p>
+				</header>
+				<div className="grid gap-4 sm:grid-cols-[180px_1fr]">
+					<div className="space-y-1.5">
+						<label
+							className="block text-sm font-medium text-text-primary"
+							htmlFor="embedding-provider"
+						>
+							Provider
+						</label>
+						<select
+							className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+							id="embedding-provider"
+							onChange={(e) => setEmbeddingProvider(e.target.value as EmbeddingProvider)}
+							value={embeddingProvider}
+						>
+							<option value="openai-compatible">OpenAI-compatible</option>
+							<option value="local">Local</option>
+						</select>
+					</div>
+					<div className="space-y-1.5">
+						<label
+							className="block text-sm font-medium text-text-primary"
+							htmlFor="embedding-api-key"
+						>
+							API key{" "}
+							<span className="text-xs text-text-tertiary">
+								{data?.hasEmbeddingKey
+									? `configured (${embeddingProviderLabel(data.embeddingProvider)})`
+									: embeddingProvider === "local"
+										? "optional for local"
+										: "not configured"}
+							</span>
+						</label>
+						<div className="flex gap-2">
+							<input
+								className="h-10 flex-1 rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+								id="embedding-api-key"
+								onChange={(e) => setEmbeddingApiKey(e.target.value)}
+								placeholder={
+									data?.hasEmbeddingKey ? "•••••• (leave blank to keep)" : "Paste key"
+								}
+								type={showEmbedding ? "text" : "password"}
+								value={embeddingApiKey}
+							/>
+							<button
+								className="h-10 rounded-md border border-border-default px-3 text-xs hover:bg-surface-hover"
+								onClick={() => setShowEmbedding((v) => !v)}
+								type="button"
+							>
+								{showEmbedding ? "Hide" : "Show"}
+							</button>
+						</div>
+					</div>
+				</div>
+				<div className="space-y-1.5">
+					<label
+						className="block text-sm font-medium text-text-primary"
+						htmlFor="embedding-base-url"
+					>
+						Base URL{" "}
+						<span className="text-xs text-text-tertiary">
+							{data?.embeddingBaseUrl ? `configured (${data.embeddingBaseUrl})` : "optional"}
+						</span>
+					</label>
+					<input
+						className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+						id="embedding-base-url"
+						onChange={(e) => setEmbeddingBaseUrl(e.target.value)}
+						placeholder={
+							data?.embeddingBaseUrl ??
+							(embeddingProvider === "local"
+								? "http://localhost:11434/v1"
+								: "https://api.siliconflow.cn/v1")
+						}
+						type="url"
+						value={embeddingBaseUrl}
+					/>
+					<p className="text-xs leading-5 text-text-secondary">
+						Any OpenAI-compatible embedding endpoint that accepts Bearer auth and
+						`POST /embeddings`, for example SiliconFlow, OpenAI, or a compatible proxy.
+						You can paste either the API base URL like `/v1` or the full embeddings URL
+						like `/v1/embeddings`.
+					</p>
+				</div>
+				<div className="space-y-1.5">
+					<label
+						className="block text-sm font-medium text-text-primary"
+						htmlFor="embedding-model"
+					>
+						Model name{" "}
+						<span className="text-xs text-text-tertiary">
+							{data?.embeddingModel
+								? `configured (${data.embeddingModel})`
+								: "required for embeddings"}
+						</span>
+					</label>
+					<input
+						className="h-10 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+						id="embedding-model"
+						onChange={(e) => setEmbeddingModel(e.target.value)}
+						placeholder={
+							data?.embeddingModel ?? "Qwen/Qwen3-VL-Embedding-8B / text-embedding-3-small"
+						}
+						type="text"
+						value={embeddingModel}
+					/>
 				</div>
 			</section>
 

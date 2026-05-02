@@ -41,6 +41,36 @@ export const compiledLocalConcepts = pgTable(
 			.default(0),
 		noteCitationCount: integer("note_citation_count").notNull().default(0),
 		lastMarginaliaAt: timestamp("last_marginalia_at", { withTimezone: true }),
+		sourceLevelDescription: text("source_level_description"),
+		sourceLevelDescriptionConfidence: doublePrecision("source_level_description_confidence"),
+		sourceLevelDescriptionGeneratedAt: timestamp("source_level_description_generated_at", {
+			withTimezone: true,
+		}),
+		sourceLevelDescriptionModel: text("source_level_description_model"),
+		sourceLevelDescriptionPromptVersion: text("source_level_description_prompt_version"),
+		sourceLevelDescriptionStatus: text("source_level_description_status", {
+			enum: ["pending", "running", "done", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		sourceLevelDescriptionError: text("source_level_description_error"),
+		sourceLevelDescriptionInputHash: text("source_level_description_input_hash"),
+		sourceLevelDescriptionDirtyAt: timestamp("source_level_description_dirty_at", {
+			withTimezone: true,
+		}),
+		readerSignalSummary: text("reader_signal_summary"),
+		readerSignalSummaryGeneratedAt: timestamp("reader_signal_summary_generated_at", {
+			withTimezone: true,
+		}),
+		readerSignalSummaryModel: text("reader_signal_summary_model"),
+		readerSignalSummaryPromptVersion: text("reader_signal_summary_prompt_version"),
+		readerSignalSummaryStatus: text("reader_signal_summary_status", {
+			enum: ["pending", "running", "done", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		readerSignalSummaryError: text("reader_signal_summary_error"),
+		readerSignalSummaryInputHash: text("reader_signal_summary_input_hash"),
 		generatedAt: timestamp("generated_at", { withTimezone: true }),
 		modelName: text("model_name"),
 		promptVersion: text("prompt_version"),
@@ -65,9 +95,26 @@ export const compiledLocalConcepts = pgTable(
 		),
 		index("idx_compiled_local_concepts_workspace_kind").on(table.workspaceId, table.kind),
 		index("idx_compiled_local_concepts_paper_kind").on(table.paperId, table.kind),
+		index("idx_compiled_local_concepts_description_status").on(
+			table.workspaceId,
+			table.paperId,
+			table.sourceLevelDescriptionStatus,
+		),
 		check(
 			"compiled_local_concepts_status_check",
 			sql`${table.status} in ('pending', 'running', 'done', 'failed')`,
+		),
+		check(
+			"compiled_local_concepts_source_level_description_status_check",
+			sql`${table.sourceLevelDescriptionStatus} in ('pending', 'running', 'done', 'failed')`,
+		),
+		check(
+			"compiled_local_concepts_reader_signal_summary_status_check",
+			sql`${table.readerSignalSummaryStatus} in ('pending', 'running', 'done', 'failed')`,
+		),
+		check(
+			"compiled_local_concepts_source_level_description_confidence_check",
+			sql`${table.sourceLevelDescriptionConfidence} is null or (${table.sourceLevelDescriptionConfidence} >= 0 and ${table.sourceLevelDescriptionConfidence} <= 1)`,
 		),
 	],
 )

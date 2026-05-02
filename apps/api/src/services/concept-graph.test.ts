@@ -275,9 +275,9 @@ describe("concept graph compile", () => {
 			object: args.schema.parse({
 				relations: [
 					{
-						source_name: "Dynamic BERT-Reinforcement Learning Model",
-						target_name: "Intent Recognition",
-						relation_type: "solves",
+						source_name: "Intent Recognition",
+						target_name: "Dynamic BERT-Reinforcement Learning Model",
+						relation_type: "solved by",
 						evidence: [{ block_id: "[Block #blk-1: text]" }],
 						confidence: "0.88",
 					},

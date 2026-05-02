@@ -33,24 +33,26 @@ import type { AgentSelectionContext } from "@/components/agent/types"
 import { getOrCreateAgentChatSession } from "@/components/agent/useAgentChat"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
+import { BlockConceptLensPanel } from "@/components/reader/BlockConceptLensPanel"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
+import { PaperConceptGraphPanel } from "@/components/reader/PaperConceptGraphPanel"
 import { PaperWikiDebugPanel } from "@/components/reader/PaperWikiDebugPanel"
 import { PdfViewer, type PdfRailLayout } from "@/components/reader/PdfViewer"
 import {
 	ReaderAnnotationActionToast,
 	type ReaderAnnotationRecallState,
 } from "@/components/reader/ReaderAnnotationActionToast"
-import { SelectedTextToolbar } from "@/components/reader/SelectedTextToolbar"
 import {
 	clearBrowserSelection,
 	type ReaderSelectionContext,
 } from "@/components/reader/reader-selection"
+import { SelectedTextToolbar } from "@/components/reader/SelectedTextToolbar"
 import { copyTextToClipboard } from "@/lib/clipboard"
 import { paletteVisualTokens, usePalette } from "@/lib/highlight-palette"
 import {
-	READER_ANNOTATION_COLORS,
 	annotationBodyBoundingBox,
+	READER_ANNOTATION_COLORS,
 	type ReaderAnnotationBody,
 	type ReaderAnnotationTool,
 } from "@/lib/reader-annotations"
@@ -1155,6 +1157,7 @@ export function PaperWorkspace({ paperId }: { paperId: string }) {
 						/>
 					) : null
 				}
+				selectedBlockId={selectedBlockId}
 				selectedTextToolbar={
 					readerSelection ? (
 						<SelectedTextToolbar
@@ -1302,6 +1305,7 @@ interface WorkspaceContentProps {
 	paper: Paper | undefined
 	workspaceId?: string
 	readerAnnotationActionToast?: React.ReactNode
+	selectedBlockId: string | null
 	selectedTextToolbar?: React.ReactNode
 	viewMode: ViewMode
 }
@@ -1337,6 +1341,7 @@ function WorkspaceContent({
 	paper,
 	workspaceId,
 	readerAnnotationActionToast,
+	selectedBlockId,
 	selectedTextToolbar,
 	viewMode,
 }: WorkspaceContentProps) {
@@ -1371,16 +1376,30 @@ function WorkspaceContent({
 
 			<div className="min-h-0 flex-1 p-3 sm:p-4 lg:p-6">
 				<PaperWikiDebugPanel paperId={paper.id} workspaceId={workspaceId} />
+				<PaperConceptGraphPanel
+					onOpenBlock={(blockId) => onOpenCitationBlock(paper.id, blockId)}
+					paperId={paper.id}
+					workspaceId={workspaceId}
+				/>
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockNumberByBlockId={blockNumberByBlockId}
 					blockAnchorsById={blockAnchorsById}
 					colorByAnnotation={colorByAnnotation}
 					annotationOrdinalById={annotationOrdinalById}
-					annotationBlockIdById={annotationBlockIdById}
-					blockTextById={blockTextById}
-					colorByBlock={colorByBlock}
-					dotColorsByNote={dotColorsByNote}
+						annotationBlockIdById={annotationBlockIdById}
+						blockTextById={blockTextById}
+						colorByBlock={colorByBlock}
+						contextPanel={
+							<BlockConceptLensPanel
+								blockId={selectedBlockId}
+								blockNumber={selectedBlockId ? (blockNumberByBlockId.get(selectedBlockId) ?? null) : null}
+								paperId={paper.id}
+								variant="marginalia"
+								workspaceId={workspaceId}
+							/>
+						}
+						dotColorsByNote={dotColorsByNote}
 					numPages={numPages}
 					pdfRailLayout={pdfRailLayout}
 					blocksRailLayout={blocksRailLayout}
@@ -1709,6 +1728,7 @@ interface MainNotesSplitProps {
 	annotationBlockIdById: Map<string, string>
 	blockTextById: Map<string, string>
 	colorByBlock: Map<string, string>
+	contextPanel?: React.ReactNode
 	dotColorsByNote: Map<string, string[]>
 	numPages: number
 	pdfRailLayout: PdfRailLayout | null
@@ -1744,6 +1764,7 @@ function MainNotesSplit({
 	annotationBlockIdById,
 	blockTextById,
 	colorByBlock,
+	contextPanel,
 	dotColorsByNote,
 	numPages,
 	pdfRailLayout,
@@ -1808,10 +1829,11 @@ function MainNotesSplit({
 					annotationBlockIdById={annotationBlockIdById}
 					blockTextById={blockTextById}
 					colorByBlock={colorByBlock}
+					contextPanel={contextPanel}
 					dotColorsByNote={dotColorsByNote}
-				numPages={numPages}
-				pdfRailLayout={pdfRailLayout}
-				blocksRailLayout={blocksRailLayout}
+					numPages={numPages}
+					pdfRailLayout={pdfRailLayout}
+					blocksRailLayout={blocksRailLayout}
 					currentAnchorYRatio={currentAnchorYRatio}
 					currentPage={currentPage}
 					externalFollowLockUntil={autoFollowLockUntil}

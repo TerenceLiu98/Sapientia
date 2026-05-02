@@ -21,6 +21,12 @@ export const userCredentials = pgTable("user_credentials", {
 	llmBaseUrl: text("llm_base_url"),
 	llmModel: text("llm_model"),
 
+	// Embedding provider is configured separately from chat/agent LLMs.
+	embeddingProvider: text("embedding_provider", { enum: ["openai-compatible", "local"] }),
+	embeddingApiKeyCiphertext: bytea("embedding_api_key_ciphertext"),
+	embeddingBaseUrl: text("embedding_base_url"),
+	embeddingModel: text("embedding_model"),
+
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

@@ -9,6 +9,10 @@ const UpdateCredentialsSchema = z.object({
 	llmApiKey: z.string().nullable().optional(),
 	llmBaseUrl: z.string().url().nullable().optional(),
 	llmModel: z.string().trim().min(1).nullable().optional(),
+	embeddingProvider: z.enum(["openai-compatible", "local"]).nullable().optional(),
+	embeddingApiKey: z.string().nullable().optional(),
+	embeddingBaseUrl: z.string().url().nullable().optional(),
+	embeddingModel: z.string().trim().min(1).nullable().optional(),
 })
 
 export const meRoutes = new Hono<AuthContext>()

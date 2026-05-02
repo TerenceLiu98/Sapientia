@@ -176,6 +176,41 @@
       "when": 1777652400000,
       "tag": "0024_inner_paper_concept_edges",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1777737600000,
+      "tag": "0025_workspace_concept_clusters",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1777741200000,
+      "tag": "0026_source_level_concept_descriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1777744800000,
+      "tag": "0027_workspace_concept_cluster_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1777748400000,
+      "tag": "0028_concept_embeddings_pgvector",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1777752000000,
+      "tag": "0029_embedding_provider_openai_compatible",
+      "breakpoints": true
     }
   ]
 }

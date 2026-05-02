@@ -3,6 +3,7 @@ import { papers, workspacePapers } from "@sapientia/db"
 import { eq } from "drizzle-orm"
 import { db } from "../db"
 import { logger } from "../logger"
+import { enqueuePaperConceptDescription } from "../queues/paper-concept-description"
 import { enqueuePaperConceptRefine } from "../queues/paper-concept-refine"
 import { enqueuePaperInnerGraphCompile } from "../queues/paper-inner-graph-compile"
 import { queueConnection } from "../queues/connection"
@@ -17,9 +18,10 @@ import {
 	compilePaper,
 	markPaperCompileFailed,
 	markPaperCompileRunning,
+	PAPER_COMPILE_PROMPT_VERSION,
 } from "../services/paper-compile"
 
-const CURRENT_PROMPT_VERSION = "paper-compile-v1"
+const CURRENT_PROMPT_VERSION = PAPER_COMPILE_PROMPT_VERSION
 
 async function processPaperSummarize(
 	job: Job<PaperSummarizeJobData, PaperSummarizeJobResult>,
@@ -81,6 +83,8 @@ async function processPaperSummarize(
 				summaryChars: result.summaryChars,
 				workspaceCount: result.workspaceCount,
 				conceptCount: result.conceptCount,
+				compileStrategy: result.compileStrategy,
+				windowCount: result.windowCount,
 			},
 			"paper_summarize_job_completed",
 		)
@@ -88,6 +92,12 @@ async function processPaperSummarize(
 		const workspaceIds = await getWorkspaceIdsForPaper(paperId)
 		for (const workspaceId of workspaceIds) {
 			await enqueuePaperConceptRefine({ paperId, userId, workspaceId })
+			await enqueuePaperConceptDescription({
+				paperId,
+				userId,
+				workspaceId,
+				reason: "paper-compile",
+			})
 			await enqueuePaperInnerGraphCompile({ paperId, userId, workspaceId })
 		}
 

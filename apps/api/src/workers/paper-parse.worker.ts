@@ -21,8 +21,8 @@ import {
 	submitFileBatch,
 	uploadFileToMineru,
 } from "../services/mineru-client"
-import { markPaperCompilePending } from "../services/paper-compile"
 import { extractMineruZip, parsePageSizes } from "../services/mineru-zip"
+import { markPaperCompilePending } from "../services/paper-compile"
 import { readPdfPageSizes } from "../services/pdf-dims"
 import { downloadFromS3, s3Client } from "../services/s3-client"
 
@@ -32,6 +32,9 @@ const POLL_INTERVAL_MS = process.env.MINERU_POLL_INTERVAL_MS
 const POLL_TIMEOUT_MS = process.env.MINERU_POLL_TIMEOUT_MS
 	? Number(process.env.MINERU_POLL_TIMEOUT_MS)
 	: 10 * 60 * 1000
+const NETWORK_STAGE_TIMEOUT_MS = process.env.PAPER_PARSE_NETWORK_STAGE_TIMEOUT_MS
+	? Number(process.env.PAPER_PARSE_NETWORK_STAGE_TIMEOUT_MS)
+	: 2 * 60 * 1000
 
 export class MissingCredentialError extends Error {
 	constructor() {
@@ -40,7 +43,7 @@ export class MissingCredentialError extends Error {
 	}
 }
 
-async function processPaperParse(
+async function processPaperParseJob(
 	job: Job<PaperParseJobData, PaperParseJobResult>,
 ): Promise<PaperParseJobResult> {
 	const { paperId, userId } = job.data
@@ -71,20 +74,26 @@ async function processPaperParse(
 	// reject those URLs at validation time with code -10002. The batch
 	// upload flow side-steps the public-reachability problem entirely:
 	// MinerU hands us a presigned PUT URL and we upload the bytes directly.
-	const pdfBytes = await downloadFromS3(paper.pdfObjectKey)
+	const pdfBytes = await withStageTimeout(
+		"download source PDF from S3",
+		downloadFromS3(paper.pdfObjectKey),
+	)
 
 	const fileName = `${paper.title.replace(/[/\\?%*:|"<>]/g, "_") || paperId}.pdf`
-	const { batchId, fileUrls } = await submitFileBatch({
-		token,
-		files: [{ name: fileName, dataId: paperId }],
-		modelVersion: "vlm",
-	})
+	const { batchId, fileUrls } = await withStageTimeout(
+		"submit MinerU batch",
+		submitFileBatch({
+			token,
+			files: [{ name: fileName, dataId: paperId }],
+			modelVersion: "vlm",
+		}),
+	)
 	if (fileUrls.length === 0) {
 		throw new Error("MinerU returned an empty file_urls array for batch upload")
 	}
 	log.info({ mineruBatchId: batchId, fileName }, "mineru_batch_submitted")
 
-	await uploadFileToMineru(fileUrls[0], pdfBytes)
+	await withStageTimeout("upload source PDF to MinerU", uploadFileToMineru(fileUrls[0], pdfBytes))
 	log.info({ mineruBatchId: batchId }, "mineru_file_uploaded")
 
 	// Poll the batch result endpoint, mirroring extract_progress to the DB
@@ -98,7 +107,7 @@ async function processPaperParse(
 		throw new Error("MinerU returned 'done' state without a zip URL")
 	}
 
-	const zipRes = await fetch(result.zipUrl)
+	const zipRes = await withStageTimeout("download MinerU result zip", fetch(result.zipUrl))
 	if (!zipRes.ok) {
 		throw new Error(`failed to download MinerU result zip: HTTP ${zipRes.status}`)
 	}
@@ -212,6 +221,19 @@ async function processPaperParse(
 		paperId,
 		blocksObjectKey: blocksKey,
 		parsedAt: new Date().toISOString(),
+	}
+}
+
+async function processPaperParse(
+	job: Job<PaperParseJobData, PaperParseJobResult>,
+): Promise<PaperParseJobResult> {
+	try {
+		return await processPaperParseJob(job)
+	} catch (err) {
+		if (err instanceof Error && isPermanent(err)) {
+			job.discard()
+		}
+		throw err
 	}
 }
 
@@ -331,4 +353,19 @@ export function createPaperParseWorker() {
 	})
 
 	return worker
+}
+
+function withStageTimeout<T>(stage: string, promise: Promise<T>): Promise<T> {
+	let timeout: ReturnType<typeof setTimeout> | undefined
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timeout = setTimeout(() => {
+			reject(
+				new Error(`paper parse stage "${stage}" timed out after ${NETWORK_STAGE_TIMEOUT_MS}ms`),
+			)
+		}, NETWORK_STAGE_TIMEOUT_MS)
+	})
+
+	return Promise.race([promise, timeoutPromise]).finally(() => {
+		if (timeout) clearTimeout(timeout)
+	})
 }

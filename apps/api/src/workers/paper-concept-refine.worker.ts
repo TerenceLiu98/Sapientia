@@ -1,12 +1,14 @@
 import { type Job, Worker } from "bullmq"
 import { logger } from "../logger"
 import { queueConnection } from "../queues/connection"
+import { enqueuePaperConceptDescription } from "../queues/paper-concept-description"
 import {
+	PAPER_CONCEPT_REFINE_QUEUE,
 	type PaperConceptRefineJobData,
 	type PaperConceptRefineJobResult,
-	PAPER_CONCEPT_REFINE_QUEUE,
 } from "../queues/paper-concept-refine"
 import { refinePaperConceptSalience } from "../services/concept-refine"
+import { compileWorkspaceConceptClusters } from "../services/workspace-concept-clusters"
 
 async function processPaperConceptRefine(
 	job: Job<PaperConceptRefineJobData, PaperConceptRefineJobResult>,
@@ -16,7 +18,21 @@ async function processPaperConceptRefine(
 
 	log.info("paper_concept_refine_job_started")
 	const result = await refinePaperConceptSalience({ paperId, userId, workspaceId })
-	log.info({ refinedConceptCount: result.refinedConceptCount }, "paper_concept_refine_job_completed")
+	await enqueuePaperConceptDescription({
+		paperId,
+		userId,
+		workspaceId,
+		reason: "marginalia-refresh",
+	})
+	const clusterResult = await compileWorkspaceConceptClusters({ workspaceId, userId })
+	log.info(
+		{
+			refinedConceptCount: result.refinedConceptCount,
+			clusterCount: clusterResult.clusterCount,
+			clusterMemberCount: clusterResult.memberCount,
+		},
+		"paper_concept_refine_job_completed",
+	)
 	return result
 }
 

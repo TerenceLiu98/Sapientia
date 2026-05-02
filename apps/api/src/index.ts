@@ -5,8 +5,9 @@ import { auth } from "./auth"
 import { config } from "./config"
 import { closeDb, db } from "./db"
 import { logger as appLogger } from "./logger"
-import { authProvidersRoutes } from "./routes/auth-providers"
 import { agentRoutes } from "./routes/agent"
+import { authProvidersRoutes } from "./routes/auth-providers"
+import { graphRoutes } from "./routes/graph"
 import { healthRoutes } from "./routes/health"
 import { highlightRoutes } from "./routes/highlights"
 import { meRoutes } from "./routes/me"
@@ -55,6 +56,7 @@ app.get("/health", async (c) => {
 const apiV1 = new Hono()
 apiV1.route("/", authProvidersRoutes)
 apiV1.route("/", agentRoutes)
+apiV1.route("/", graphRoutes)
 apiV1.route("/", healthRoutes)
 apiV1.route("/", meRoutes)
 apiV1.route("/", workspaceRoutes)

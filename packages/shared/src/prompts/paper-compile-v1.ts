@@ -56,11 +56,13 @@ Concept extraction rules:
   - Zero-shot classification, few-shot classification, natural language inference, detection, ranking, retrieval, prediction, and generation are usually "task" when they name what the paper is trying to solve.
   - A model, algorithm, architecture, prompting strategy, fine-tuning method, adapter method, or training recipe is usually "method".
   - A benchmark collection or corpus is "dataset"; the score computed on it is "metric"; the problem it measures is usually "task".
+  - A problem, objective, capability, or evaluation target is usually "task" unless the paper names it as a concrete algorithm/procedure.
+  - A score, measurement, rate, loss, or criterion is "metric", not "task".
   - If a term could be both a general concept and a task, choose "task" when the paper evaluates performance on that objective.
   - If a term could be both a concept and a method, choose "method" only when the paper uses it as a concrete procedure or system.
 - Positive examples:
   - A named model or algorithm introduced by the paper -> "method".
-  - The objective the paper evaluates, such as a classification or inference objective -> "task".
+  - The objective the paper evaluates, such as a classification, retrieval, ranking, or inference objective -> "task".
   - A named benchmark corpus or evaluation set -> "dataset".
   - A named score, accuracy, rate, loss, or benchmark measurement -> "metric".
   - A broad technique family or theoretical idea -> "concept" unless the paper uses a specific instance as a concrete method.

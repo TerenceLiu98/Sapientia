@@ -11,7 +11,7 @@ const navItems: NavItem[] = [
 	{ label: "Library", to: "/library" },
 	{ label: "Notes", to: "/notes" },
 	{ label: "Wiki", hint: "Soon" },
-	{ label: "Graph", hint: "Soon" },
+	{ label: "Graph", to: "/graph" },
 ]
 
 export function LeftNav() {

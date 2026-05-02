@@ -3,6 +3,7 @@ import { config } from "./config"
 import { closeDb } from "./db"
 import { logger } from "./logger"
 import { queueConnection } from "./queues/connection"
+import { createPaperConceptDescriptionWorker } from "./workers/paper-concept-description.worker"
 import { createPaperConceptRefineWorker } from "./workers/paper-concept-refine.worker"
 import { createPaperEnrichWorker } from "./workers/paper-enrich.worker"
 import { createPaperInnerGraphCompileWorker } from "./workers/paper-inner-graph-compile.worker"
@@ -14,6 +15,7 @@ logger.info({ env: config.NODE_ENV }, "worker_starting")
 const paperParseWorker = createPaperParseWorker()
 const paperEnrichWorker = createPaperEnrichWorker()
 const paperConceptRefineWorker = createPaperConceptRefineWorker()
+const paperConceptDescriptionWorker = createPaperConceptDescriptionWorker()
 const paperInnerGraphCompileWorker = createPaperInnerGraphCompileWorker()
 const paperSummarizeWorker = createPaperSummarizeWorker()
 
@@ -33,6 +35,7 @@ const shutdown = async (signal: string) => {
 	await paperParseWorker.close()
 	await paperEnrichWorker.close()
 	await paperConceptRefineWorker.close()
+	await paperConceptDescriptionWorker.close()
 	await paperInnerGraphCompileWorker.close()
 	await paperSummarizeWorker.close()
 	await healthcheckWorker.close()

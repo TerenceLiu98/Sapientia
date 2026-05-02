@@ -86,6 +86,7 @@ interface NotesPanelProps {
 	// `blocksRailLayout` wins whenever the user is currently in markdown
 	// mode (i.e. its block metrics are populated by an active scroll).
 	blocksRailLayout?: BlocksRailLayout | null
+	contextPanel?: React.ReactNode
 	// Wide / compact / mobile — measured upstream by useGutterMode in
 	// MainNotesSplit. Drives lane width, rail width, folded-slip excerpt
 	// clamp, and (in compact mode) routes "expanded" notes to the
@@ -213,6 +214,7 @@ export function NotesPanel({
 	onRequestExpandSidebar,
 	pdfRailLayout,
 	blocksRailLayout,
+	contextPanel,
 	gutterMode = "wide",
 }: NotesPanelProps) {
 	// `externalFollowLockUntil` no longer drives a local scroll lock —
@@ -655,12 +657,12 @@ export function NotesPanel({
 				>
 					<div className="relative flex h-full overflow-visible">
 						{isSidebarCollapsed ? null : (
-				<div
-					className="relative h-full overflow-visible bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-bg-primary)_62%,var(--color-bg-secondary)_38%),var(--color-bg-secondary))]"
-					style={{ width: `${slipLaneWidth}px` }}
-				>
-					<div className="absolute inset-x-0 inset-y-6 overflow-visible" ref={laneInnerRef}>
-						{laneGroups.map((group) => {
+							<div
+								className="relative h-full overflow-visible bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-bg-primary)_62%,var(--color-bg-secondary)_38%),var(--color-bg-secondary))]"
+								style={{ width: `${slipLaneWidth}px` }}
+							>
+									<div className="absolute inset-x-0 inset-y-6 overflow-visible" ref={laneInnerRef}>
+									{laneGroups.map((group) => {
 							const isExpanded = group.expanded
 							const note = isExpanded
 								? (group.notes.find((candidate) => candidate.id === expandedNoteId) ?? group.notes[0] ?? null)
@@ -852,8 +854,13 @@ export function NotesPanel({
 				</div>
 					</div>
 				</div>
-			</div>
-			{/* Compact-mode expand surface. The lane keeps a 35%-opacity
+				</div>
+				{contextPanel ? (
+					<div className="pointer-events-auto fixed bottom-4 right-[60px] z-[80] w-auto max-w-[calc(100vw-84px)]">
+						{contextPanel}
+					</div>
+				) : null}
+				{/* Compact-mode expand surface. The lane keeps a 35%-opacity
 				FoldedSlip placeholder where the note "lives" so its
 				spatial anchor stays visible; the editor itself happens
 				here, centered above the workspace with a backdrop dim.
