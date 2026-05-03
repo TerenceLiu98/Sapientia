@@ -34,6 +34,7 @@ export async function refinePaperConceptSalience(args: {
 			id: compiledLocalConcepts.id,
 			kind: compiledLocalConcepts.kind,
 			displayName: compiledLocalConcepts.displayName,
+			sourceLevelDescriptionConfidence: compiledLocalConcepts.sourceLevelDescriptionConfidence,
 		})
 		.from(compiledLocalConcepts)
 		.where(
@@ -171,6 +172,11 @@ export async function refinePaperConceptSalience(args: {
 				noteCitationCount,
 				salienceScore,
 				lastMarginaliaAt,
+				readerSignalDirtyAt: now,
+				confidenceScore: calculateConceptConfidence({
+					evidenceBlockCount: blockIds.length,
+					sourceLevelDescriptionConfidence: concept.sourceLevelDescriptionConfidence,
+				}),
 				updatedAt: now,
 			})
 			.where(eq(compiledLocalConcepts.id, concept.id))
@@ -192,6 +198,15 @@ export async function refinePaperConceptSalience(args: {
 	})
 
 	return { paperId, workspaceId, refinedConceptCount: concepts.length }
+}
+
+function calculateConceptConfidence(args: {
+	evidenceBlockCount: number
+	sourceLevelDescriptionConfidence: number | null
+}) {
+	const evidenceConfidence = Math.min(0.4, args.evidenceBlockCount * 0.08)
+	const descriptionConfidence = args.sourceLevelDescriptionConfidence ?? 0.45
+	return Math.max(0, Math.min(1, Math.round((descriptionConfidence * 0.6 + evidenceConfidence) * 100) / 100))
 }
 
 async function refreshSourcePageReferences(args: {

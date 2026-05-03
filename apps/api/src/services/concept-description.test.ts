@@ -6,6 +6,13 @@ const updateSetMock: any = vi.fn()
 const updateMock: any = vi.fn(() => ({
 	set: updateSetMock,
 }))
+const insertOnConflictDoUpdateMock: any = vi.fn()
+const insertValuesMock: any = vi.fn(() => ({
+	onConflictDoUpdate: insertOnConflictDoUpdateMock,
+}))
+const insertMock: any = vi.fn(() => ({
+	values: insertValuesMock,
+}))
 const getLlmCredentialMock = vi.fn()
 const completeObjectMock = vi.fn()
 
@@ -13,6 +20,7 @@ vi.mock("../db", () => ({
 	db: {
 		select: (...args: any[]) => selectMock(args[0]),
 		update: (...args: any[]) => updateMock(args[0]),
+		insert: (...args: any[]) => insertMock(args[0]),
 	},
 }))
 
@@ -29,6 +37,9 @@ describe("concept description", () => {
 		selectMock.mockReset()
 		updateSetMock.mockReset()
 		updateMock.mockClear()
+		insertOnConflictDoUpdateMock.mockReset()
+		insertValuesMock.mockClear()
+		insertMock.mockClear()
 		getLlmCredentialMock.mockReset()
 		completeObjectMock.mockReset()
 	})
@@ -87,6 +98,7 @@ describe("concept description", () => {
 					where: async () => [
 						{
 							blockId: "blk-1",
+							id: "highlight-1",
 							color: "important",
 							updatedAt: new Date("2026-05-02T09:00:00.000Z"),
 						},
@@ -98,6 +110,7 @@ describe("concept description", () => {
 					innerJoin: () => ({
 						where: async () => [
 							{
+								noteId: "note-1",
 								blockId: "blk-2",
 								citationCount: 2,
 								noteTitle: "Metric question",
@@ -205,6 +218,9 @@ describe("concept description", () => {
 					sourceLevelDescriptionModel: "model-1",
 					sourceLevelDescriptionPromptVersion: "concept-source-description-v1",
 					sourceLevelDescriptionStatus: "done",
+					semanticDirtyAt: expect.any(Date),
+					semanticFingerprint: expect.any(String),
+					confidenceScore: 0.82,
 				}),
 				expect.objectContaining({
 					sourceLevelDescriptionStatus: "failed",

@@ -97,8 +97,16 @@ export async function compileWorkspaceConceptEmbeddings(args: {
 		(input) =>
 			force || existingInputHashByConceptId.get(input.concept.id) !== input.inputHash,
 	)
+	const upToDateConceptIds = force
+		? []
+		: hashedInputs
+				.filter(
+					(input) => existingInputHashByConceptId.get(input.concept.id) === input.inputHash,
+				)
+				.map((input) => input.concept.id)
 
 	let embeddedConceptCount = 0
+	const embeddedConceptIds: string[] = []
 	for (const batch of chunk(eligibleInputs, EMBEDDING_BATCH_SIZE)) {
 		const embeddings = await embedTexts({
 			credential,
@@ -115,7 +123,29 @@ export async function compileWorkspaceConceptEmbeddings(args: {
 				embedding,
 			})
 			embeddedConceptCount += 1
+			embeddedConceptIds.push(input.concept.id)
 		}
+	}
+
+	const semanticCleanConceptIds = uniqueStrings([
+		...upToDateConceptIds,
+		...embeddedConceptIds,
+	])
+	if (semanticCleanConceptIds.length > 0) {
+		await db
+			.update(compiledLocalConcepts)
+			.set({
+				semanticDirtyAt: null,
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(compiledLocalConcepts.workspaceId, workspaceId),
+					eq(compiledLocalConcepts.ownerUserId, userId),
+					inArray(compiledLocalConcepts.id, semanticCleanConceptIds),
+					isNull(compiledLocalConcepts.deletedAt),
+				),
+			)
 	}
 
 	logger.info(
@@ -127,6 +157,7 @@ export async function compileWorkspaceConceptEmbeddings(args: {
 			conceptCount: limitedConcepts.length,
 			embeddedConceptCount,
 			skippedConceptCount: limitedConcepts.length - embeddedConceptCount,
+			semanticCleanedConceptCount: semanticCleanConceptIds.length,
 		},
 		"concept_embeddings_compiled",
 	)
@@ -136,6 +167,7 @@ export async function compileWorkspaceConceptEmbeddings(args: {
 		conceptCount: limitedConcepts.length,
 		embeddedConceptCount,
 		skippedConceptCount: limitedConcepts.length - embeddedConceptCount,
+		semanticCleanedConceptCount: semanticCleanConceptIds.length,
 		provider: credential.provider,
 		model: credential.model,
 	}
@@ -271,4 +303,8 @@ function chunk<T>(items: T[], size: number) {
 		chunks.push(items.slice(index, index + size))
 	}
 	return chunks
+}
+
+function uniqueStrings(values: string[]) {
+	return [...new Set(values)]
 }

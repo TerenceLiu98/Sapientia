@@ -71,6 +71,20 @@ export const compiledLocalConcepts = pgTable(
 			.default("pending"),
 		readerSignalSummaryError: text("reader_signal_summary_error"),
 		readerSignalSummaryInputHash: text("reader_signal_summary_input_hash"),
+		readerSignalDirtyAt: timestamp("reader_signal_dirty_at", {
+			withTimezone: true,
+		}),
+		readerMeaningHint: text("reader_meaning_hint"),
+		readerMeaningHintConfidence: doublePrecision("reader_meaning_hint_confidence"),
+		readerMeaningHintGeneratedAt: timestamp("reader_meaning_hint_generated_at", {
+			withTimezone: true,
+		}),
+		readerMeaningHintInputHash: text("reader_meaning_hint_input_hash"),
+		semanticFingerprint: text("semantic_fingerprint"),
+		semanticDirtyAt: timestamp("semantic_dirty_at", {
+			withTimezone: true,
+		}),
+		confidenceScore: doublePrecision("confidence_score"),
 		generatedAt: timestamp("generated_at", { withTimezone: true }),
 		modelName: text("model_name"),
 		promptVersion: text("prompt_version"),
@@ -100,6 +114,15 @@ export const compiledLocalConcepts = pgTable(
 			table.paperId,
 			table.sourceLevelDescriptionStatus,
 		),
+		index("idx_compiled_local_concepts_reader_signal_dirty").on(
+			table.workspaceId,
+			table.paperId,
+			table.readerSignalDirtyAt,
+		),
+		index("idx_compiled_local_concepts_semantic_dirty").on(
+			table.workspaceId,
+			table.semanticDirtyAt,
+		),
 		check(
 			"compiled_local_concepts_status_check",
 			sql`${table.status} in ('pending', 'running', 'done', 'failed')`,
@@ -115,6 +138,14 @@ export const compiledLocalConcepts = pgTable(
 		check(
 			"compiled_local_concepts_source_level_description_confidence_check",
 			sql`${table.sourceLevelDescriptionConfidence} is null or (${table.sourceLevelDescriptionConfidence} >= 0 and ${table.sourceLevelDescriptionConfidence} <= 1)`,
+		),
+		check(
+			"compiled_local_concepts_reader_meaning_hint_confidence_check",
+			sql`${table.readerMeaningHintConfidence} is null or (${table.readerMeaningHintConfidence} >= 0 and ${table.readerMeaningHintConfidence} <= 1)`,
+		),
+		check(
+			"compiled_local_concepts_confidence_score_check",
+			sql`${table.confidenceScore} is null or (${table.confidenceScore} >= 0 and ${table.confidenceScore} <= 1)`,
 		),
 	],
 )

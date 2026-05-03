@@ -55,7 +55,7 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 | TASK-019 | Source-summary auto-generation (per paper) | ✅ 完成 (`7f5ec60` / `79d086f`) |
 | TASK-019.1 | Color-token compliance + dark theme | ✅ 完成 (`59b4a3e`) |
 | TASK-019.2 | Spacing / motion / radius token alignment | 🚧 Phase A 已发 (`f58c448`)；B–F 待做 |
-| TASK-020 | Knowledge compilation pipeline (summary + concept extraction + wiki refinement) | 🚧 已重写并拆成子卡 ([TASK-020.md](TASK-020.md), [020A](TASK-020A.md), [020B](TASK-020B.md), [020C](TASK-020C.md), [020D](TASK-020D.md), [020F](TASK-020F.md), [020G](TASK-020G.md), [020H](TASK-020H.md), [020I](TASK-020I.md)); `020A` 已改为 `paper-compile-v1` 单次编译并进入 hardening；`020F` 已建立 workspace concept cluster substrate；`020G` AI-maintained source-level concept descriptions 基础闭环已落地；`020H` 建立 AI-maintained semantic candidate layer；`020I` 将 `/graph` 默认面改为 paper graph，concept evidence 作为 paper-paper edge 解释层；[020E](TASK-020E.md) 已退休 |
+| TASK-020 | Knowledge compilation pipeline (summary + concept extraction + wiki refinement) | 🚧 已重写并拆成子卡 ([TASK-020.md](TASK-020.md), [020A](TASK-020A.md), [020B](TASK-020B.md), [020C](TASK-020C.md), [020D](TASK-020D.md), [020F](TASK-020F.md), [020G](TASK-020G.md), [020H](TASK-020H.md), [020I](TASK-020I.md), [020J](TASK-020J.md)); `020A` 已改为 `paper-compile-v1` 单次编译并进入 hardening；`020F` 已建立 workspace concept cluster substrate；`020G` AI-maintained source-level concept descriptions 基础闭环已落地；`020H` 建立 AI-maintained semantic candidate layer；`020I` 将 `/graph` 默认面改为 paper graph，concept evidence 作为 paper-paper edge 解释层；`020J` 已 checkpoint ready：note/highlight reader signal 与 embedding/LLM judgement 解耦，`readerSignalDirtyAt` 和 `semanticDirtyAt` 分层；[020E](TASK-020E.md) 已退休 |
 | TASK-021 | Knowledge graph view (Cytoscape.js) | ⚠️ 需按 [PRD_v2.md](../PRD_v2.md) 和 [TASK-020I](TASK-020I.md) 重写：默认 Graph Page 应是 paper graph；Concept Lens + optional Concept Map 作为概念层入口 |
 | TASK-022 | Agent v0.1 (summon-only, Layer 1 + Layer 2 context) | ✅ checkpoint ready ([TASK-022.md](TASK-022.md)); note-native Ask checkpoint 已开始：在 Novel/Tiptap note selection bubble 中触发 Ask，并把回答写回 note；后续继续替代独立 agent sidebar |
 | TASK-025 | Prompt reliability, taxonomy alignment, and regression evaluation | 🆕 已起草 ([TASK-025.md](TASK-025.md)) — 覆盖所有生产 prompt 的可靠性与评测主线 |
@@ -99,6 +99,7 @@ Per ADR-020 (revised), TASK-016 is a migration convenience tool, not a cold-star
 | **OpenAI-compatible JSON mode** | 假设 structured output 可统一使用 | OpenAI-compatible 路径统一使用 `response_format: { type: "json_object" }`，schema 写入 system prompt 后再用 Zod 校验 |
 | **Inner-paper graph substrate** | 仅规划 cross-paper graph | 已新增 `compiled_local_concept_edges` / `compiled_local_concept_edge_evidence`，先做 paper-local concept relations |
 | **Prompt 可靠性主线** | 单个 prompt 出问题时局部修补 | 新增 TASK-025，把 taxonomy、JSON-mode、block evidence、回归样本统一为 prompt 系统治理 |
+| **Concept lifecycle** | note/highlight 变化可直接推动 semantic refresh | TASK-020J 已落地：reader-signal 更新只进入 paper-level refine，semantic refresh 只由 source-level semantic dirty / explicit refresh / credential change 等低频路径触发 |
 
 ### 数据库演进
 

@@ -1,16 +1,15 @@
 import { type Job, Worker } from "bullmq"
 import { logger } from "../logger"
 import { queueConnection } from "../queues/connection"
-import { enqueuePaperConceptDescription } from "../queues/paper-concept-description"
 import {
 	PAPER_CONCEPT_REFINE_QUEUE,
 	type PaperConceptRefineJobData,
 	type PaperConceptRefineJobResult,
 } from "../queues/paper-concept-refine"
+import { refreshPaperConceptReaderSignals } from "../services/concept-description"
 import { refinePaperConceptSalience } from "../services/concept-refine"
-import { compileWorkspaceConceptClusters } from "../services/workspace-concept-clusters"
 
-async function processPaperConceptRefine(
+export async function processPaperConceptRefine(
 	job: Job<PaperConceptRefineJobData, PaperConceptRefineJobResult>,
 ): Promise<PaperConceptRefineJobResult> {
 	const { paperId, userId, workspaceId } = job.data
@@ -18,22 +17,18 @@ async function processPaperConceptRefine(
 
 	log.info("paper_concept_refine_job_started")
 	const result = await refinePaperConceptSalience({ paperId, userId, workspaceId })
-	await enqueuePaperConceptDescription({
-		paperId,
-		userId,
-		workspaceId,
-		reason: "marginalia-refresh",
-	})
-	const clusterResult = await compileWorkspaceConceptClusters({ workspaceId, userId })
+	const readerSignalResult = await refreshPaperConceptReaderSignals({ paperId, userId, workspaceId })
 	log.info(
 		{
 			refinedConceptCount: result.refinedConceptCount,
-			clusterCount: clusterResult.clusterCount,
-			clusterMemberCount: clusterResult.memberCount,
+			readerSignalConceptCount: readerSignalResult.readerSignalConceptCount,
 		},
 		"paper_concept_refine_job_completed",
 	)
-	return result
+	return {
+		...result,
+		readerSignalConceptCount: readerSignalResult.readerSignalConceptCount,
+	}
 }
 
 export function createPaperConceptRefineWorker() {

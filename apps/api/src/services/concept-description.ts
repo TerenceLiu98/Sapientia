@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import {
 	blockHighlights,
 	blocks,
+	conceptObservations,
 	compiledLocalConceptEvidence,
 	compiledLocalConcepts,
 	noteBlockRefs,
@@ -10,7 +11,7 @@ import {
 	papers,
 } from "@sapientia/db"
 import { fillPrompt, loadPrompt } from "@sapientia/shared"
-import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { db } from "../db"
 import { getLlmCredential } from "./credentials"
@@ -21,6 +22,7 @@ const READER_SIGNAL_PROMPT_VERSION = "reader-signal-deterministic-v1"
 const MAX_CONCEPTS_PER_BATCH = 10
 const MAX_EVIDENCE_SNIPPETS_PER_CONCEPT = 5
 const MAX_EVIDENCE_TEXT_CHARS = 900
+const SEMANTIC_GRAPH_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric"])
 
 const conceptDescriptionOutputSchema = z.object({
 	concepts: z.array(
@@ -214,6 +216,52 @@ export async function compilePaperConceptDescriptions(args: {
 	}
 }
 
+export async function refreshPaperConceptReaderSignals(args: {
+	paperId: string
+	workspaceId: string
+	userId: string
+}): Promise<{
+	paperId: string
+	workspaceId: string
+	readerSignalConceptCount: number
+}> {
+	const { paperId, workspaceId, userId } = args
+
+	const concepts = await db
+		.select({
+			id: compiledLocalConcepts.id,
+			kind: compiledLocalConcepts.kind,
+			canonicalName: compiledLocalConcepts.canonicalName,
+			displayName: compiledLocalConcepts.displayName,
+			sourceLevelDescriptionStatus: compiledLocalConcepts.sourceLevelDescriptionStatus,
+			sourceLevelDescriptionInputHash: compiledLocalConcepts.sourceLevelDescriptionInputHash,
+			readerSignalSummaryInputHash: compiledLocalConcepts.readerSignalSummaryInputHash,
+		})
+		.from(compiledLocalConcepts)
+		.where(
+			and(
+				eq(compiledLocalConcepts.paperId, paperId),
+				eq(compiledLocalConcepts.workspaceId, workspaceId),
+				eq(compiledLocalConcepts.ownerUserId, userId),
+				isNull(compiledLocalConcepts.deletedAt),
+			),
+		)
+		.orderBy(asc(compiledLocalConcepts.kind), asc(compiledLocalConcepts.displayName))
+
+	if (concepts.length === 0) {
+		return { paperId, workspaceId, readerSignalConceptCount: 0 }
+	}
+
+	const readerSignalConceptCount = await refreshConceptReaderSignalSummaries({
+		paperId,
+		workspaceId,
+		userId,
+		concepts,
+	})
+
+	return { paperId, workspaceId, readerSignalConceptCount }
+}
+
 async function refreshConceptReaderSignalSummaries(args: {
 	paperId: string
 	workspaceId: string
@@ -236,6 +284,7 @@ async function refreshConceptReaderSignalSummaries(args: {
 
 	const highlightRows = await db
 		.select({
+			id: blockHighlights.id,
 			blockId: blockHighlights.blockId,
 			color: blockHighlights.color,
 			updatedAt: blockHighlights.updatedAt,
@@ -252,6 +301,7 @@ async function refreshConceptReaderSignalSummaries(args: {
 
 	const noteRows = await db
 		.select({
+			noteId: notes.id,
 			blockId: noteBlockRefs.blockId,
 			citationCount: noteBlockRefs.citationCount,
 			noteTitle: notes.title,
@@ -276,6 +326,14 @@ async function refreshConceptReaderSignalSummaries(args: {
 		const blockIds = new Set(evidenceByConceptId.get(concept.id) ?? [])
 		const conceptHighlights = highlightRows.filter((row) => blockIds.has(row.blockId))
 		const conceptNotes = noteRows.filter((row) => blockIds.has(row.blockId))
+		await syncConceptObservations({
+			workspaceId,
+			userId,
+			paperId,
+			conceptId: concept.id,
+			highlights: conceptHighlights,
+			notes: conceptNotes,
+		})
 		const inputHash = stableHash({
 			conceptId: concept.id,
 			highlights: conceptHighlights.map((row) => ({
@@ -303,13 +361,167 @@ async function refreshConceptReaderSignalSummaries(args: {
 				readerSignalSummaryStatus: "done",
 				readerSignalSummaryError: null,
 				readerSignalSummaryInputHash: inputHash,
+				readerSignalDirtyAt: null,
 				updatedAt: new Date(),
 			})
 			.where(eq(compiledLocalConcepts.id, concept.id))
 		changedCount += 1
 	}
 
+	await db
+		.update(compiledLocalConcepts)
+		.set({
+			readerSignalDirtyAt: null,
+			updatedAt: new Date(),
+		})
+		.where(inArray(compiledLocalConcepts.id, conceptIds))
+
 	return changedCount
+}
+
+async function syncConceptObservations(args: {
+	workspaceId: string
+	userId: string
+	paperId: string
+	conceptId: string
+	highlights: Array<{
+		id: string
+		blockId: string
+		color: string
+		updatedAt: Date
+	}>
+	notes: Array<{
+		noteId: string
+		blockId: string
+		citationCount: number
+		noteTitle: string | null
+		noteMarkdown: string | null
+		noteUpdatedAt: Date
+	}>
+}) {
+	const now = new Date()
+	const activeSourceIds = [
+		...args.highlights.map((row) => `highlight:${row.id}`),
+		...args.notes.map((row) => `note:${row.noteId}`),
+	]
+
+	if (activeSourceIds.length > 0) {
+		await db
+			.update(conceptObservations)
+			.set({ deletedAt: now, updatedAt: now })
+			.where(
+				and(
+					eq(conceptObservations.workspaceId, args.workspaceId),
+					eq(conceptObservations.ownerUserId, args.userId),
+					eq(conceptObservations.paperId, args.paperId),
+					eq(conceptObservations.localConceptId, args.conceptId),
+					notInArray(conceptObservations.sourceId, activeSourceIds),
+					isNull(conceptObservations.deletedAt),
+				),
+			)
+	} else {
+		await db
+			.update(conceptObservations)
+			.set({ deletedAt: now, updatedAt: now })
+			.where(
+				and(
+					eq(conceptObservations.workspaceId, args.workspaceId),
+					eq(conceptObservations.ownerUserId, args.userId),
+					eq(conceptObservations.paperId, args.paperId),
+					eq(conceptObservations.localConceptId, args.conceptId),
+					isNull(conceptObservations.deletedAt),
+				),
+			)
+		return
+	}
+
+	const noteRowsById = new Map<
+		string,
+		{
+			noteId: string
+			blockIds: string[]
+			citationCount: number
+			noteTitle: string | null
+			noteMarkdown: string | null
+			noteUpdatedAt: Date
+		}
+	>()
+	for (const row of args.notes) {
+		const existing = noteRowsById.get(row.noteId)
+		if (!existing) {
+			noteRowsById.set(row.noteId, {
+				noteId: row.noteId,
+				blockIds: [row.blockId],
+				citationCount: row.citationCount,
+				noteTitle: row.noteTitle,
+				noteMarkdown: row.noteMarkdown,
+				noteUpdatedAt: row.noteUpdatedAt,
+			})
+			continue
+		}
+		existing.blockIds = uniqueStrings([...existing.blockIds, row.blockId])
+		existing.citationCount += row.citationCount
+		if (row.noteUpdatedAt > existing.noteUpdatedAt) existing.noteUpdatedAt = row.noteUpdatedAt
+	}
+
+	const observationRows = [
+		...args.highlights.map((row) => ({
+			workspaceId: args.workspaceId,
+			ownerUserId: args.userId,
+			paperId: args.paperId,
+			localConceptId: args.conceptId,
+			sourceType: "highlight" as const,
+			sourceId: `highlight:${row.id}`,
+			blockIds: [row.blockId],
+			observationText: `Highlight color: ${row.color}`,
+			signalWeight: highlightObservationWeight(row.color),
+			observedAt: row.updatedAt,
+			consolidatedAt: now,
+			deletedAt: null,
+			updatedAt: now,
+		})),
+		...[...noteRowsById.values()].map((row) => ({
+			workspaceId: args.workspaceId,
+			ownerUserId: args.userId,
+			paperId: args.paperId,
+			localConceptId: args.conceptId,
+			sourceType: "note" as const,
+			sourceId: `note:${row.noteId}`,
+			blockIds: row.blockIds,
+			observationText: truncateText(
+				[row.noteTitle, row.noteMarkdown].filter(Boolean).join("\n\n"),
+				1_200,
+			),
+			signalWeight: row.citationCount,
+			observedAt: row.noteUpdatedAt,
+			consolidatedAt: now,
+			deletedAt: null,
+			updatedAt: now,
+		})),
+	]
+
+	if (observationRows.length === 0) return
+	await db
+		.insert(conceptObservations)
+		.values(observationRows)
+		.onConflictDoUpdate({
+			target: [
+				conceptObservations.workspaceId,
+				conceptObservations.ownerUserId,
+				conceptObservations.localConceptId,
+				conceptObservations.sourceType,
+				conceptObservations.sourceId,
+			],
+			set: {
+				blockIds: sql`excluded.block_ids`,
+				observationText: sql`excluded.observation_text`,
+				signalWeight: sql`excluded.signal_weight`,
+				observedAt: sql`excluded.observed_at`,
+				consolidatedAt: sql`excluded.consolidated_at`,
+				deletedAt: null,
+				updatedAt: now,
+			},
+		})
 }
 
 async function buildConceptDescriptionInputs(args: {
@@ -419,6 +631,15 @@ async function applyConceptDescriptionOutput(args: {
 				sourceLevelDescriptionError: null,
 				sourceLevelDescriptionInputHash: input.inputHash,
 				sourceLevelDescriptionDirtyAt: null,
+				semanticFingerprint: stableHash({
+					version: "semantic-fingerprint-v1",
+					kind: input.kind,
+					canonicalName: input.canonicalName,
+					sourceLevelDescription: item.description.trim(),
+					evidenceBlockIds: input.evidenceBlocks.map((block) => block.blockId),
+				}),
+				semanticDirtyAt: SEMANTIC_GRAPH_CONCEPT_KINDS.has(input.kind) ? now : null,
+				confidenceScore: clamp01(item.confidence),
 				updatedAt: now,
 			})
 			.where(eq(compiledLocalConcepts.id, input.localConceptId))
@@ -465,6 +686,19 @@ function buildReaderSignalSummary(
 	if (highlightCount > 0) parts.push(`highlighted on ${highlightCount} evidence block(s): ${colorSummary}`)
 	if (noteCitationCount > 0) parts.push(`cited ${noteCitationCount} time(s) in notes`)
 	return `Reader signal: ${parts.join("; ")}.`
+}
+
+function highlightObservationWeight(color: string) {
+	if (color === "important") return 1.2
+	if (color === "original") return 1.1
+	if (color === "questioning") return 0.9
+	if (color === "pending") return 0.7
+	if (color === "background") return 0.35
+	return 0.6
+}
+
+function uniqueStrings(values: string[]) {
+	return [...new Set(values.filter(Boolean))]
 }
 
 function formatConceptEvidenceForPrompt(batch: ConceptDescriptionInput[]) {

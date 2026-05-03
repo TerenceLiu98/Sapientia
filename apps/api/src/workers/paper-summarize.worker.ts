@@ -20,6 +20,7 @@ import {
 	markPaperCompileRunning,
 	PAPER_COMPILE_PROMPT_VERSION,
 } from "../services/paper-compile"
+import { compileWorkspaceConceptClusters } from "../services/workspace-concept-clusters"
 
 const CURRENT_PROMPT_VERSION = PAPER_COMPILE_PROMPT_VERSION
 
@@ -92,6 +93,7 @@ async function processPaperSummarize(
 		const workspaceIds = await getWorkspaceIdsForPaper(paperId)
 		for (const workspaceId of workspaceIds) {
 			await enqueuePaperConceptRefine({ paperId, userId, workspaceId })
+			await compileWorkspaceConceptClusters({ workspaceId, userId })
 			await enqueuePaperConceptDescription({
 				paperId,
 				userId,

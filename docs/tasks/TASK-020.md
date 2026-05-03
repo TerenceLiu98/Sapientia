@@ -1,0 +1,772 @@
+# TASK-020: Knowledge compilation pipeline (paper-local concepts + AI-maintained graph)
+
+**Estimated effort**: 5-7 working days, likely split into sub-cards once implementation starts  
+**Depends on**: TASK-019 (per-paper summary), TASK-022 (agent + prompt/context infrastructure), TASK-017 (highlights), TASK-013 (note → block citations), accumulated user data (ideally ≥ ~10 papers with real marginalia)  
+**Phase**: 3 — Zettelkasten Output (core knowledge-compilation substrate)
+**Status**: Implemented foundation / checkpoint ready
+
+---
+
+## Context
+
+This card revises the earlier "wiki ingestion pipeline" idea into something closer to Sapientia's actual product logic:
+
+1. **upload-time compilation**
+2. **reading-time interaction**
+3. **post-reading refinement**
+
+The key insight is that **marginalia is not the same thing as concept structure**.
+
+- Paper content tells us **what concepts/entities/claims exist**
+- Marginalia tells us **what the reader naturally touches while reading**
+- Inline AI replies in notes tell us **which concepts remain confusing, important, or worth expanding**
+
+So the pipeline should not build knowledge *only* from marginalia, and it should not ignore marginalia either. Instead:
+
+- **paper blocks** define the canonical concept skeleton
+- **source summaries / source pages** are parallel agent-facing projections, not the upstream truth for concept extraction
+- **paper-local concept atoms** carry the concept's meaning inside this specific paper
+- **highlights / notes / citations / AI reply note signals** become passive reader signals
+- **wiki pages** become an agent-facing memory projection of the compiled knowledge layer
+
+2026-05-02 product decision:
+
+> Users do not maintain the concept wiki or graph. Users read papers.
+> AI maintains the concept wiki and graph in the background.
+> User participation should be passive by default and explicit only as correction/override.
+
+This means Concept Lens is a reading aid, not a review queue. It can reveal concepts, evidence, and nearby cross-paper structure, but it should not ask the user to curate ontology as a normal workflow.
+
+2026-05-02 graph-surface decision:
+
+> `/graph` should default to a paper graph, not a concept graph.
+> Users expect the graph page to answer: "How are the papers I read connected?"
+
+Concepts remain the bridge layer. Paper-local concept atoms, source-level concept descriptions, embeddings, and LLM judgements should be used to construct paper-paper edges and explain why two papers are connected. The concept graph remains valuable as an inner substrate, debug view, and optional drill-down, but it should not be the default graph surface.
+
+This pipeline should be designed as production architecture, not an MVP shortcut. Some real papers will be too long for one LLM context, and Sapientia must not silently truncate parsed blocks in a way that loses late-paper methods, tasks, metrics, or evidence. The target compile architecture is hierarchical and evidence-preserving; a one-pass compile can exist only as an optimization for inputs that genuinely fit.
+
+The extraction layer itself should distinguish between:
+
+- **core knowledge kinds** used to drive graph structure by default
+  - `concept`
+  - `method`
+  - `task`
+  - `metric`
+- **supporting entity kinds** that are still worth extracting and grounding
+  - `dataset`
+  - `person` (authors only)
+  - `organization` (author affiliations only)
+
+Supporting entity kinds are part of the compiled substrate, but they should not automatically become first-class graph nodes in the initial concept graph UX.
+
+The key v2 refinement is that a concept is not only a term. Each extracted concept should become a **paper-local concept atom**:
+
+- it has a name and kind
+- it is grounded by evidence blocks
+- it has a source-level meaning: "what this concept means in this paper"
+- it can be refined by natural reading signals
+- it can be corrected by explicit user overrides when the compiled layer is wrong
+- it can later bridge into workspace-global concept clusters
+
+This is the Sapientia adaptation of Atomic's atom-first idea. Atomic atoms are markdown notes/articles/clips; Sapientia atoms are concept-like units extracted from papers and backed by blocks.
+
+This keeps Sapientia aligned with its core thesis in [PHILOSOPHY.md](../PHILOSOPHY.md):
+
+- the user does the reading
+- AI compiles in the background
+- knowledge becomes a persistent, compounding artifact rather than a disposable chat answer
+
+---
+
+## Implementation Checkpoint — 2026-05-03
+
+TASK-020 is now implemented as a working foundation across the upload, concept, semantic-link, Concept Lens, and paper-graph paths.
+
+Current engineering shape:
+
+- paper parse produces block-grounded text
+- paper compile runs as hierarchical windows + reduce, so long papers do not depend on a single giant prompt
+- compile output includes paper summary plus local concept atoms
+- local concepts support core kinds:
+  - `concept`
+  - `method`
+  - `task`
+  - `metric`
+- local concepts also support grounded supporting entities:
+  - `dataset`
+  - `person` (author-level only)
+  - `organization` (affiliation-level only)
+- concept evidence remains block-grounded
+- source-level concept descriptions are generated by background worker
+- reader-signal summaries are separate from source-level descriptions
+- concept embeddings are stored in Postgres/pgvector-compatible schema
+- workspace semantic refresh performs embedding recall, inserts only new candidate pairs, and preserves existing AI/user decisions
+- LLM judgement promotes candidate pairs to `ai_confirmed` only when:
+  - decision is `same` or `related`
+  - confidence is at least `0.80`
+- rejected/uncertain/low-confidence pairs become `ai_rejected`
+- note/highlight reader signals are decoupled from workspace semantic refresh
+- `readerSignalDirtyAt` tracks reading-time salience updates
+- `semanticDirtyAt` tracks source-level semantic updates for graph-eligible concepts only
+- `/graph` defaults to a paper relationship map
+- concept graph remains a substrate/debug view
+- Concept Lens is a reading aid, not a review queue
+
+Current reader-facing surfaces:
+
+- **Reader / Concept Lens**
+  - shows concepts grounded in the selected block
+  - shows source-level descriptions
+  - can surface AI-confirmed related concept hints
+  - does not ask the user to approve ontology
+- **Graph**
+  - shows papers as nodes
+  - shows only confirmed paper-paper links
+  - explains each edge through concept-pair evidence, descriptions, LLM confidence, and block snippets
+  - does not show paper titles directly on the canvas; metadata lives in the inspector
+
+Current non-blocking follow-ups:
+
+- continue prompt quality work in TASK-025 so extracted concepts are important reading atoms rather than incidental keywords
+- tune graph density and edge scoring on larger real workspaces
+- decide later whether paper-paper edges need a persisted derived table for large workspaces
+- add explicit correction/override UX only if real user testing shows the AI-maintained layer needs reader-side repair affordances
+- decide later whether scheduled meaning augmentation should propose source-level description revisions from repeated reader observations
+
+---
+
+## Product logic
+
+### Stage 1 — Silent compile after upload
+
+After a paper finishes parsing and summary generation, the system should silently build an initial knowledge layer from the paper itself:
+
+- source summary
+- concept extraction
+- entity extraction
+- initial source wiki page
+- initial concept/entity wiki pages
+
+At this stage, the system is answering:
+
+> "What is in this paper?"
+
+Not yet:
+
+> "What does the user care about in this paper?"
+
+Concepts created here should be treated as **AI-maintained concept atoms**, not user-confirmed ontology. The system should not interrupt reading with repeated confirmation prompts. Instead, concept confidence/salience evolves from passive reading signals, and explicit user edits are reserved for correction.
+
+### Stage 2 — User reads, annotates, and asks
+
+The user then:
+
+- highlights passages
+- writes notes
+- cites blocks
+- asks questions inside notes and receives inline AI replies
+
+These actions do **not** redefine the paper's canonical concepts and should not become ontology-maintenance tasks. Instead, they add **reader signals**:
+
+- importance
+- confusion / uncertainty
+- repeated follow-up
+- interpretive interest
+- cross-paper relevance
+- source-level meaning refinements
+
+At this stage, the system is learning without asking the user to stop reading:
+
+> "Which parts of this conceptual structure are actually live for this reader?"
+
+When comments or inline AI replies clarify a concept, the system may update that concept atom's source-level meaning through a compact derived summary. This writeback is an AI background operation with provenance, not a user-facing maintenance step.
+
+### Stage 3 — Refinement / reweighting
+
+The system then revises concept importance and wiki emphasis based on the user's real activity:
+
+- concepts with repeated highlights move up
+- concepts cited in notes gain stronger evidence weighting
+- concepts repeatedly discussed in AI reply note threads gain higher salience
+- concepts with no reinforcement stay structurally present but less foregrounded
+
+This means Sapientia's source wiki is not a user reading destination. It becomes:
+
+- **content-grounded**
+- **reader-signal-aware**
+- **paper-traceable**
+- **AI-maintained**
+
+---
+
+## Design shift from the original draft
+
+The previous TASK-020 draft was effectively **wiki-first**:
+
+- build wiki pages
+- then use them as the main Phase 3 artifact
+- later derive graph structure from those pages
+
+This revised version is **knowledge-first**:
+
+1. extract concepts/entities from paper content
+2. link those artifacts back to evidence blocks
+3. enrich the compiled layer with marginalia + AI reply note salience
+4. project the compiled layer into:
+   - wiki pages
+   - concept graph
+   - concept-first retrieval
+
+So:
+
+- **graph/wiki are views**
+- **concept/evidence structure is the substrate**
+
+---
+
+## Scope for v0.1
+
+### In scope
+
+- per-paper concept/entity extraction after summary generation
+- source / concept / entity wiki-page projection
+- concept-to-evidence links back to `(paperId, blockId)`
+- salience enrichment from:
+  - highlights
+  - notes
+  - note→block citations
+- a minimal AI-reply-note-derived salience path, if we can persist lightweight concept signals without introducing full conversation memory
+- source-level concept descriptions
+- workspace-local concept embeddings
+- AI-maintained semantic relation candidates
+- LLM judgement for high-similarity semantic pairs
+- paper graph derived from confirmed concept evidence
+
+### Explicitly NOT in scope
+
+- external web search / external corpora
+- editable wiki pages
+- full agent-writeback of arbitrary page bodies from open-ended conversation
+- real-time graph mutation after every single interaction
+- full persistent chat-thread memory
+- user-facing ontology review queues
+- automatic cross-workspace/global ontology fusion
+
+AI reply notes in v0.1 should influence **salience and refinement**, not become a free-form writeback channel.
+
+---
+
+## Acceptance Criteria
+
+1. **Schema** exists for:
+   - compiled wiki pages
+   - page references back to source blocks
+   - concept-/entity-level compilation records or equivalent substrate needed to avoid wiki-only storage
+2. **Upload-time worker path** runs after `paper-summarize` and silently produces:
+   - source summary projection
+   - extracted concept/entity candidates
+   - initial wiki page artifacts
+3. **Refinement path** can re-run when marginalia changes and update:
+   - concept salience
+   - page emphasis / ranking
+   - references
+   - reader-signal summaries
+4. **Concepts are content-derived first**:
+   marginalia can enrich them, but not define the entire concept universe by itself.
+5. **Page references remain block-grounded**:
+   every synthesized page can point back to the `(paperId, blockId)` evidence it used.
+6. `020A` artifacts are available to the agent and the knowledge-compilation pipeline.
+   - do not require a user-facing wiki reading page
+   - do not require global `/wiki` browsing in v0.1
+7. **Concept-first retrieval direction is preserved in the data model**:
+   future retrieval should be able to flow `query → concept → evidence blocks`, even if the full retrieval UI lands in a follow-up card.
+8. **Workspace semantic relation layer exists**:
+   concept embeddings recall likely related pairs, LLM judgement promotes only reliable `same` / `related` links, and existing decisions are preserved across incremental refresh.
+9. **Paper graph defaults correctly**:
+   `/graph` renders a paper relationship map backed by concept evidence, not a user-facing wiki or ontology maintenance page.
+10. **Graph and Concept Lens remain reading-first**:
+   they explain context and evidence but do not ask the user to keep/reject concepts as a normal workflow.
+11. **Privacy + cost discipline** remains identical to TASK-019 / TASK-022:
+   all LLM calls go through `services/llm-client.ts`; no prompt/response body logging; AI SDK telemetry stays disabled.
+12. **Tests** cover:
+   - worker idempotency
+   - extraction fixture shape
+   - refinement trigger on marginalia change
+   - reference integrity
+   - semantic candidate generation
+   - LLM judgement promotion/rejection
+   - paper graph payload and inspector behavior
+13. **Performance** remains operationally sane:
+   a typical paper should compile and refine in background-worker time budgets that feel "silent" rather than user-blocking.
+
+---
+
+## Execution split
+
+This card should be treated as an **umbrella card**. The logic belongs together, but implementation should almost certainly ship in smaller slices.
+
+Recommended split:
+
+1. **TASK-020A — Upload-time concept/entity extraction + initial wiki projection**
+2. **TASK-020B — Marginalia alignment + salience refinement**
+3. **TASK-020C — Dialogue-informed refinement**
+4. **TASK-020D — Inner-paper graph + concept-first retrieval substrate**
+5. **TASK-020E — Retired: do not ship a user-facing wiki page for 020A**
+6. **TASK-020F — Workspace concept cluster substrate**
+7. **TASK-020G — AI-maintained source-level concept descriptions**
+8. **TASK-020H — AI-maintained semantic cluster candidates / relation layer**
+9. **TASK-020I — Paper graph from concept evidence**
+
+Recommended shipping rule:
+
+- ship `020A` first
+- only start `020B` once `020A` is stable on real papers
+- before `020G`, tighten `paper-compile-*` prompts through `TASK-025` so local concepts are load-bearing reading atoms rather than incidental keyphrases
+- treat `020C` as weak-signal refinement, not a blocker for initial wiki usefulness
+- do `020D` only after enough real corpus density exists
+
+Drafted companion cards:
+
+- [TASK-020A.md](TASK-020A.md)
+- [TASK-020B.md](TASK-020B.md)
+- [TASK-020C.md](TASK-020C.md)
+- [TASK-020D.md](TASK-020D.md)
+- [TASK-020E.md](TASK-020E.md)
+- [TASK-020F.md](TASK-020F.md)
+- [TASK-020G.md](TASK-020G.md)
+- [TASK-020H.md](TASK-020H.md)
+- [TASK-020I.md](TASK-020I.md)
+
+---
+
+## Suggested data model direction
+
+This card does **not** require a perfect ontology in v0.1, but it should stop short of making wiki pages the only durable truth.
+
+Minimum viable compiled substrate:
+
+- `wiki_pages`
+- `wiki_page_references`
+- one additional concept/entity compilation layer, for example:
+  - `compiled_concepts`
+  - `compiled_concept_evidence`
+  - optional `compiled_concept_links`
+
+That layer should capture:
+
+- canonical name
+- display name
+- type (`source` / `entity` / `concept`)
+- source paper provenance
+- salience / priority score
+- evidence links to blocks
+
+Wiki/source pages can then remain the agent-facing projection of that substrate.
+
+---
+
+## Sub-card breakdown
+
+### TASK-020A — Upload-time concept/entity extraction + initial wiki projection
+
+**Purpose**
+
+Build the first durable knowledge artifact immediately after upload, before the user has done any reading.
+
+**Inputs**
+
+- parsed `blocks`
+- paper metadata from TASK-014 when useful
+- `papers.summary` only for the source-page projection, not as the canonical source for concept extraction
+
+**Outputs**
+
+- initial `source` page
+- initial `entity` / `concept` candidates
+- initial evidence links to `(paperId, blockId)`
+- first-pass canonicalization within a single paper
+
+**Acceptance boundary**
+
+- a newly uploaded paper can silently produce grounded initial pages without requiring any highlights or notes
+- all generated pages can point back to source blocks
+- rerunning with no summary/block change is idempotent
+
+**Do not include yet**
+
+- marginalia weighting
+- AI-reply-note-derived refinement
+- cross-paper merging
+
+### TASK-020B — Marginalia alignment + salience refinement
+
+**Purpose**
+
+Take the upload-time concept skeleton and let user activity reshape which concepts are foregrounded.
+
+**Inputs**
+
+- highlights
+- notes
+- note→block citations
+- existing compiled concepts/pages from `020A`
+
+**Outputs**
+
+- salience / priority updates per concept
+- stronger or weaker evidence weighting
+- page emphasis refresh
+- reference refresh
+
+**Acceptance boundary**
+
+- changing highlights/notes can trigger a selective refinement pass
+- concept importance changes without inventing brand-new ontology purely from marginalia
+- concepts with no user reinforcement remain valid but quieter
+
+**Do not include yet**
+
+- arbitrary agent writeback
+- cross-paper fusion
+
+### TASK-020C — Note-native AI reply refinement
+
+**Purpose**
+
+Use inline AI replies inside notes as a weak signal for what remains unresolved or important to the user.
+
+**Inputs**
+
+- selected paper-scoped AI reply note traces or lightweight derived signals
+- existing compiled concepts/pages
+
+**Outputs**
+
+- concept follow-up counts
+- uncertainty / unresolved markers
+- optional explanatory emphasis shift in page bodies
+
+**Acceptance boundary**
+
+- AI reply notes can influence ranking and emphasis
+- AI reply notes cannot directly overwrite canonical source-grounded concept structure
+- persisted signal remains lightweight and privacy-safe
+
+**Do not include**
+
+- full conversation memory
+- unrestricted writeback from agent free text into wiki body
+
+### TASK-020D — Inner-paper graph + concept-first retrieval substrate
+
+**Purpose**
+
+Move from paper-local concepts to paper-local structure and retrieval-ready evidence paths.
+
+**Inputs**
+
+- compiled concepts/pages/evidence from one paper
+- salience-enriched concept nodes
+
+**Outputs**
+
+- typed inner-paper concept edges
+- edge evidence back to blocks
+- local graph neighborhood for Concept Lens
+- substrate needed for `query → concept → block evidence`
+
+**Acceptance boundary**
+
+- related concepts inside one paper can be connected conservatively
+- all graph edges remain evidence-grounded
+- the resulting substrate is sufficient for Concept Lens local neighborhoods and later concept-first retrieval UI
+
+**Do not include**
+
+- cross-paper semantic clustering
+- fully polished end-user search UX unless split into a later card
+
+---
+
+## Pipeline
+
+### Pass A — Upload-time compile
+
+Triggered after `paper-summarize`.
+
+```
+1. Load parsed blocks (+ metadata) and the existing source-summary artifact.
+2. Extract candidate entities/concepts from the paper content itself.
+3. Normalize / canonicalize names within the paper.
+4. Create or update:
+   - source page
+   - initial concept/entity pages
+   - evidence links back to paper blocks
+5. Mark the paper as knowledge-compiled at generation version X.
+```
+
+Primary question answered:
+
+> What concepts and entities does this paper contain?
+
+### Pass B — Marginalia alignment
+
+Triggered when highlights / notes / note citations materially change.
+
+```
+1. Load existing compiled concepts for the paper.
+2. Attach highlights/notes/citations to the best-matching concepts.
+3. Increase or decrease salience signals.
+4. Refresh evidence and page emphasis as needed.
+```
+
+Primary question answered:
+
+> Which of these concepts matter to this user?
+
+### Pass C — Note-native AI reply refinement
+
+Triggered conservatively, not on every token-stream.
+
+```
+1. Persist a lightweight AI-reply-note-derived concept signal
+   (for example: concept asked about, repeated confusion, follow-up count).
+2. Reweight concept salience.
+3. Optionally refresh the wiki page body if the salience shift is strong enough.
+```
+
+Primary question answered:
+
+> Which concepts are still unresolved, repeatedly queried, or interpretively important?
+
+This is **not** open-ended agent writeback. It is refinement of ranking, emphasis, and explanatory focus.
+
+### Pass D — Inner-paper graph compile
+
+Runs after local concepts are compiled.
+
+```
+1. Gather paper-local concepts and evidence.
+2. Create typed inner-paper edges with evidence.
+3. Preserve graph provenance and confidence.
+4. Expose local neighborhoods to Concept Lens and graph APIs.
+```
+
+Primary question answered:
+
+> How do ideas inside this paper depend on, implement, measure, or contrast with each other?
+
+### Pass E — Cross-paper synthesis
+
+Runs after TASK-020G/020H, periodically or on demand once the user has enough corpus depth.
+
+```
+1. Gather paper-local concept atoms across papers.
+2. Use source-level descriptions, embeddings, evidence, and graph neighborhoods to find related concepts.
+3. Let AI maintain cross-paper clusters/relations with confidence and provenance.
+4. Preserve local concept meaning under every cluster.
+5. Expose only useful cross-paper context through Concept Lens / Concept Map.
+```
+
+Primary question answered:
+
+> How do ideas from different papers converge, diverge, or reinforce each other without asking the user to maintain the graph?
+
+---
+
+## Suggested implementation order
+
+### Order 1 — Make the first wiki page real
+
+Start with `020A` only.
+
+Why:
+
+- it is the smallest slice that proves Phase 3 is no longer just chat
+- it gives every paper a durable compiled artifact immediately after upload
+- it uses the cleanest inputs: summary + blocks
+
+### Order 1.5 — Tighten concept importance before descriptions
+
+Do this through `TASK-025` before `020G`.
+
+Why:
+
+- source-level descriptions, embeddings, clusters, and Concept Lens all inherit concept extraction quality
+- if extraction includes incidental noun phrases, downstream graph work becomes noisy
+- the prompt should explicitly keep only `core` and `supporting` paper-local concepts, not every scientific keyphrase
+
+### Order 2 — Let reading behavior reshape emphasis
+
+Then do `020B`.
+
+Why:
+
+- this is where Sapientia becomes meaningfully different from generic LLM Wiki clones
+- the source memory layer starts reflecting reading signals, not just paper text
+
+### Order 3 — Add inline AI replies as a weak but useful signal
+
+Then do `020C`.
+
+Why:
+
+- it is higher-risk because AI replies can be noisy
+- it should refine emphasis only after the upload-time and marginalia-time signals are already stable
+
+### Order 4 — Only then do corpus-level fusion
+
+Do `020D` last.
+
+Why:
+
+- without enough real papers, cross-paper synthesis is fake confidence
+- this stage depends on seeing real alias collisions and reading patterns
+
+---
+
+## Frontend surfaces
+
+### Reader / Concept Lens
+
+The primary user-facing surface is the paper reader. Concept Lens can reveal:
+
+- detected concepts in the current block
+- paper-local source-level descriptions
+- evidence blocks and jump targets
+- local concept neighborhood
+- nearby cross-paper concepts when useful
+- lightweight correction affordances only when the compiled layer is visibly wrong
+
+Concept Lens should not become:
+
+- a wiki page reader
+- an ontology review queue
+- a graph maintenance tool
+
+### Concept Map
+
+Optional, power-user oriented, and secondary to reading.
+
+It can show the concept substrate, but should treat graph/wiki as projections over evidence-grounded local concept atoms.
+
+### Source Page / Wiki
+
+Source pages/wiki artifacts are agent-facing memory and debug/audit substrate. They should remain grounded in block evidence and available to agent context, but they should not become the main user reading surface.
+
+---
+
+## Risks
+
+1. **Concept extraction drift**
+   - raw paper content can over-generate noun phrases that are not useful concepts
+   - mitigation: use page/body constraints + evidence requirements + type taxonomy
+
+2. **Marginalia overweighting**
+   - a heavily highlighted local detail can incorrectly dominate a page
+   - mitigation: salience affects emphasis, not ontology; explicit user overrides are correction state, not ordinary workflow
+
+3. **AI reply note contamination**
+   - note questions can be noisy or exploratory
+   - mitigation: use AI reply notes as a weak refinement signal, not canonical truth
+
+4. **Schema confusion**
+   - if wiki pages become the only storage layer, later graph/retrieval work gets boxed in
+   - mitigation: keep a concept/evidence substrate distinct from page presentation
+
+5. **Cross-paper merge mistakes**
+   - distinct concepts can be merged too aggressively
+   - mitigation: AI-maintained confidence/provenance + reversible user override state
+
+---
+
+## Recommended follow-up split
+
+This card is likely too large to ship as one uninterrupted implementation. Once work starts, it should probably be split into sub-cards such as:
+
+- **TASK-020A** — upload-time concept/entity extraction + initial wiki projection
+- **TASK-020B** — marginalia alignment and salience refinement
+- **TASK-020C** — cross-paper concept fusion
+- **TASK-020D** — concept-first retrieval API
+- **TASK-020I** — paper graph from concept evidence
+
+This document remains the umbrella specification so the system logic stays coherent even if execution is split.
+
+---
+
+## Minimum viable milestone definition
+
+To avoid Phase 3 turning into a giant never-finished "knowledge system" project, define milestones explicitly:
+
+### Milestone 1
+
+- `020A` shipped
+- every paper gets a source page and initial concept/entity pages
+- every page is grounded in source blocks
+
+This is the first meaningful compiled-substrate checkpoint. It does not require a user-facing wiki page.
+
+### Milestone 2
+
+- `020B` shipped
+- user highlights/notes visibly change concept importance and reader-signal summaries
+
+This is the first checkpoint where Sapientia clearly differs from generic upload-and-chat products.
+
+### Milestone 3
+
+- `020C` shipped
+- repeated AI reply notes/refinements subtly improve source-level concept memory
+
+This is the point where the system begins reflecting not just what the paper says, but what the user is actually wrestling with.
+
+### Milestone 4
+
+- `020D` + `020G` + `020H` + Concept Lens shipped
+- concepts become reading-visible in context and graph-usable in the background
+
+This is the full marginalia → Zettelkasten loop.
+
+### Milestone 5
+
+- `020I` shipped
+- `/graph` defaults to paper graph
+- concept evidence explains paper-paper edges
+- concept graph is available only as optional drill-down/debug view
+
+This is the point where the compiled concept substrate becomes a reader-facing literature map without making the user browse or maintain ontology directly.
+
+---
+
+## Relationship to TASK-021
+
+TASK-021 should be understood as a **view layer** over the substrate produced here.
+
+- TASK-020 builds compiled concepts/pages/references
+- TASK-021 / Concept Map visualizes that substrate as an optional graph projection
+
+The graph should not become the source of truth; it is a projection of compiled knowledge.
+
+---
+
+## References
+
+- [PHILOSOPHY.md](../PHILOSOPHY.md) — marginalia → Zettelkasten loop
+- [TASK-019.md](TASK-019.md) — per-paper summary infrastructure
+- [TASK-022.md](TASK-022.md) — v0.1 agent panel; v2 direction folds AI replies into notes
+- [TASK-021.md](TASK-021.md) — optional graph visualization layer that should sit on top of this compilation substrate
+
+---
+
+## Report Back
+
+When done, append to `docs/tasks/README.md` with the final shipped split (single card or sub-cards), and explicitly record:
+
+- whether wiki pages stayed the main storage layer or became a projection over compiled concepts
+- how AI-reply-note-derived salience was persisted
+- what conservative rules prevented marginalia from redefining ontology
+
+---
+
+*Reframed 2026-05-01 around a knowledge-compilation-first model: upload-time concept extraction, reading-time marginalia enrichment, and note-native AI reply refinement.*

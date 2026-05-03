@@ -13,6 +13,7 @@ export interface PaperConceptRefineJobResult {
 	paperId: string
 	workspaceId: string
 	refinedConceptCount: number
+	readerSignalConceptCount: number
 }
 
 export const paperConceptRefineQueue = new Queue<

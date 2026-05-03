@@ -1,6 +1,7 @@
 export * from "./auth"
 export * from "./block-highlights"
 export * from "./blocks"
+export * from "./concept-memory-lifecycle"
 export * from "./compiled-local-concept-edges"
 export * from "./compiled-local-concept-embeddings"
 export * from "./compiled-local-concepts"
