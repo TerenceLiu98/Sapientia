@@ -1,16 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
 import { compiledLocalConcepts } from "@sapientia/db"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const selectMock: any = vi.fn()
-const updateSetMock: any = vi.fn()
-const updateMock: any = vi.fn(() => ({
+const selectMock = vi.fn()
+const updateSetMock = vi.fn()
+const updateMock = vi.fn((_target?: unknown) => ({
 	set: updateSetMock,
 }))
-const insertOnConflictDoUpdateMock: any = vi.fn()
-const insertValuesMock: any = vi.fn(() => ({
+const insertOnConflictDoUpdateMock = vi.fn()
+const insertValuesMock = vi.fn(() => ({
 	onConflictDoUpdate: insertOnConflictDoUpdateMock,
 }))
-const insertMock: any = vi.fn(() => ({
+const insertMock = vi.fn((_target?: unknown) => ({
 	values: insertValuesMock,
 }))
 const getLlmCredentialMock = vi.fn()
@@ -18,9 +18,9 @@ const completeObjectMock = vi.fn()
 
 vi.mock("../db", () => ({
 	db: {
-		select: (...args: any[]) => selectMock(args[0]),
-		update: (...args: any[]) => updateMock(args[0]),
-		insert: (...args: any[]) => insertMock(args[0]),
+		select: (...args: unknown[]) => selectMock(args[0]),
+		update: (...args: unknown[]) => updateMock(args[0]),
+		insert: (...args: unknown[]) => insertMock(args[0]),
 	},
 }))
 
@@ -119,6 +119,20 @@ describe("concept description", () => {
 							},
 						],
 					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						innerJoin: () => ({
+							where: async () => [],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [],
 				}),
 			})
 			.mockReturnValueOnce({
@@ -282,5 +296,103 @@ describe("concept description", () => {
 		})
 		expect(getLlmCredentialMock).not.toHaveBeenCalled()
 		expect(completeObjectMock).not.toHaveBeenCalled()
+	})
+
+	it("includes annotation citations in reader signal summaries as ordinary note signal", async () => {
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								id: "concept-1",
+								kind: "concept",
+								canonicalName: "concept",
+								displayName: "Concept",
+								sourceLevelDescriptionStatus: "done",
+								sourceLevelDescriptionInputHash: null,
+								readerSignalSummaryInputHash: null,
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ conceptId: "concept-1", blockId: "blk-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						where: async () => [],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						innerJoin: () => ({
+							where: async () => [
+								{
+									noteId: "note-1",
+									annotationId: "annotation-1",
+									citationCount: 3,
+									noteTitle: "Annotation note",
+									noteMarkdown: "This annotated passage matters.",
+									noteUpdatedAt: new Date("2026-05-02T10:00:00.000Z"),
+									page: 2,
+									body: { rects: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] },
+								},
+							],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{ blockId: "blk-1", page: 2, bbox: { x: 0.05, y: 0.05, w: 0.4, h: 0.4 } },
+					],
+				}),
+			})
+
+		const updatedRows: Array<Record<string, unknown>> = []
+		updateSetMock.mockImplementation((values: Record<string, unknown>) => ({
+			where: async () => {
+				updatedRows.push(values)
+			},
+		}))
+
+		const { refreshPaperConceptReaderSignals } = await import("./concept-description")
+		const result = await refreshPaperConceptReaderSignals({
+			paperId: "paper-1",
+			workspaceId: "workspace-1",
+			userId: "user-1",
+		})
+
+		expect(result.readerSignalConceptCount).toBe(1)
+		expect(updatedRows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					readerSignalSummary: "Reader signal: cited 3 time(s) in notes.",
+					readerSignalSummaryModel: "deterministic",
+					readerSignalSummaryStatus: "done",
+				}),
+			]),
+		)
+		expect(insertValuesMock).toHaveBeenCalledWith([
+			expect.objectContaining({
+				sourceType: "note",
+				sourceId: "note:note-1",
+				blockIds: ["blk-1"],
+				signalWeight: 3,
+			}),
+		])
 	})
 })

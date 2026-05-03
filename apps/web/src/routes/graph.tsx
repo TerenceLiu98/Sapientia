@@ -13,7 +13,7 @@ function GraphPage() {
 
 	return (
 		<ProtectedRoute>
-			<AppShell title="Graph">
+			<AppShell title="Paper Map">
 				<WorkspaceGraphView workspace={workspace} />
 			</AppShell>
 		</ProtectedRoute>

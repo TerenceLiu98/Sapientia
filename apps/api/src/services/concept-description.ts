@@ -5,10 +5,12 @@ import {
 	conceptObservations,
 	compiledLocalConceptEvidence,
 	compiledLocalConcepts,
+	noteAnnotationRefs,
 	noteBlockRefs,
 	notes,
 	type Paper,
 	papers,
+	readerAnnotations,
 } from "@sapientia/db"
 import { fillPrompt, loadPrompt } from "@sapientia/shared"
 import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm"
@@ -321,11 +323,66 @@ async function refreshConceptReaderSignalSummaries(args: {
 			),
 		)
 
+	const annotationNoteRows = await db
+		.select({
+			noteId: notes.id,
+			annotationId: noteAnnotationRefs.annotationId,
+			citationCount: noteAnnotationRefs.citationCount,
+			noteTitle: notes.title,
+			noteMarkdown: notes.agentMarkdownCache,
+			noteUpdatedAt: notes.updatedAt,
+			page: readerAnnotations.page,
+			body: readerAnnotations.body,
+		})
+		.from(noteAnnotationRefs)
+		.innerJoin(notes, eq(notes.id, noteAnnotationRefs.noteId))
+		.innerJoin(
+			readerAnnotations,
+			and(
+				eq(readerAnnotations.id, noteAnnotationRefs.annotationId),
+				eq(readerAnnotations.paperId, noteAnnotationRefs.paperId),
+				isNull(readerAnnotations.deletedAt),
+			),
+		)
+		.where(
+			and(
+				eq(noteAnnotationRefs.paperId, paperId),
+				eq(notes.paperId, paperId),
+				eq(notes.workspaceId, workspaceId),
+				eq(notes.ownerUserId, userId),
+				isNull(notes.deletedAt),
+			),
+		)
+
+	const paperBlocks = await db
+		.select({
+			blockId: blocks.blockId,
+			page: blocks.page,
+			bbox: blocks.bbox,
+		})
+		.from(blocks)
+		.where(eq(blocks.paperId, paperId))
+	const annotationNotes = annotationNoteRows.flatMap((row) => {
+		const blockId = findOverlappingBlockId(paperBlocks, row.page, annotationBodyBoundingBox(row.body))
+		if (!blockId) return []
+		return [
+			{
+				noteId: row.noteId,
+				blockId,
+				citationCount: row.citationCount,
+				noteTitle: row.noteTitle,
+				noteMarkdown: row.noteMarkdown,
+				noteUpdatedAt: row.noteUpdatedAt,
+			},
+		]
+	})
+	const allNoteRows = [...noteRows, ...annotationNotes]
+
 	let changedCount = 0
 	for (const concept of concepts) {
 		const blockIds = new Set(evidenceByConceptId.get(concept.id) ?? [])
 		const conceptHighlights = highlightRows.filter((row) => blockIds.has(row.blockId))
-		const conceptNotes = noteRows.filter((row) => blockIds.has(row.blockId))
+		const conceptNotes = allNoteRows.filter((row) => blockIds.has(row.blockId))
 		await syncConceptObservations({
 			workspaceId,
 			userId,
@@ -738,6 +795,61 @@ function stableHash(value: unknown) {
 
 function truncateText(text: string, maxChars: number) {
 	return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`
+}
+
+function annotationBodyBoundingBox(body: unknown) {
+	if (!body || typeof body !== "object" || !("rects" in body)) return null
+	const rects = (body as { rects?: unknown }).rects
+	if (!Array.isArray(rects) || rects.length === 0) return null
+	let minX = Number.POSITIVE_INFINITY
+	let minY = Number.POSITIVE_INFINITY
+	let maxX = 0
+	let maxY = 0
+	for (const rect of rects) {
+		if (!rect || typeof rect !== "object") continue
+		const candidate = rect as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+		if (
+			typeof candidate.x !== "number" ||
+			typeof candidate.y !== "number" ||
+			typeof candidate.w !== "number" ||
+			typeof candidate.h !== "number"
+		) {
+			continue
+		}
+		minX = Math.min(minX, candidate.x)
+		minY = Math.min(minY, candidate.y)
+		maxX = Math.max(maxX, candidate.x + candidate.w)
+		maxY = Math.max(maxY, candidate.y + candidate.h)
+	}
+	if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null
+	return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) }
+}
+
+function findOverlappingBlockId(
+	blocks: Array<{ blockId: string; page: number; bbox: { x: number; y: number; w: number; h: number } | null }>,
+	page: number,
+	rect: { x: number; y: number; w: number; h: number } | null,
+) {
+	if (!rect) return null
+	let best: { blockId: string; area: number } | null = null
+	for (const block of blocks) {
+		if (block.page !== page || !block.bbox) continue
+		const area = intersectionArea(rect, block.bbox)
+		if (area <= 0) continue
+		if (!best || area > best.area) best = { blockId: block.blockId, area }
+	}
+	return best?.blockId ?? null
+}
+
+function intersectionArea(
+	a: { x: number; y: number; w: number; h: number },
+	b: { x: number; y: number; w: number; h: number },
+) {
+	const x1 = Math.max(a.x, b.x)
+	const y1 = Math.max(a.y, b.y)
+	const x2 = Math.min(a.x + a.w, b.x + b.w)
+	const y2 = Math.min(a.y + a.h, b.y + b.h)
+	return Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
 }
 
 function clamp01(value: number) {

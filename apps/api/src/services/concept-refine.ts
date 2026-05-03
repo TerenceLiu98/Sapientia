@@ -1,9 +1,12 @@
 import {
+	blocks as blocksTable,
 	blockHighlights,
 	compiledLocalConceptEvidence,
 	compiledLocalConcepts,
+	noteAnnotationRefs,
 	noteBlockRefs,
 	notes,
+	readerAnnotations,
 	wikiPageReferences,
 	wikiPages,
 } from "@sapientia/db"
@@ -92,6 +95,43 @@ export async function refinePaperConceptSalience(args: {
 			),
 		)
 
+	const annotationRefRows = await db
+		.select({
+			annotationId: noteAnnotationRefs.annotationId,
+			citationCount: noteAnnotationRefs.citationCount,
+			noteUpdatedAt: notes.updatedAt,
+			page: readerAnnotations.page,
+			body: readerAnnotations.body,
+		})
+		.from(noteAnnotationRefs)
+		.innerJoin(notes, eq(notes.id, noteAnnotationRefs.noteId))
+		.innerJoin(
+			readerAnnotations,
+			and(
+				eq(readerAnnotations.id, noteAnnotationRefs.annotationId),
+				eq(readerAnnotations.paperId, noteAnnotationRefs.paperId),
+				isNull(readerAnnotations.deletedAt),
+			),
+		)
+		.where(
+			and(
+				eq(noteAnnotationRefs.paperId, paperId),
+				eq(notes.paperId, paperId),
+				eq(notes.workspaceId, workspaceId),
+				eq(notes.ownerUserId, userId),
+				isNull(notes.deletedAt),
+			),
+		)
+
+	const paperBlocks = await db
+		.select({
+			blockId: blocksTable.blockId,
+			page: blocksTable.page,
+			bbox: blocksTable.bbox,
+		})
+		.from(blocksTable)
+		.where(eq(blocksTable.paperId, paperId))
+
 	const highlightByBlockId = new Map(
 		highlightRows.map((row) => [row.blockId, row] as const),
 	)
@@ -101,20 +141,17 @@ export async function refinePaperConceptSalience(args: {
 		{ citationCount: number; noteUpdatedAt: Date | null }
 	>()
 	for (const row of noteRefRows) {
-		const existing = noteRefsByBlockId.get(row.blockId)
-		if (!existing) {
-			noteRefsByBlockId.set(row.blockId, {
-				citationCount: row.citationCount,
-				noteUpdatedAt: row.noteUpdatedAt,
-			})
-			continue
-		}
-		noteRefsByBlockId.set(row.blockId, {
-			citationCount: existing.citationCount + row.citationCount,
-			noteUpdatedAt:
-				!existing.noteUpdatedAt || (row.noteUpdatedAt && row.noteUpdatedAt > existing.noteUpdatedAt)
-					? row.noteUpdatedAt
-					: existing.noteUpdatedAt,
+		addNoteRefSignal(noteRefsByBlockId, row.blockId, {
+			citationCount: row.citationCount,
+			noteUpdatedAt: row.noteUpdatedAt,
+		})
+	}
+	for (const row of annotationRefRows) {
+		const blockId = findOverlappingBlockId(paperBlocks, row.page, annotationBodyBoundingBox(row.body))
+		if (!blockId) continue
+		addNoteRefSignal(noteRefsByBlockId, blockId, {
+			citationCount: row.citationCount,
+			noteUpdatedAt: row.noteUpdatedAt,
 		})
 	}
 
@@ -198,6 +235,28 @@ export async function refinePaperConceptSalience(args: {
 	})
 
 	return { paperId, workspaceId, refinedConceptCount: concepts.length }
+}
+
+function addNoteRefSignal(
+	noteRefsByBlockId: Map<string, { citationCount: number; noteUpdatedAt: Date | null }>,
+	blockId: string,
+	row: { citationCount: number; noteUpdatedAt: Date | null },
+) {
+	const existing = noteRefsByBlockId.get(blockId)
+	if (!existing) {
+		noteRefsByBlockId.set(blockId, {
+			citationCount: row.citationCount,
+			noteUpdatedAt: row.noteUpdatedAt,
+		})
+		return
+	}
+	noteRefsByBlockId.set(blockId, {
+		citationCount: existing.citationCount + row.citationCount,
+		noteUpdatedAt:
+			!existing.noteUpdatedAt || (row.noteUpdatedAt && row.noteUpdatedAt > existing.noteUpdatedAt)
+				? row.noteUpdatedAt
+				: existing.noteUpdatedAt,
+	})
 }
 
 function calculateConceptConfidence(args: {
@@ -292,4 +351,59 @@ function uniqueBlockIds(blockIds: string[]) {
 		result.push(blockId)
 	}
 	return result
+}
+
+function annotationBodyBoundingBox(body: unknown) {
+	if (!body || typeof body !== "object" || !("rects" in body)) return null
+	const rects = (body as { rects?: unknown }).rects
+	if (!Array.isArray(rects) || rects.length === 0) return null
+	let minX = Number.POSITIVE_INFINITY
+	let minY = Number.POSITIVE_INFINITY
+	let maxX = 0
+	let maxY = 0
+	for (const rect of rects) {
+		if (!rect || typeof rect !== "object") continue
+		const candidate = rect as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+		if (
+			typeof candidate.x !== "number" ||
+			typeof candidate.y !== "number" ||
+			typeof candidate.w !== "number" ||
+			typeof candidate.h !== "number"
+		) {
+			continue
+		}
+		minX = Math.min(minX, candidate.x)
+		minY = Math.min(minY, candidate.y)
+		maxX = Math.max(maxX, candidate.x + candidate.w)
+		maxY = Math.max(maxY, candidate.y + candidate.h)
+	}
+	if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null
+	return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) }
+}
+
+function findOverlappingBlockId(
+	blocks: Array<{ blockId: string; page: number; bbox: { x: number; y: number; w: number; h: number } | null }>,
+	page: number,
+	rect: { x: number; y: number; w: number; h: number } | null,
+) {
+	if (!rect) return null
+	let best: { blockId: string; area: number } | null = null
+	for (const block of blocks) {
+		if (block.page !== page || !block.bbox) continue
+		const area = intersectionArea(rect, block.bbox)
+		if (area <= 0) continue
+		if (!best || area > best.area) best = { blockId: block.blockId, area }
+	}
+	return best?.blockId ?? null
+}
+
+function intersectionArea(
+	a: { x: number; y: number; w: number; h: number },
+	b: { x: number; y: number; w: number; h: number },
+) {
+	const x1 = Math.max(a.x, b.x)
+	const y1 = Math.max(a.y, b.y)
+	const x2 = Math.min(a.x + a.w, b.x + b.w)
+	const y2 = Math.min(a.y + a.h, b.y + b.h)
+	return Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
 }

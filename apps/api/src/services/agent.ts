@@ -7,15 +7,13 @@ import {
 } from "@sapientia/db"
 import { fillPrompt, formatBlocksForAgent, loadPrompt } from "@sapientia/shared"
 import { and, asc, desc, eq, isNull } from "drizzle-orm"
-import { convertToModelMessages, type UIMessage } from "ai"
 import { db } from "../db"
 import { logger } from "../logger"
 import { getLlmCredential } from "./credentials"
-import { LlmCredentialMissingError, complete, streamComplete } from "./llm-client"
+import { LlmCredentialMissingError, streamComplete } from "./llm-client"
 
 export const AGENT_PROMPT_ID = "agent-summon-v2"
 
-const MAX_HISTORY_MESSAGES = 20
 const MAX_CONTEXT_CHARS = 120_000
 
 export interface AgentSelectionContext {
@@ -210,49 +208,7 @@ ${salientConceptSummary}`
 	}
 }
 
-export async function streamAgentAnswer(args: {
-	userId: string
-	workspaceId: string
-	paperId: string
-	messages: UIMessage[]
-	selectionContext?: AgentSelectionContext
-	abortSignal?: AbortSignal
-}) {
-	const credential = await getLlmCredential(args.userId)
-	if (!credential) throw new LlmCredentialMissingError()
-
-	const context = await buildAgentContext(args)
-	const modelMessages = convertToModelMessages(args.messages.slice(-MAX_HISTORY_MESSAGES))
-	const system = fillPrompt(loadPrompt(AGENT_PROMPT_ID), {
-		paperTitle: context.paperTitle,
-		paperAuthors: context.paperAuthors,
-		paperSummary: context.paperSummary,
-		focusContext: context.focusContext,
-		marginaliaSignal: context.marginaliaSignal,
-		userMessage: "Use the conversation messages below as the live user turn history for this paper-only chat.",
-	})
-
-	const stream = await streamComplete({
-		userId: args.userId,
-		workspaceId: args.workspaceId,
-		promptId: AGENT_PROMPT_ID,
-		model: credential.model,
-		system,
-		messages: modelMessages,
-		maxTokens: 1400,
-		temperature: 0.2,
-		abortSignal: args.abortSignal,
-	})
-
-	return {
-		context,
-		model: credential.model,
-		promptId: AGENT_PROMPT_ID,
-		stream,
-	}
-}
-
-export async function completeAgentAnswer(args: {
+export async function streamAgentNoteAnswer(args: {
 	userId: string
 	workspaceId: string
 	paperId: string
@@ -274,7 +230,7 @@ export async function completeAgentAnswer(args: {
 			"The user is asking from inside a note. Answer concisely enough to be pasted into the note, while preserving required block citations.",
 	})
 
-	const result = await complete({
+	const stream = await streamComplete({
 		userId: args.userId,
 		workspaceId: args.workspaceId,
 		promptId: AGENT_PROMPT_ID,
@@ -287,11 +243,9 @@ export async function completeAgentAnswer(args: {
 	})
 
 	return {
-		answer: result.text,
-		model: result.model,
+		model: credential.model,
 		promptId: AGENT_PROMPT_ID,
-		inputTokens: result.inputTokens,
-		outputTokens: result.outputTokens,
+		stream,
 	}
 }
 

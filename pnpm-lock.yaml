@@ -105,9 +105,6 @@ importers:
 
   apps/web:
     dependencies:
-      '@ai-sdk/react':
-        specifier: ^2.0.0
-        version: 2.0.182(react@19.2.5)(zod@4.3.6)
       '@radix-ui/react-dropdown-menu':
         specifier: ^2.1.16
         version: 2.1.16(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -144,9 +141,6 @@ importers:
       better-auth:
         specifier: ^1.6.9
         version: 1.6.9(@opentelemetry/api@1.9.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(bun-types@1.3.13)(kysely@0.28.16)(postgres@3.4.9))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(vitest@4.1.5(@opentelemetry/api@1.9.0)(@types/node@24.12.2)(jsdom@29.0.2(@noble/hashes@2.2.0))(vite@8.0.10(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))
-      cytoscape:
-        specifier: ^3.33.3
-        version: 3.33.3
       d3-force:
         specifier: ^3.0.0
         version: 3.0.0
@@ -308,16 +302,6 @@ packages:
   '@ai-sdk/provider@2.0.2':
     resolution: {integrity: sha512-Epf0oKdUxNRK97Qm4l/Sp05TnwzE8FsyRF5p6nncOp8zH0GTuwK2uZoyzE/3uVjRdZNLyQ6Jw/SBjlOScMQy1Q==}
     engines: {node: '>=18'}
-
-  '@ai-sdk/react@2.0.182':
-    resolution: {integrity: sha512-NbxRU7IiHZ5142JajXNlCiiul0W0YULPtCFiVbZmQqWUQzdc+uQJ9mMIZqmmp/UOgQBfrCtcKBo7UTqCLs9QeA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
-      zod: ^3.25.76 || ^4.1.8
-    peerDependenciesMeta:
-      zod:
-        optional: true
 
   '@asamuzakjp/css-color@5.1.11':
     resolution: {integrity: sha512-KVw6qIiCTUQhByfTd78h2yD1/00waTmm9uy/R7Ck/ctUyAPj+AEDLkQIdJW0T8+qGgj3j5bpNKK7Q3G+LedJWg==}
@@ -3135,10 +3119,6 @@ packages:
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
-  cytoscape@3.33.3:
-    resolution: {integrity: sha512-Gej7U+OKR+LZ8kvX7rb2HhCYJ0IhvEFsnkud4SB1PR+BUY/TsSO0dmOW59WEVLu51b1Rm+gQRKoz4bLYxGSZ2g==}
-    engines: {node: '>=0.10'}
-
   d3-dispatch@3.0.1:
     resolution: {integrity: sha512-rzUyPU/S7rwUflMyLc1ETDeBj0NRuHKKAcvukozwhshr6g6c5d8zh4c2gQjY2bZ0dXeGLWc1PF174P2tVvKhfg==}
     engines: {node: '>=12'}
@@ -4592,10 +4572,6 @@ packages:
     resolution: {integrity: sha512-4iMVL6HAINXWf1ZKZjIPcz5wYaOdPhtO8ATvZ+Xqp3BTdaqtAwQkNmKORqcIo5YkQqGXq5cwfswDwMqqQNrpJA==}
     engines: {node: '>=20'}
 
-  throttleit@2.1.0:
-    resolution: {integrity: sha512-nt6AMGKW1p/70DF/hGBdJB57B8Tspmbp5gfJ8ilhLnt7kkr2ye7hzD6NVG8GGErk2HWF34igrL2CXmNIkzKqKw==}
-    engines: {node: '>=18'}
-
   tiny-invariant@1.3.3:
     resolution: {integrity: sha512-+FbBPE1o9QAYvviau/qC5SE3caw21q3xkvWKBtja5vgqOWIHHJ3ioaq1VPfn/Szqctz2bU/oYeKd9/z5BL+PVg==}
 
@@ -4978,16 +4954,6 @@ snapshots:
   '@ai-sdk/provider@2.0.2':
     dependencies:
       json-schema: 0.4.0
-
-  '@ai-sdk/react@2.0.182(react@19.2.5)(zod@4.3.6)':
-    dependencies:
-      '@ai-sdk/provider-utils': 3.0.24(zod@4.3.6)
-      ai: 5.0.180(zod@4.3.6)
-      react: 19.2.5
-      swr: 2.4.1(react@19.2.5)
-      throttleit: 2.1.0
-    optionalDependencies:
-      zod: 4.3.6
 
   '@asamuzakjp/css-color@5.1.11':
     dependencies:
@@ -7842,8 +7808,6 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  cytoscape@3.33.3: {}
-
   d3-dispatch@3.0.1: {}
 
   d3-force@3.0.0:
@@ -9655,8 +9619,6 @@ snapshots:
   thread-stream@4.0.0:
     dependencies:
       real-require: 0.2.0
-
-  throttleit@2.1.0: {}
 
   tiny-invariant@1.3.3: {}
 

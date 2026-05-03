@@ -1,14 +1,6 @@
 import { Link } from "@tanstack/react-router"
-import {
-	memo,
-	startTransition,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react"
-import { useAskAgentForNote } from "@/api/hooks/agent"
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { streamAskAgentForNote } from "@/api/hooks/agent"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import {
 	useNotesForBlock,
@@ -27,18 +19,17 @@ import {
 	useUpdateReaderAnnotationColor,
 } from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
-import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
+import { AppShell } from "@/components/layout/AppShell"
 import {
 	buildAiAskDocument,
 	buildAiAskErrorDocument,
 	buildAiAskPendingDocument,
+	buildAiAskStreamingDocument,
 } from "@/components/notes/ai-note-content"
 import { setNoteEditorCachedContent, type NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlockConceptLensPanel } from "@/components/reader/BlockConceptLensPanel"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
-import { PaperConceptGraphPanel } from "@/components/reader/PaperConceptGraphPanel"
-import { PaperWikiDebugPanel } from "@/components/reader/PaperWikiDebugPanel"
 import { type PdfRailLayout, PdfViewer } from "@/components/reader/PdfViewer"
 import {
 	ReaderAnnotationActionToast,
@@ -117,6 +108,7 @@ export function PaperWorkspace({
 	const [blocksRailLayout, setBlocksRailLayout] = useState<BlocksRailLayout | null>(null)
 	const editorRef = useRef<NoteEditorRef | null>(null)
 	const expandedNoteIdRef = useRef<string | null>(null)
+	const askAbortControllersRef = useRef(new Set<AbortController>())
 	const readerAnnotationRecallTimeoutRef = useRef<number | null>(null)
 	const readerAnnotationRecallExpiresAtRef = useRef<number | null>(null)
 	const readerAnnotationRecallRemainingMsRef = useRef(READER_ANNOTATION_RECALL_MS)
@@ -129,6 +121,13 @@ export function PaperWorkspace({
 		expandedNoteIdRef.current = expandedNoteId
 	}, [expandedNoteId])
 
+	useEffect(() => {
+		return () => {
+			for (const controller of askAbortControllersRef.current) controller.abort()
+			askAbortControllersRef.current.clear()
+		}
+	}, [])
+
 	const { data: blocks } = useBlocks(paperId)
 	const { data: counts } = usePaperCitationCounts(paperId)
 	const { data: notesCitingSelectedBlock = [] } = useNotesForBlock(paperId, selectedBlockId)
@@ -137,7 +136,6 @@ export function PaperWorkspace({
 	const setBlockHighlight = useSetBlockHighlight(paperId)
 	const clearBlockHighlight = useClearBlockHighlight(paperId)
 	const createReaderAnnotation = useCreateReaderAnnotation(paperId)
-	const askAgentForNote = useAskAgentForNote()
 	const deleteReaderAnnotation = useDeleteReaderAnnotation(paperId, workspace?.id)
 	const restoreReaderAnnotation = useRestoreReaderAnnotation(paperId, workspace?.id)
 	const updateReaderAnnotationColor = useUpdateReaderAnnotationColor(paperId, workspace?.id)
@@ -340,6 +338,13 @@ export function PaperWorkspace({
 		[updateNote],
 	)
 
+	const previewAiAskNoteDocument = useCallback((noteId: string, document: unknown) => {
+		setNoteEditorCachedContent(noteId, document)
+		if (expandedNoteIdRef.current === noteId && editorRef.current) {
+			editorRef.current.commands.setContent(document as never, false)
+		}
+	}, [])
+
 	const handleAskReaderSelection = useCallback(
 		async (selection: ReaderSelectionContext) => {
 			if (!workspace) return
@@ -369,22 +374,39 @@ export function PaperWorkspace({
 			if (selectedBlock) handleSelectBlock(selectedBlock)
 			setExpandedNoteId(note.id)
 
+			const controller = new AbortController()
+			askAbortControllersRef.current.add(controller)
 			try {
-				const result = await askAgentForNote.mutateAsync({
-					paperId,
-					workspaceId: workspace.id,
-					question: selectedText,
-					selectionContext: {
-						blockIds: selection.blockIds,
-						selectedText,
+				const answer = await streamAskAgentForNote(
+					{
+						paperId,
+						workspaceId: workspace.id,
+						question: selectedText,
+						selectionContext: {
+							blockIds: selection.blockIds,
+							selectedText,
+						},
 					},
-				})
+					{
+						signal: controller.signal,
+						onChunk: (_chunk, accumulated) => {
+							previewAiAskNoteDocument(
+								note.id,
+								buildAiAskStreamingDocument({
+									question: selectedText,
+									selectedText,
+									answer: accumulated,
+								}),
+							)
+						},
+					},
+				)
 				await replaceAiAskNoteDocument(
 					note.id,
 					buildAiAskDocument({
 						question: selectedText,
 						selectedText,
-						answer: result.answer,
+						answer,
 						paperId,
 						blocksById,
 					}),
@@ -398,16 +420,18 @@ export function PaperWorkspace({
 						error: error instanceof Error ? error.message : "Unknown error",
 					}),
 				)
+			} finally {
+				askAbortControllersRef.current.delete(controller)
 			}
 		},
 		[
-			askAgentForNote,
 			blocks,
 			createNote,
 			currentAnchorYRatio,
 			currentPage,
 			handleSelectBlock,
 			paperId,
+			previewAiAskNoteDocument,
 			replaceAiAskNoteDocument,
 			upsertOptimisticNote,
 			workspace,
@@ -645,22 +669,39 @@ export function PaperWorkspace({
 			if (block.type !== "figure" && block.type !== "table") handleSelectBlock(block)
 			setExpandedNoteId(note.id)
 
+			const controller = new AbortController()
+			askAbortControllersRef.current.add(controller)
 			try {
-				const result = await askAgentForNote.mutateAsync({
-					paperId,
-					workspaceId: workspace.id,
-					question,
-					selectionContext: {
-						blockIds: [block.blockId],
-						selectedText,
+				const answer = await streamAskAgentForNote(
+					{
+						paperId,
+						workspaceId: workspace.id,
+						question,
+						selectionContext: {
+							blockIds: [block.blockId],
+							selectedText,
+						},
 					},
-				})
+					{
+						signal: controller.signal,
+						onChunk: (_chunk, accumulated) => {
+							previewAiAskNoteDocument(
+								note.id,
+								buildAiAskStreamingDocument({
+									question,
+									selectedText,
+									answer: accumulated,
+								}),
+							)
+						},
+					},
+				)
 				await replaceAiAskNoteDocument(
 					note.id,
 					buildAiAskDocument({
 						question,
 						selectedText,
-						answer: result.answer,
+						answer,
 						paperId,
 						blocksById,
 					}),
@@ -674,14 +715,16 @@ export function PaperWorkspace({
 						error: error instanceof Error ? error.message : "Unknown error",
 					}),
 				)
+			} finally {
+				askAbortControllersRef.current.delete(controller)
 			}
 		},
 		[
-			askAgentForNote,
 			blocks,
 			createNote,
 			handleSelectBlock,
 			paperId,
+			previewAiAskNoteDocument,
 			replaceAiAskNoteDocument,
 			upsertOptimisticNote,
 			workspace,
@@ -1227,9 +1270,7 @@ export function PaperWorkspace({
 	)
 
 	return (
-		<AppShell
-			title={paper?.title ?? "Paper"}
-		>
+		<AppShell title={paper?.title ?? "Paper"}>
 			<WorkspaceContent
 				activeCitingNoteIds={activeCitingNoteIds}
 				blockNumberByBlockId={blockNumberByBlockId}
@@ -1463,8 +1504,6 @@ function WorkspaceContent({
 	selectedTextToolbar,
 	viewMode,
 }: WorkspaceContentProps) {
-	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
-
 	return isLoading ? (
 		<div className="p-8 text-sm text-text-tertiary">Loading…</div>
 	) : !paper ? (
@@ -1475,19 +1514,9 @@ function WorkspaceContent({
 
 			<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
 				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
-				<SidebarToggleButtons
-					leftOpen={isLeftNavOpen}
-					onToggleLeft={toggleLeftNav}
-				/>
 			</div>
 
 			<div className="min-h-0 flex-1 p-3 sm:p-4 lg:p-6">
-				<PaperWikiDebugPanel paperId={paper.id} workspaceId={workspaceId} />
-				<PaperConceptGraphPanel
-					onOpenBlock={(blockId) => onOpenCitationBlock(paper.id, blockId)}
-					paperId={paper.id}
-					workspaceId={workspaceId}
-				/>
 				<MainNotesSplit
 					activeCitingNoteIds={activeCitingNoteIds}
 					blockNumberByBlockId={blockNumberByBlockId}
@@ -1625,59 +1654,6 @@ function MarkdownIcon() {
 			/>
 			<path d="M150 98V30h20v40h20l-30 33-30-33h20" fill="currentColor" stroke="none" />
 		</svg>
-	)
-}
-
-function SidebarToggleButtons({
-	leftOpen,
-	onToggleLeft,
-}: {
-	leftOpen: boolean
-	onToggleLeft: () => void
-}) {
-	return (
-		<div className="inline-flex overflow-hidden rounded-lg border border-border-default bg-bg-primary/90 p-0.5 shadow-[var(--shadow-popover)]">
-			<button
-				aria-label={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
-				aria-pressed={leftOpen}
-				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
-				onClick={onToggleLeft}
-				title={leftOpen ? "Collapse workspace sidebar" : "Expand workspace sidebar"}
-				type="button"
-			>
-				<SidebarIcon open={leftOpen} side="left" />
-			</button>
-		</div>
-	)
-}
-
-function SidebarIcon({ open, side }: { open: boolean; side: "left" | "right" }) {
-	const leadingPane =
-		side === "left"
-			? open
-				? "w-2 bg-current/80"
-				: "w-2 bg-current/20"
-			: open
-				? "flex-1 bg-transparent"
-				: "flex-1 bg-current/20"
-	const trailingPane =
-		side === "left"
-			? open
-				? "flex-1 bg-transparent"
-				: "flex-1 bg-current/20"
-			: open
-				? "w-2 bg-current/80"
-				: "w-2 bg-current/20"
-	return (
-		<span
-			className={`flex h-4 w-5 overflow-hidden rounded-[5px] border transition-colors ${
-				open ? "border-current/55 bg-transparent" : "border-current/35 bg-current/10"
-			}`}
-		>
-			<span className={`transition-colors ${leadingPane}`} />
-			<span className={`w-px transition-colors ${open ? "bg-current/45" : "bg-current/30"}`} />
-			<span className={`transition-colors ${trailingPane}`} />
-		</span>
 	)
 }
 

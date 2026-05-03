@@ -1,7 +1,7 @@
 # TASK-025: Prompt reliability, taxonomy alignment, and regression evaluation
 
 **Priority**: High  
-**Status**: In Progress — first prompt/schema regression guardrails started  
+**Status**: ✅ Completed — prompt/schema regression guardrails closed for v1  
 **Estimated effort**: 1.5-3 working days for v1 hardening, then ongoing prompt-eval maintenance  
 **Depends on**: TASK-020A, TASK-020D, TASK-022, current BYOK LLM client behavior  
 **Phase**: 3 — Knowledge compilation hardening

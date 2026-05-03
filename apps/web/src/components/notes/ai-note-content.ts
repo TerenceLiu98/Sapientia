@@ -36,6 +36,35 @@ export function buildAiAskPendingDocument(args: {
 	}
 }
 
+export function buildAiAskStreamingDocument(args: {
+	question: string
+	selectedText?: string
+	answer: string
+}) {
+	const answer = args.answer.trim()
+	return {
+		type: "doc",
+		content: [
+			buildQuestionNode(args.question || args.selectedText || ""),
+			...(answer
+				? rawAnswerTextToTiptapNodes(answer)
+				: [
+						{
+							type: "paragraph",
+							content: [
+								{
+									type: "text",
+									text: "Thinking...",
+									marks: [{ type: "italic" }],
+								},
+							],
+						},
+					]),
+			{ type: "paragraph" },
+		],
+	}
+}
+
 export function buildAiAskErrorDocument(args: {
 	question: string
 	selectedText?: string
@@ -80,6 +109,18 @@ export function buildAiAskContent(args: {
 		}),
 		{ type: "paragraph" },
 	]
+}
+
+function rawAnswerTextToTiptapNodes(text: string) {
+	return text
+		.replace(/\r\n/g, "\n")
+		.split(/\n{2,}/)
+		.map((paragraph) => paragraph.trim())
+		.filter(Boolean)
+		.map((paragraph) => ({
+			type: "paragraph",
+			content: [{ type: "text", text: paragraph }],
+		}))
 }
 
 function buildQuestionNode(text: string) {

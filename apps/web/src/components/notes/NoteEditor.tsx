@@ -55,7 +55,7 @@ import {
 	useRef,
 	useState,
 } from "react"
-import { useAskAgentForNote } from "@/api/hooks/agent"
+import { streamAskAgentForNote } from "@/api/hooks/agent"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import { type NoteWithUrl, useNote, useUpdateNote } from "@/api/hooks/notes"
 import {
@@ -813,10 +813,12 @@ function NoteEditorInner({
 	const { palette } = usePalette()
 	const { data: blocks = [] } = useBlocks(note.paperId ?? "")
 	const blocksById = useMemo(() => new Map(blocks.map((block) => [block.blockId, block])), [blocks])
-	const askAgentForNote = useAskAgentForNote()
 	const [askDraft, setAskDraft] = useState<NoteAskDraft | null>(null)
 	const [askQuestion, setAskQuestion] = useState("")
 	const [askError, setAskError] = useState<string | null>(null)
+	const [askStreamedAnswer, setAskStreamedAnswer] = useState("")
+	const [isAskingNote, setIsAskingNote] = useState(false)
+	const askAbortControllerRef = useRef<AbortController | null>(null)
 	const anchorBlock =
 		note.anchorBlockId != null
 			? (blocks.find((block) => block.blockId === note.anchorBlockId) ?? null)
@@ -874,18 +876,28 @@ function NoteEditorInner({
 	])
 	const submitAskDraft = useCallback(async (draft: NoteAskDraft, rawQuestion: string) => {
 		const question = rawQuestion.trim()
-		if (!note.paperId || !question || askAgentForNote.isPending) return
+		if (!note.paperId || !question || isAskingNote) return
 		setAskError(null)
+		setAskStreamedAnswer("")
+		setIsAskingNote(true)
+		const controller = new AbortController()
+		askAbortControllerRef.current = controller
 		try {
-			const result = await askAgentForNote.mutateAsync({
-				paperId: note.paperId,
-				workspaceId: note.workspaceId,
-				question,
-				selectionContext: {
-					blockIds: draft.blockIds,
-					selectedText: draft.selectedText || undefined,
+			const answer = await streamAskAgentForNote(
+				{
+					paperId: note.paperId,
+					workspaceId: note.workspaceId,
+					question,
+					selectionContext: {
+						blockIds: draft.blockIds,
+						selectedText: draft.selectedText || undefined,
+					},
 				},
-			})
+				{
+					signal: controller.signal,
+					onChunk: (_chunk, accumulated) => setAskStreamedAnswer(accumulated),
+				},
+			)
 			insertAgentAnswerIntoNote({
 				editor: draft.editor,
 				insertAt: draft.insertAt,
@@ -893,14 +905,20 @@ function NoteEditorInner({
 				blocksById,
 				question,
 				selectedText: draft.selectedText,
-				answer: result.answer,
+				answer,
 			})
 			setAskDraft(null)
 			setAskQuestion("")
+			setAskStreamedAnswer("")
 		} catch (error) {
 			setAskError(error instanceof Error ? error.message : "Ask failed")
+		} finally {
+			setIsAskingNote(false)
+			if (askAbortControllerRef.current === controller) {
+				askAbortControllerRef.current = null
+			}
 		}
-	}, [askAgentForNote, blocksById, note.paperId, note.workspaceId])
+	}, [blocksById, isAskingNote, note.paperId, note.workspaceId])
 	const handleAskSelection = useCallback(
 		(draft: NoteAskDraft) => {
 			const anchorBlockIds = note.anchorBlockId ? [note.anchorBlockId] : []
@@ -911,6 +929,7 @@ function NoteEditorInner({
 			setAskDraft(nextDraft)
 			setAskQuestion("")
 			setAskError(null)
+			setAskStreamedAnswer("")
 			if (draft.mode === "direct" && draft.selectedText.trim().length > 0) {
 				void submitAskDraft(nextDraft, draft.selectedText.trim())
 			}
@@ -925,6 +944,7 @@ function NoteEditorInner({
 	useEffect(() => {
 		return () => {
 			if (debounceRef.current) clearTimeout(debounceRef.current)
+			askAbortControllerRef.current?.abort()
 		}
 	}, [debounceRef])
 
@@ -1032,26 +1052,32 @@ function NoteEditorInner({
 					{askDraft && note.paperId && askDraft.mode === "composer" ? (
 						<NoteAskComposer
 							error={askError}
-							isSending={askAgentForNote.isPending}
+							isSending={isAskingNote}
 							onCancel={() => {
+								askAbortControllerRef.current?.abort()
 								setAskDraft(null)
 								setAskError(null)
 								setAskQuestion("")
+								setAskStreamedAnswer("")
 							}}
 							onChange={setAskQuestion}
 							onSubmit={() => void handleSubmitAsk()}
 							question={askQuestion}
 							selectedText={askDraft.selectedText}
+							streamedAnswer={askStreamedAnswer}
 						/>
 					) : null}
 					{askDraft && note.paperId && askDraft.mode === "direct" ? (
 						<NoteAskStatus
 							error={askError}
-							isSending={askAgentForNote.isPending}
+							isSending={isAskingNote}
 							onCancel={() => {
+								askAbortControllerRef.current?.abort()
 								setAskDraft(null)
 								setAskError(null)
+								setAskStreamedAnswer("")
 							}}
+							streamedAnswer={askStreamedAnswer}
 						/>
 					) : null}
 					<EditorRoot>
@@ -1128,6 +1154,7 @@ function NoteAskComposer({
 	onSubmit,
 	question,
 	selectedText,
+	streamedAnswer,
 }: {
 	error: string | null
 	isSending: boolean
@@ -1136,6 +1163,7 @@ function NoteAskComposer({
 	onSubmit: () => void
 	question: string
 	selectedText: string
+	streamedAnswer: string
 }) {
 	const normalizedSelection = selectedText.replace(/\s+/g, " ").trim()
 	const selectionPreview =
@@ -1192,6 +1220,11 @@ function NoteAskComposer({
 						{isSending ? "Asking" : "Insert answer"}
 					</button>
 				</div>
+				{streamedAnswer ? (
+					<div className="mt-3 max-h-36 overflow-y-auto rounded-xl border border-border-subtle bg-[var(--color-reading-bg)] px-3 py-2 text-sm leading-6 text-text-secondary">
+						{streamedAnswer}
+					</div>
+				) : null}
 			</div>
 		</div>
 	)
@@ -1201,29 +1234,38 @@ function NoteAskStatus({
 	error,
 	isSending,
 	onCancel,
+	streamedAnswer,
 }: {
 	error: string | null
 	isSending: boolean
 	onCancel: () => void
+	streamedAnswer: string
 }) {
 	if (!isSending && !error) return null
 
 	return (
 		<div className="border-b border-border-subtle/70 bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-5 py-3">
-			<div className="flex items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-bg-primary/90 px-3 py-2 text-sm shadow-[var(--shadow-sm)]">
-				<div className="flex min-w-0 items-center gap-2 text-text-secondary">
-					{isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-text-accent" /> : null}
-					<span className={error ? "text-text-error" : ""}>
-						{error ?? "Asking Sapientia about the selected text..."}
-					</span>
+			<div className="rounded-2xl border border-border-subtle bg-bg-primary/90 px-3 py-2 text-sm shadow-[var(--shadow-sm)]">
+				<div className="flex items-center justify-between gap-3">
+					<div className="flex min-w-0 items-center gap-2 text-text-secondary">
+						{isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-text-accent" /> : null}
+						<span className={error ? "text-text-error" : ""}>
+							{error ?? "Asking Sapientia about the selected text..."}
+						</span>
+					</div>
+					<button
+						className="shrink-0 text-xs text-text-tertiary transition-colors hover:text-text-primary"
+						onClick={onCancel}
+						type="button"
+					>
+						{error ? "Dismiss" : "Cancel"}
+					</button>
 				</div>
-				<button
-					className="shrink-0 text-xs text-text-tertiary transition-colors hover:text-text-primary"
-					onClick={onCancel}
-					type="button"
-				>
-					{error ? "Dismiss" : "Cancel"}
-				</button>
+				{streamedAnswer ? (
+					<div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-border-subtle bg-[var(--color-reading-bg)] px-3 py-2 leading-6 text-text-secondary">
+						{streamedAnswer}
+					</div>
+				) : null}
 			</div>
 		</div>
 	)

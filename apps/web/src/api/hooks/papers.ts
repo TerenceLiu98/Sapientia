@@ -107,68 +107,6 @@ export interface PaperWikiEdge {
 	}>
 }
 
-export interface PaperWikiPayload {
-	page: PaperWikiPage
-	concepts: PaperWikiConcept[]
-	innerGraph: {
-		edgeCount: number
-		relationCounts: Partial<Record<PaperWikiEdge["relationType"], number>>
-		edges: PaperWikiEdge[]
-	}
-}
-
-export interface PaperConceptGraphPayload {
-	workspaceId: string
-	paperId: string
-	sourcePage: Pick<
-		PaperWikiPage,
-		| "id"
-		| "displayName"
-		| "status"
-		| "error"
-		| "generatedAt"
-		| "modelName"
-		| "promptVersion"
-		| "referenceBlockIds"
-	>
-	visibility: {
-		defaultNodeKinds: PaperWikiConcept["kind"][]
-		supportingNodeKinds: Array<"dataset" | "person" | "organization">
-	}
-	graph: {
-		nodeCount: number
-		edgeCount: number
-		relationCounts: Partial<Record<PaperWikiEdge["relationType"], number>>
-		nodes: Array<{
-			id: string
-			conceptId: string
-			label: string
-			kind: PaperWikiConcept["kind"]
-			canonicalName: string
-			status: PaperWikiConcept["status"]
-			salienceScore: number
-			highlightCount: number
-			noteCitationCount: number
-			sourceLevelDescription: string | null
-			sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
-			readerSignalSummary: string | null
-			degree: number
-			evidenceBlockIds: string[]
-		}>
-		edges: Array<{
-			id: string
-			source: string
-			target: string
-			sourceConceptId: string
-			targetConceptId: string
-			relationType: PaperWikiEdge["relationType"]
-			confidence: number | null
-			evidenceBlockIds: string[]
-			evidence: PaperWikiEdge["evidence"]
-		}>
-	}
-}
-
 export interface PaperBlockConceptLensPayload {
 	workspaceId: string
 	paperId: string
@@ -296,28 +234,6 @@ export function usePaper(paperId: string) {
 	})
 }
 
-export function usePaperWiki(workspaceId: string | undefined, paperId: string) {
-	return useQuery<PaperWikiPayload>({
-		queryKey: ["paper-wiki", workspaceId ?? "", paperId],
-		queryFn: () =>
-			apiFetch<PaperWikiPayload>(`/api/v1/workspaces/${workspaceId}/papers/${paperId}/wiki`),
-		enabled: Boolean(workspaceId) && Boolean(paperId),
-		retry: false,
-	})
-}
-
-export function usePaperConceptGraph(workspaceId: string | undefined, paperId: string) {
-	return useQuery<PaperConceptGraphPayload>({
-		queryKey: ["paper-concept-graph", workspaceId ?? "", paperId],
-		queryFn: () =>
-			apiFetch<PaperConceptGraphPayload>(
-				`/api/v1/workspaces/${workspaceId}/papers/${paperId}/concept-graph`,
-			),
-		enabled: Boolean(workspaceId) && Boolean(paperId),
-		retry: false,
-	})
-}
-
 export function usePaperBlockConceptLens(
 	workspaceId: string | undefined,
 	paperId: string,
@@ -439,23 +355,6 @@ export function useFetchPaperMetadata(workspaceId: string, paperId: string) {
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
-			qc.invalidateQueries({ queryKey: ["paper", paperId] })
-		},
-	})
-}
-
-export function useCompilePaperWiki(workspaceId: string | undefined, paperId: string) {
-	const qc = useQueryClient()
-	return useMutation({
-		mutationFn: () =>
-			apiFetch<{ ok: true; status: "queued"; paperId: string; queue: string }>(
-				`/api/v1/papers/${paperId}/compile-wiki`,
-				{ method: "POST" },
-			),
-		onSuccess: () => {
-			if (workspaceId) {
-				qc.invalidateQueries({ queryKey: ["paper-wiki", workspaceId, paperId] })
-			}
 			qc.invalidateQueries({ queryKey: ["paper", paperId] })
 		},
 	})

@@ -1,26 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
 import { compiledLocalConcepts } from "@sapientia/db"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const selectMock: any = vi.fn()
-const updateSetMock: any = vi.fn()
-const updateMock: any = vi.fn(() => ({
+const selectMock = vi.fn()
+const updateSetMock = vi.fn()
+const updateMock = vi.fn((_target?: unknown) => ({
 	set: updateSetMock,
 }))
-const deleteWhereMock: any = vi.fn()
-const deleteMock: any = vi.fn(() => ({
+const deleteWhereMock = vi.fn()
+const deleteMock = vi.fn((_target?: unknown) => ({
 	where: deleteWhereMock,
 }))
-const insertValuesMock: any = vi.fn()
-const insertMock: any = vi.fn(() => ({
+const insertValuesMock = vi.fn()
+const insertMock = vi.fn((_target?: unknown) => ({
 	values: insertValuesMock,
 }))
 
 vi.mock("../db", () => ({
 	db: {
-		select: (...args: any[]) => selectMock(args[0]),
-		update: (...args: any[]) => updateMock(args[0]),
-		delete: (...args: any[]) => deleteMock(args[0]),
-		insert: (...args: any[]) => insertMock(args[0]),
+		select: (...args: unknown[]) => selectMock(args[0]),
+		update: (...args: unknown[]) => updateMock(args[0]),
+		delete: (...args: unknown[]) => deleteMock(args[0]),
+		insert: (...args: unknown[]) => insertMock(args[0]),
 	},
 }))
 
@@ -90,6 +90,20 @@ describe("concept refine", () => {
 			})
 			.mockReturnValueOnce({
 				from: () => ({
+					innerJoin: () => ({
+						innerJoin: () => ({
+							where: async () => [],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
 					where: () => ({
 						limit: async () => [{ id: "page-1" }],
 					}),
@@ -154,5 +168,159 @@ describe("concept refine", () => {
 			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-3" },
 			{ pageId: "page-1", paperId: "paper-1", blockId: "blk-legacy" },
 		])
+	})
+
+	it("counts note annotation refs when their markup overlaps concept evidence blocks", async () => {
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{ id: "concept-1", kind: "concept", displayName: "Concept 1" },
+					],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ conceptId: "concept-1", blockId: "blk-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						where: async () => [],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						innerJoin: () => ({
+							where: async () => [
+								{
+									annotationId: "00000000-0000-0000-0000-000000000001",
+									citationCount: 2,
+									noteUpdatedAt: new Date("2026-05-01T12:00:00.000Z"),
+									page: 1,
+									body: { rects: [{ x: 0.1, y: 0.1, w: 0.1, h: 0.1 }], quote: "quoted" },
+								},
+							],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{ blockId: "blk-1", page: 1, bbox: { x: 0.05, y: 0.05, w: 0.3, h: 0.3 } },
+					],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [],
+					}),
+				}),
+			})
+
+		const updatedRows: Array<Record<string, unknown>> = []
+		updateSetMock.mockImplementation((values: Record<string, unknown>) => ({
+			where: async (_clause: unknown) => updatedRows.push(values),
+		}))
+
+		const { refinePaperConceptSalience } = await import("./concept-refine")
+		await refinePaperConceptSalience({
+			paperId: "paper-1",
+			userId: "user-1",
+			workspaceId: "ws-1",
+		})
+
+		expect(updatedRows[0]).toMatchObject({
+			noteCitationCount: 2,
+			salienceScore: 3,
+			lastMarginaliaAt: new Date("2026-05-01T12:00:00.000Z"),
+		})
+	})
+
+	it("ignores annotation refs that cannot be mapped back to evidence blocks", async () => {
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{ id: "concept-1", kind: "concept", displayName: "Concept 1" },
+					],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ conceptId: "concept-1", blockId: "blk-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						where: async () => [],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						innerJoin: () => ({
+							where: async () => [
+								{
+									annotationId: "00000000-0000-0000-0000-000000000002",
+									citationCount: 4,
+									noteUpdatedAt: new Date("2026-05-01T12:00:00.000Z"),
+									page: 3,
+									body: { rects: [{ x: 0.8, y: 0.8, w: 0.1, h: 0.1 }] },
+								},
+							],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{ blockId: "blk-1", page: 3, bbox: { x: 0.05, y: 0.05, w: 0.3, h: 0.3 } },
+					],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [],
+					}),
+				}),
+			})
+
+		const updatedRows: Array<Record<string, unknown>> = []
+		updateSetMock.mockImplementation((values: Record<string, unknown>) => ({
+			where: async (_clause: unknown) => updatedRows.push(values),
+		}))
+
+		const { refinePaperConceptSalience } = await import("./concept-refine")
+		await refinePaperConceptSalience({
+			paperId: "paper-1",
+			userId: "user-1",
+			workspaceId: "ws-1",
+		})
+
+		expect(updatedRows[0]).toMatchObject({
+			noteCitationCount: 0,
+			salienceScore: 0,
+			lastMarginaliaAt: null,
+		})
 	})
 })
