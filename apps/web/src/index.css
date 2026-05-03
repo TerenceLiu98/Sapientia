@@ -474,6 +474,19 @@ kbd {
 	margin: 0.2em 0 0.55em;
 }
 
+.note-editor__novel .ProseMirror blockquote {
+	background: color-mix(in srgb, var(--color-bg-secondary) 76%, var(--color-reading-bg));
+	border-left: 3px solid var(--color-accent-700);
+	border-radius: var(--radius-lg);
+	color: var(--color-text-secondary);
+	margin: 0.45em 0 0.75em;
+	padding: 0.55em 0.8em;
+}
+
+.note-editor__novel .ProseMirror blockquote p {
+	margin: 0;
+}
+
 .note-editor__novel .ProseMirror ul,
 .note-editor__novel .ProseMirror ol {
 	margin: 0.35em 0 0.75em;

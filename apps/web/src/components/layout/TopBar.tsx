@@ -51,7 +51,7 @@ export function TopBar({
 					onClick={onToggleAgentPanel}
 					type="button"
 				>
-					{isAgentPanelOpen ? "Hide agent" : "Show agent"}
+					{isAgentPanelOpen ? "Close Ask" : "Ask"}
 				</button>
 
 				<DropdownMenu>

@@ -36,14 +36,26 @@ import {
 	List,
 	ListOrdered,
 	ListTodo,
+	Loader2,
 	Minus,
 	Pilcrow,
 	Sigma,
+	Sparkles,
 	Strikethrough,
 	TextQuote,
 	Underline,
 } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import {
+	type ReactNode,
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react"
+import { useAskAgentForNote } from "@/api/hooks/agent"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import { type NoteWithUrl, useNote, useUpdateNote } from "@/api/hooks/notes"
 import {
@@ -117,6 +129,21 @@ const editorExtensions = [
 ]
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] } as const
+
+interface NoteAskDraft {
+	selectedText: string
+	blockIds: string[]
+	insertAt: number
+	editor: Editor
+	mode: "composer" | "direct"
+}
+
+interface NoteAskContextValue {
+	enabled: boolean
+	onAskSelection: (draft: NoteAskDraft) => void
+}
+
+const NoteAskContext = createContext<NoteAskContextValue | null>(null)
 
 // Tiptap text-color picker swatches. Like reader-annotations they are
 // user-presentation choices (rich-text typography) that get persisted
@@ -431,6 +458,10 @@ function blockExcerpt(block: Block | null) {
 	return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw
 }
 
+function useNoteAskContext() {
+	return useContext(NoteAskContext)
+}
+
 function NovelEditorHandle({
 	noteId,
 	initialContent,
@@ -460,12 +491,42 @@ function NovelEditorHandle({
 }
 
 function SlashMenu() {
-		return (
-			<EditorCommand className="note-editor__command rounded-xl border border-border-subtle bg-bg-primary p-2 shadow-[var(--shadow-popover)]">
-				<EditorCommandEmpty className="px-2 py-1.5 text-sm text-text-tertiary">
-					No matching commands
-				</EditorCommandEmpty>
-				<EditorCommandList className="reader-scrollbar flex max-h-80 min-w-[280px] flex-col gap-1 overflow-y-auto">
+	const noteAsk = useNoteAskContext()
+
+	return (
+		<EditorCommand className="note-editor__command rounded-xl border border-border-subtle bg-bg-primary p-2 shadow-[var(--shadow-popover)]">
+			<EditorCommandEmpty className="px-2 py-1.5 text-sm text-text-tertiary">
+				No matching commands
+			</EditorCommandEmpty>
+			<EditorCommandList className="reader-scrollbar flex max-h-80 min-w-[280px] flex-col gap-1 overflow-y-auto">
+				{noteAsk?.enabled ? (
+					<EditorCommandItem
+						className="flex items-start gap-3 rounded-lg px-2.5 py-2 text-left outline-none data-[selected=true]:bg-surface-hover"
+						key="Ask AI"
+						keywords={["ai", "ask", "agent", "question", "sapientia"]}
+						onCommand={({ editor, range }) => {
+							editor.chain().focus().deleteRange(range).run()
+							noteAsk.onAskSelection({
+								selectedText: "",
+								blockIds: [],
+								insertAt: range.from,
+								editor,
+								mode: "composer",
+							})
+						}}
+						value="Ask AI"
+					>
+						<div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-bg-secondary text-text-accent">
+							<Sparkles className="h-4 w-4" />
+						</div>
+						<div className="min-w-0">
+							<div className="font-medium text-sm text-text-primary">Ask AI</div>
+							<div className="text-xs text-text-tertiary">
+								Ask about this paper and insert the answer here.
+							</div>
+						</div>
+					</EditorCommandItem>
+				) : null}
 				{SLASH_MENU_ITEMS.map((item) => (
 					<EditorCommandItem
 						className="flex items-start gap-3 rounded-lg px-2.5 py-2 text-left outline-none data-[selected=true]:bg-surface-hover"
@@ -599,6 +660,7 @@ function ColorMenuButton({ onOpenChange }: { onOpenChange?: (open: boolean) => v
 
 function SelectionBubbleMenu() {
 	const { editor } = useEditor()
+	const noteAsk = useNoteAskContext()
 	const [colorMenuOpen, setColorMenuOpen] = useState(false)
 
 	return (
@@ -630,6 +692,26 @@ function SelectionBubbleMenu() {
 				<ArrowUpRight className="h-4 w-4" />
 				<span className="underline underline-offset-2">Link</span>
 			</EditorBubbleItem>
+			{noteAsk?.enabled ? (
+				<EditorBubbleItem
+					className="flex h-8 items-center gap-1.5 rounded-md px-3 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
+					onSelect={(ed) => {
+						const { from, to } = ed.state.selection
+						const selectedText = ed.state.doc.textBetween(from, to, " ").trim()
+						noteAsk.onAskSelection({
+							selectedText,
+							blockIds: [],
+							insertAt: to,
+							editor: ed,
+							mode: "direct",
+						})
+					}}
+					title="Ask AI"
+				>
+					<Sparkles className="h-4 w-4" />
+					<span>Ask</span>
+				</EditorBubbleItem>
+			) : null}
 			<div className="mx-1 h-6 w-px bg-border-subtle" />
 			<BubbleButton
 				active={editor?.isActive("math")}
@@ -724,6 +806,11 @@ function NoteEditorInner({
 }) {
 	const { palette } = usePalette()
 	const { data: blocks = [] } = useBlocks(note.paperId ?? "")
+	const blocksById = useMemo(() => new Map(blocks.map((block) => [block.blockId, block])), [blocks])
+	const askAgentForNote = useAskAgentForNote()
+	const [askDraft, setAskDraft] = useState<NoteAskDraft | null>(null)
+	const [askQuestion, setAskQuestion] = useState("")
+	const [askError, setAskError] = useState<string | null>(null)
 	const anchorBlock =
 		note.anchorBlockId != null
 			? (blocks.find((block) => block.blockId === note.anchorBlockId) ?? null)
@@ -779,6 +866,55 @@ function NoteEditorInner({
 		onOpenCitationAnnotation,
 		onOpenCitationBlock,
 	])
+	const submitAskDraft = useCallback(async (draft: NoteAskDraft, rawQuestion: string) => {
+		const question = rawQuestion.trim()
+		if (!note.paperId || !question || askAgentForNote.isPending) return
+		setAskError(null)
+		try {
+			const result = await askAgentForNote.mutateAsync({
+				paperId: note.paperId,
+				workspaceId: note.workspaceId,
+				question,
+				selectionContext: {
+					blockIds: draft.blockIds,
+					selectedText: draft.selectedText || undefined,
+				},
+			})
+			insertAgentAnswerIntoNote({
+				editor: draft.editor,
+				insertAt: draft.insertAt,
+				paperId: note.paperId,
+				blocksById,
+				question,
+				selectedText: draft.selectedText,
+				answer: result.answer,
+			})
+			setAskDraft(null)
+			setAskQuestion("")
+		} catch (error) {
+			setAskError(error instanceof Error ? error.message : "Ask failed")
+		}
+	}, [askAgentForNote, blocksById, note.paperId, note.workspaceId])
+	const handleAskSelection = useCallback(
+		(draft: NoteAskDraft) => {
+			const anchorBlockIds = note.anchorBlockId ? [note.anchorBlockId] : []
+			const nextDraft = {
+				...draft,
+				blockIds: draft.blockIds.length > 0 ? draft.blockIds : anchorBlockIds,
+			}
+			setAskDraft(nextDraft)
+			setAskQuestion("")
+			setAskError(null)
+			if (draft.mode === "direct" && draft.selectedText.trim().length > 0) {
+				void submitAskDraft(nextDraft, draft.selectedText.trim())
+			}
+		},
+		[note.anchorBlockId, submitAskDraft],
+	)
+	const handleSubmitAsk = useCallback(async () => {
+		if (!askDraft) return
+		await submitAskDraft(askDraft, askQuestion)
+	}, [askDraft, askQuestion, submitAskDraft])
 
 	useEffect(() => {
 		return () => {
@@ -887,6 +1023,31 @@ function NoteEditorInner({
 						</div>
 					) : null}
 					{beforeEditorContent}
+					{askDraft && note.paperId && askDraft.mode === "composer" ? (
+						<NoteAskComposer
+							error={askError}
+							isSending={askAgentForNote.isPending}
+							onCancel={() => {
+								setAskDraft(null)
+								setAskError(null)
+								setAskQuestion("")
+							}}
+							onChange={setAskQuestion}
+							onSubmit={() => void handleSubmitAsk()}
+							question={askQuestion}
+							selectedText={askDraft.selectedText}
+						/>
+					) : null}
+					{askDraft && note.paperId && askDraft.mode === "direct" ? (
+						<NoteAskStatus
+							error={askError}
+							isSending={askAgentForNote.isPending}
+							onCancel={() => {
+								setAskDraft(null)
+								setAskError(null)
+							}}
+						/>
+					) : null}
 					<EditorRoot>
 						<EditorContent
 							className="note-editor__novel"
@@ -936,14 +1097,339 @@ function NoteEditorInner({
 								noteId={note.id}
 								onEditorReady={onEditorReady}
 							/>
-							<SelectionBubbleMenu />
-							<SlashMenu />
+							<NoteAskContext.Provider
+								value={{
+									enabled: Boolean(note.paperId),
+									onAskSelection: handleAskSelection,
+								}}
+							>
+								<SelectionBubbleMenu />
+								<SlashMenu />
+							</NoteAskContext.Provider>
 						</EditorContent>
 					</EditorRoot>
 				</NoteCitationThemeProvider>
 			</div>
 		</div>
 	)
+}
+
+function NoteAskComposer({
+	error,
+	isSending,
+	onCancel,
+	onChange,
+	onSubmit,
+	question,
+	selectedText,
+}: {
+	error: string | null
+	isSending: boolean
+	onCancel: () => void
+	onChange: (value: string) => void
+	onSubmit: () => void
+	question: string
+	selectedText: string
+}) {
+	const normalizedSelection = selectedText.replace(/\s+/g, " ").trim()
+	const selectionPreview =
+		normalizedSelection.length > 180
+			? `${normalizedSelection.slice(0, 177)}...`
+			: normalizedSelection
+
+	return (
+		<div className="border-b border-border-subtle/70 bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-5 py-3">
+			<div className="rounded-2xl border border-border-subtle bg-bg-primary/90 p-3 shadow-[var(--shadow-sm)]">
+				<div className="mb-2 flex items-center justify-between gap-3">
+					<div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+						<Sparkles className="h-4 w-4 text-text-accent" />
+						Ask into note
+					</div>
+					<button
+						className="text-xs text-text-tertiary transition-colors hover:text-text-primary"
+						onClick={onCancel}
+						type="button"
+					>
+						Cancel
+					</button>
+				</div>
+				{selectionPreview ? (
+					<div className="mb-2 rounded-xl bg-bg-secondary px-3 py-2 font-serif text-xs leading-5 text-text-secondary">
+						{selectionPreview}
+					</div>
+				) : null}
+				<textarea
+					autoFocus
+					className="min-h-20 w-full resize-none rounded-xl border border-border-subtle bg-[var(--color-reading-bg)] px-3 py-2 text-sm leading-6 text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-border-strong"
+					disabled={isSending}
+					onChange={(event) => onChange(event.target.value)}
+					onKeyDown={(event) => {
+						if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+							event.preventDefault()
+							onSubmit()
+						}
+					}}
+					placeholder="Ask Sapientia about this passage..."
+					value={question}
+				/>
+				<div className="mt-2 flex items-center justify-between gap-3">
+					<div className="min-h-5 text-xs text-text-tertiary">
+						{error ? <span className="text-text-error">{error}</span> : "Answer will be inserted into this note."}
+					</div>
+					<button
+						className="inline-flex h-8 items-center gap-2 rounded-full bg-text-primary px-3 text-sm font-medium text-bg-primary transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={isSending || question.trim().length === 0}
+						onClick={onSubmit}
+						type="button"
+					>
+						{isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+						{isSending ? "Asking" : "Insert answer"}
+					</button>
+				</div>
+			</div>
+		</div>
+	)
+}
+
+function NoteAskStatus({
+	error,
+	isSending,
+	onCancel,
+}: {
+	error: string | null
+	isSending: boolean
+	onCancel: () => void
+}) {
+	if (!isSending && !error) return null
+
+	return (
+		<div className="border-b border-border-subtle/70 bg-[color-mix(in_srgb,var(--color-reading-bg)_82%,var(--color-bg-secondary))] px-5 py-3">
+			<div className="flex items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-bg-primary/90 px-3 py-2 text-sm shadow-[var(--shadow-sm)]">
+				<div className="flex min-w-0 items-center gap-2 text-text-secondary">
+					{isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-text-accent" /> : null}
+					<span className={error ? "text-text-error" : ""}>
+						{error ?? "Asking Sapientia about the selected text..."}
+					</span>
+				</div>
+				<button
+					className="shrink-0 text-xs text-text-tertiary transition-colors hover:text-text-primary"
+					onClick={onCancel}
+					type="button"
+				>
+					{error ? "Dismiss" : "Cancel"}
+				</button>
+			</div>
+		</div>
+	)
+}
+
+function insertAgentAnswerIntoNote(args: {
+	editor: Editor
+	insertAt: number
+	paperId: string
+	blocksById: Map<string, Block>
+	question: string
+	selectedText: string
+	answer: string
+}) {
+	const content = [
+		{
+			type: "blockquote",
+			content: [
+				{
+					type: "paragraph",
+					content: [{ type: "text", text: args.question || args.selectedText }],
+				},
+			],
+		},
+		...answerMarkdownToTiptapNodes({
+			markdown: args.answer,
+			paperId: args.paperId,
+			blocksById: args.blocksById,
+		}),
+		{ type: "paragraph" },
+	]
+
+	args.editor.chain().focus().insertContentAt(args.insertAt, content).run()
+}
+
+function answerMarkdownToTiptapNodes(args: {
+	markdown: string
+	paperId: string
+	blocksById: Map<string, Block>
+}) {
+	const lines = args.markdown.replace(/\r\n/g, "\n").split("\n")
+	const nodes: Array<Record<string, unknown>> = []
+	let paragraphBuffer: string[] = []
+	let bulletItems: string[] = []
+	let orderedItems: string[] = []
+
+	const flushParagraph = () => {
+		const text = paragraphBuffer.join(" ").replace(/\s+/g, " ").trim()
+		paragraphBuffer = []
+		if (!text) return
+		nodes.push({
+			type: "paragraph",
+			content: parseAnswerInlineContent(text, args),
+		})
+	}
+	const flushBulletItems = () => {
+		if (bulletItems.length === 0) return
+		nodes.push({
+			type: "bulletList",
+			content: bulletItems.map((item) => ({
+				type: "listItem",
+				content: [
+					{
+						type: "paragraph",
+						content: parseAnswerInlineContent(item, args),
+					},
+				],
+			})),
+		})
+		bulletItems = []
+	}
+	const flushOrderedItems = () => {
+		if (orderedItems.length === 0) return
+		nodes.push({
+			type: "orderedList",
+			content: orderedItems.map((item) => ({
+				type: "listItem",
+				content: [
+					{
+						type: "paragraph",
+						content: parseAnswerInlineContent(item, args),
+					},
+				],
+			})),
+		})
+		orderedItems = []
+	}
+	const flushAll = () => {
+		flushParagraph()
+		flushBulletItems()
+		flushOrderedItems()
+	}
+
+	for (const rawLine of lines) {
+		const line = rawLine.trim()
+		if (!line) {
+			flushParagraph()
+			continue
+		}
+
+		const heading = line.match(/^(#{1,3})\s+(.+)$/)
+		if (heading) {
+			flushAll()
+			nodes.push({
+				type: "heading",
+				attrs: { level: Math.min(3, heading[1].length) },
+				content: parseAnswerInlineContent(heading[2], args),
+			})
+			continue
+		}
+
+		const bullet = line.match(/^[-*]\s+(.+)$/)
+		if (bullet) {
+			flushParagraph()
+			flushOrderedItems()
+			bulletItems.push(bullet[1])
+			continue
+		}
+
+		const ordered = line.match(/^\d+[.)]\s+(.+)$/)
+		if (ordered) {
+			flushParagraph()
+			flushBulletItems()
+			orderedItems.push(ordered[1])
+			continue
+		}
+
+		flushBulletItems()
+		flushOrderedItems()
+		paragraphBuffer.push(line)
+	}
+
+	flushAll()
+
+	return nodes.length > 0
+		? nodes
+		: [{ type: "paragraph", content: [{ type: "text", text: "(No answer returned.)" }] }]
+}
+
+function parseAnswerInlineContent(
+	text: string,
+	args: { paperId: string; blocksById: Map<string, Block> },
+) {
+	const nodes: Array<Record<string, unknown>> = []
+	const pattern = /(\*\*[^*]+\*\*|\[blk\s+([^\]]+)\])/gi
+	let cursor = 0
+
+	for (const match of text.matchAll(pattern)) {
+		const index = match.index ?? 0
+		if (index > cursor) {
+			nodes.push(...parseBoldInlineText(text.slice(cursor, index)))
+		}
+
+		const token = match[0]
+		const blockIdsText = match[2]
+		if (blockIdsText) {
+			const blockIds = blockIdsText
+				.split(/[,\s]+/)
+				.map((blockId) => blockId.trim())
+				.filter(Boolean)
+			blockIds.forEach((blockId, index) => {
+				const block = args.blocksById.get(blockId)
+				if (index > 0) nodes.push({ type: "text", text: " " })
+				nodes.push({
+					type: "blockCitation",
+					attrs: {
+						paperId: args.paperId,
+						blockId,
+						blockNumber: block ? block.blockIndex + 1 : 0,
+						snapshot: block ? noteBlockCitationSnapshot(block) : "",
+					},
+				})
+			})
+		} else if (token.startsWith("**") && token.endsWith("**")) {
+			nodes.push({
+				type: "text",
+				text: token.slice(2, -2),
+				marks: [{ type: "bold" }],
+			})
+		}
+		cursor = index + token.length
+	}
+
+	if (cursor < text.length) {
+		nodes.push(...parseBoldInlineText(text.slice(cursor)))
+	}
+
+	return nodes.length > 0 ? nodes : [{ type: "text", text }]
+}
+
+function parseBoldInlineText(text: string) {
+	const nodes: Array<Record<string, unknown>> = []
+	const pattern = /\*\*([^*]+)\*\*/g
+	let cursor = 0
+	for (const match of text.matchAll(pattern)) {
+		const index = match.index ?? 0
+		if (index > cursor) nodes.push({ type: "text", text: text.slice(cursor, index) })
+		nodes.push({
+			type: "text",
+			text: match[1],
+			marks: [{ type: "bold" }],
+		})
+		cursor = index + match[0].length
+	}
+	if (cursor < text.length) nodes.push({ type: "text", text: text.slice(cursor) })
+	return nodes
+}
+
+function noteBlockCitationSnapshot(block: Block) {
+	const raw = (block.caption ?? block.text ?? "").replace(/\s+/g, " ").trim()
+	if (!raw) return ""
+	return raw.length > 160 ? `${raw.slice(0, 157)}...` : raw
 }
 
 // Markdown shortcut: a paragraph that's *just* "$$" gets replaced with an

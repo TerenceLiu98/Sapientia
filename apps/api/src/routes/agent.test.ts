@@ -4,6 +4,7 @@ import { LlmCallError, LlmCredentialMissingError } from "../services/llm-client"
 
 const selectMock = vi.fn()
 const streamAgentAnswerMock = vi.fn()
+const completeAgentAnswerMock = vi.fn()
 
 vi.mock("../db", () => ({
 	db: {
@@ -19,12 +20,14 @@ vi.mock("../middleware/auth", () => ({
 }))
 
 vi.mock("../services/agent", () => ({
+	completeAgentAnswer: (...args: Array<unknown>) => completeAgentAnswerMock(...args),
 	streamAgentAnswer: (...args: Array<unknown>) => streamAgentAnswerMock(...args),
 }))
 
 describe("agent route", () => {
 	beforeEach(() => {
 		selectMock.mockReset()
+		completeAgentAnswerMock.mockReset()
 		streamAgentAnswerMock.mockReset()
 	})
 
@@ -245,6 +248,67 @@ describe("agent route", () => {
 
 		expect(streamAgentAnswerMock).toHaveBeenCalledWith(
 			expect.objectContaining({
+				abortSignal: expect.any(AbortSignal),
+			}),
+		)
+	})
+
+	it("returns a note-native ask answer as JSON", async () => {
+		const workspaceId = "123e4567-e89b-42d3-a456-426614174000"
+		selectMock.mockReturnValue({
+			from: () => ({
+				innerJoin: () => ({
+					where: () => ({
+						limit: async () => [{ workspaceId }],
+					}),
+				}),
+			}),
+		})
+
+		completeAgentAnswerMock.mockResolvedValue({
+			answer: "Grounded answer [blk blk-1]",
+			model: "mimo-v2.5-pro",
+			promptId: "agent-summon-v2",
+			inputTokens: 100,
+			outputTokens: 24,
+		})
+
+		const { agentRoutes } = await import("./agent")
+		const app = new Hono()
+		app.route("/", agentRoutes)
+
+		const response = await app.request("/agent/note-ask", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				paperId: "paper-1",
+				workspaceId,
+				question: "Explain this in one paragraph",
+				selectionContext: {
+					blockIds: ["blk-1"],
+					selectedText: "selected note text",
+				},
+			}),
+		})
+
+		expect(response.status).toBe(200)
+		expect(await response.json()).toEqual({
+			answer: "Grounded answer [blk blk-1]",
+			model: "mimo-v2.5-pro",
+			promptId: "agent-summon-v2",
+			inputTokens: 100,
+			outputTokens: 24,
+		})
+		expect(completeAgentAnswerMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				userId: "user-1",
+				workspaceId,
+				paperId: "paper-1",
+				question: "Explain this in one paragraph",
+				selectionContext: {
+					blockIds: ["blk-1"],
+					selectedText: "selected note text",
+				},
 				abortSignal: expect.any(AbortSignal),
 			}),
 		)

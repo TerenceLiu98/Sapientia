@@ -11,7 +11,7 @@ import { convertToModelMessages, type UIMessage } from "ai"
 import { db } from "../db"
 import { logger } from "../logger"
 import { getLlmCredential } from "./credentials"
-import { LlmCredentialMissingError, streamComplete } from "./llm-client"
+import { LlmCredentialMissingError, complete, streamComplete } from "./llm-client"
 
 export const AGENT_PROMPT_ID = "agent-summon-v2"
 
@@ -249,6 +249,49 @@ export async function streamAgentAnswer(args: {
 		model: credential.model,
 		promptId: AGENT_PROMPT_ID,
 		stream,
+	}
+}
+
+export async function completeAgentAnswer(args: {
+	userId: string
+	workspaceId: string
+	paperId: string
+	question: string
+	selectionContext?: AgentSelectionContext
+	abortSignal?: AbortSignal
+}) {
+	const credential = await getLlmCredential(args.userId)
+	if (!credential) throw new LlmCredentialMissingError()
+
+	const context = await buildAgentContext(args)
+	const system = fillPrompt(loadPrompt(AGENT_PROMPT_ID), {
+		paperTitle: context.paperTitle,
+		paperAuthors: context.paperAuthors,
+		paperSummary: context.paperSummary,
+		focusContext: context.focusContext,
+		marginaliaSignal: context.marginaliaSignal,
+		userMessage:
+			"The user is asking from inside a note. Answer concisely enough to be pasted into the note, while preserving required block citations.",
+	})
+
+	const result = await complete({
+		userId: args.userId,
+		workspaceId: args.workspaceId,
+		promptId: AGENT_PROMPT_ID,
+		model: credential.model,
+		system,
+		messages: [{ role: "user", content: args.question }],
+		maxTokens: 1200,
+		temperature: 0.2,
+		abortSignal: args.abortSignal,
+	})
+
+	return {
+		answer: result.text,
+		model: result.model,
+		promptId: AGENT_PROMPT_ID,
+		inputTokens: result.inputTokens,
+		outputTokens: result.outputTokens,
 	}
 }
 
