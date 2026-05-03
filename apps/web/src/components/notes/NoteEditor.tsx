@@ -90,6 +90,11 @@ export function primeNoteEditorContent(noteId: string, jsonUrl: string) {
 	return loadNoteEditorContent(noteId, jsonUrl).then(() => undefined)
 }
 
+export function setNoteEditorCachedContent(noteId: string, content: unknown) {
+	noteEditorContentCache.set(noteId, normalizeInitialContent(content))
+	noteEditorContentInflight.delete(noteId)
+}
+
 const editorExtensions = [
 	StarterKit.configure({
 		// Keep dropcursor subtle — the default `#ddeeff` reads teal/green over

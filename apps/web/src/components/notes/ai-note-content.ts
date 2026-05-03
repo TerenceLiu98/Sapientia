@@ -13,6 +13,57 @@ export function buildAiAskDocument(args: {
 	}
 }
 
+export function buildAiAskPendingDocument(args: {
+	question: string
+	selectedText?: string
+}) {
+	return {
+		type: "doc",
+		content: [
+			buildQuestionNode(args.question || args.selectedText || ""),
+			{
+				type: "paragraph",
+				content: [
+					{
+						type: "text",
+						text: "Thinking...",
+						marks: [{ type: "italic" }],
+					},
+				],
+			},
+			{ type: "paragraph" },
+		],
+	}
+}
+
+export function buildAiAskErrorDocument(args: {
+	question: string
+	selectedText?: string
+	error: string
+}) {
+	return {
+		type: "doc",
+		content: [
+			buildQuestionNode(args.question || args.selectedText || ""),
+			{
+				type: "paragraph",
+				content: [
+					{
+						type: "text",
+						text: `Ask failed: ${args.error}`,
+						marks: [{ type: "italic" }],
+					},
+				],
+			},
+			{
+				type: "paragraph",
+				content: [{ type: "text", text: "You can edit this note or ask again." }],
+			},
+			{ type: "paragraph" },
+		],
+	}
+}
+
 export function buildAiAskContent(args: {
 	question: string
 	selectedText?: string
@@ -21,15 +72,7 @@ export function buildAiAskContent(args: {
 	blocksById: Map<string, Block>
 }) {
 	return [
-		{
-			type: "blockquote",
-			content: [
-				{
-					type: "paragraph",
-					content: [{ type: "text", text: args.question || args.selectedText || "" }],
-				},
-			],
-		},
+		buildQuestionNode(args.question || args.selectedText || ""),
 		...answerMarkdownToTiptapNodes({
 			markdown: args.answer,
 			paperId: args.paperId,
@@ -37,6 +80,18 @@ export function buildAiAskContent(args: {
 		}),
 		{ type: "paragraph" },
 	]
+}
+
+function buildQuestionNode(text: string) {
+	return {
+		type: "blockquote",
+		content: [
+			{
+				type: "paragraph",
+				content: [{ type: "text", text }],
+			},
+		],
+	}
 }
 
 function answerMarkdownToTiptapNodes(args: {

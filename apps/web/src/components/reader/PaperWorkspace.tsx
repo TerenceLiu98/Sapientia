@@ -16,7 +16,7 @@ import {
 	usePaperNoteCitations,
 } from "@/api/hooks/citations"
 import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
-import { useCreateNote, useDeleteNote, useNotes } from "@/api/hooks/notes"
+import { useCreateNote, useDeleteNote, useNotes, useUpdateNote } from "@/api/hooks/notes"
 import { type Paper, usePaper } from "@/api/hooks/papers"
 import {
 	type ReaderAnnotation,
@@ -28,8 +28,12 @@ import {
 } from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
-import { buildAiAskDocument } from "@/components/notes/ai-note-content"
-import type { NoteEditorRef } from "@/components/notes/NoteEditor"
+import {
+	buildAiAskDocument,
+	buildAiAskErrorDocument,
+	buildAiAskPendingDocument,
+} from "@/components/notes/ai-note-content"
+import { setNoteEditorCachedContent, type NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlockConceptLensPanel } from "@/components/reader/BlockConceptLensPanel"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
@@ -87,6 +91,7 @@ export function PaperWorkspace({
 	const { data: workspace } = useCurrentWorkspace()
 	const { data: paperNotes = [] } = useNotes(workspace?.id ?? "", paperId)
 	const createNote = useCreateNote(workspace?.id ?? "")
+	const updateNote = useUpdateNote()
 	const deleteNote = useDeleteNote(workspace?.id ?? "")
 
 	const [requestedPage, setRequestedPage] = useState<number | undefined>()
@@ -111,6 +116,7 @@ export function PaperWorkspace({
 	const [pdfRailLayout, setPdfRailLayout] = useState<PdfRailLayout | null>(null)
 	const [blocksRailLayout, setBlocksRailLayout] = useState<BlocksRailLayout | null>(null)
 	const editorRef = useRef<NoteEditorRef | null>(null)
+	const expandedNoteIdRef = useRef<string | null>(null)
 	const readerAnnotationRecallTimeoutRef = useRef<number | null>(null)
 	const readerAnnotationRecallExpiresAtRef = useRef<number | null>(null)
 	const readerAnnotationRecallRemainingMsRef = useRef(READER_ANNOTATION_RECALL_MS)
@@ -118,6 +124,10 @@ export function PaperWorkspace({
 	const [pendingCiteBlock, setPendingCiteBlock] = useState<Block | null>(null)
 	const [pendingCiteAnnotation, setPendingCiteAnnotation] = useState<ReaderAnnotation | null>(null)
 	const [autoFollowLockUntil, setAutoFollowLockUntil] = useState(0)
+
+	useEffect(() => {
+		expandedNoteIdRef.current = expandedNoteId
+	}, [expandedNoteId])
 
 	const { data: blocks } = useBlocks(paperId)
 	const { data: counts } = usePaperCitationCounts(paperId)
@@ -319,6 +329,17 @@ export function PaperWorkspace({
 		void copyTextToClipboard(selection.selectedText)
 	}, [])
 
+	const replaceAiAskNoteDocument = useCallback(
+		async (noteId: string, document: unknown) => {
+			setNoteEditorCachedContent(noteId, document)
+			if (expandedNoteIdRef.current === noteId && editorRef.current) {
+				editorRef.current.commands.setContent(document as never, false)
+			}
+			await updateNote.mutateAsync({ noteId, blocknoteJson: document })
+		},
+		[updateNote],
+	)
+
 	const handleAskReaderSelection = useCallback(
 		async (selection: ReaderSelectionContext) => {
 			if (!workspace) return
@@ -331,33 +352,53 @@ export function PaperWorkspace({
 			const blocksById = new Map((blocks ?? []).map((block) => [block.blockId, block]))
 			setReaderSelection(undefined)
 			clearBrowserSelection()
-
-			const result = await askAgentForNote.mutateAsync({
-				paperId,
-				workspaceId: workspace.id,
+			const pendingDocument = buildAiAskPendingDocument({
 				question: selectedText,
-				selectionContext: {
-					blockIds: selection.blockIds,
-					selectedText,
-				},
+				selectedText,
 			})
 			const note = await createNote.mutateAsync({
 				paperId,
-				blocknoteJson: buildAiAskDocument({
-					question: selectedText,
-					selectedText,
-					answer: result.answer,
-					paperId,
-					blocksById,
-				}),
+				blocknoteJson: pendingDocument,
 				anchorPage: selectedBlock?.page ?? selection.annotationTarget?.page ?? currentPage,
 				anchorYRatio: selectedBlock?.bbox?.y ?? currentAnchorYRatio,
 				anchorKind: selectedBlock ? "block" : "page",
 				anchorBlockId: selectedBlock?.blockId ?? selection.blockIds[0] ?? null,
 			})
+			setNoteEditorCachedContent(note.id, pendingDocument)
 			upsertOptimisticNote(note)
 			if (selectedBlock) handleSelectBlock(selectedBlock)
 			setExpandedNoteId(note.id)
+
+			try {
+				const result = await askAgentForNote.mutateAsync({
+					paperId,
+					workspaceId: workspace.id,
+					question: selectedText,
+					selectionContext: {
+						blockIds: selection.blockIds,
+						selectedText,
+					},
+				})
+				await replaceAiAskNoteDocument(
+					note.id,
+					buildAiAskDocument({
+						question: selectedText,
+						selectedText,
+						answer: result.answer,
+						paperId,
+						blocksById,
+					}),
+				)
+			} catch (error) {
+				await replaceAiAskNoteDocument(
+					note.id,
+					buildAiAskErrorDocument({
+						question: selectedText,
+						selectedText,
+						error: error instanceof Error ? error.message : "Unknown error",
+					}),
+				)
+			}
 		},
 		[
 			askAgentForNote,
@@ -367,6 +408,7 @@ export function PaperWorkspace({
 			currentPage,
 			handleSelectBlock,
 			paperId,
+			replaceAiAskNoteDocument,
 			upsertOptimisticNote,
 			workspace,
 		],
@@ -589,34 +631,61 @@ export function PaperWorkspace({
 			const selectedText = normalizeReaderAskText(block.caption || block.text)
 			const question = "Explain this block."
 			const blocksById = new Map((blocks ?? []).map((candidate) => [candidate.blockId, candidate]))
-			const result = await askAgentForNote.mutateAsync({
-				paperId,
-				workspaceId: workspace.id,
-				question,
-				selectionContext: {
-					blockIds: [block.blockId],
-					selectedText,
-				},
-			})
+			const pendingDocument = buildAiAskPendingDocument({ question, selectedText })
 			const note = await createNote.mutateAsync({
 				paperId,
-				blocknoteJson: buildAiAskDocument({
-					question,
-					selectedText,
-					answer: result.answer,
-					paperId,
-					blocksById,
-				}),
+				blocknoteJson: pendingDocument,
 				anchorPage: block.page,
 				anchorYRatio: block.bbox?.y ?? null,
 				anchorKind: "block",
 				anchorBlockId: block.blockId,
 			})
+			setNoteEditorCachedContent(note.id, pendingDocument)
 			upsertOptimisticNote(note)
 			if (block.type !== "figure" && block.type !== "table") handleSelectBlock(block)
 			setExpandedNoteId(note.id)
+
+			try {
+				const result = await askAgentForNote.mutateAsync({
+					paperId,
+					workspaceId: workspace.id,
+					question,
+					selectionContext: {
+						blockIds: [block.blockId],
+						selectedText,
+					},
+				})
+				await replaceAiAskNoteDocument(
+					note.id,
+					buildAiAskDocument({
+						question,
+						selectedText,
+						answer: result.answer,
+						paperId,
+						blocksById,
+					}),
+				)
+			} catch (error) {
+				await replaceAiAskNoteDocument(
+					note.id,
+					buildAiAskErrorDocument({
+						question,
+						selectedText,
+						error: error instanceof Error ? error.message : "Unknown error",
+					}),
+				)
+			}
 		},
-		[askAgentForNote, blocks, createNote, handleSelectBlock, paperId, upsertOptimisticNote, workspace],
+		[
+			askAgentForNote,
+			blocks,
+			createNote,
+			handleSelectBlock,
+			paperId,
+			replaceAiAskNoteDocument,
+			upsertOptimisticNote,
+			workspace,
+		],
 	)
 
 	const handleCiteAnnotation = useCallback(
