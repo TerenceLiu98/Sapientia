@@ -1,4 +1,6 @@
-docs/
+docs/*
+!docs/tasks/
+!docs/tasks/**
 demo/
 CLAUDE.md
 
