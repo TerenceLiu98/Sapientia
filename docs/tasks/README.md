@@ -2,7 +2,7 @@
 
 This directory contains task cards for Sapientia implementation. Tasks are organized by where they sit in the **marginalia → Zettelkasten loop** — Sapientia's core product thesis (see [PHILOSOPHY.md](../PHILOSOPHY.md), [PRD_v1.md](../PRD_v1.md), and the v2 design upgrade in [PRD_v2.md](../PRD_v2.md)).
 
-**Current state**: Phase 1 全部完成（8/8）。Phase 2 核心任务全部完成。TASK-018 marginalia v2 主体（A/B/D）已发，C/E/F 推迟。**Phase 3 已进入知识编译主线：TASK-019 已发；TASK-020 已形成 paper-local concept / semantic relation / paper graph checkpoint；TASK-022 agent summon-mode v0.1 已收尾为 checkpoint。** 2026-05-02 新增 [PRD_v2.md](../PRD_v2.md)：Phase 3 的用户侧方向从独立 wiki/graph 页面升级为 **Concept Lens + optional Concept Map**，source page/wiki 继续以 agent-facing substrate 为主；最新 v2 决策是：**用户不维护 concept wiki 或 graph，AI 在后台自主维护，用户行为默认只是阅读信号，显式操作只作为 correction/override**。paper-local concept 是 Sapientia 的 atom-like unit，`sourceLevelMeaning` 是 cross-paper clustering 的核心输入；agent 不再作为最终独立侧栏，而应折叠进 notes/marginalia，表现为 note-native AI replies。
+**Current state**: Phase 1 全部完成（8/8）。Phase 2 核心任务全部完成。TASK-018 marginalia v2 主体（A/B/D）已发，C/E/F 推迟。**Phase 3 已进入知识编译主线：TASK-019 已发；TASK-020 已形成 paper-local concept / semantic relation / paper graph checkpoint；TASK-022 已收尾为 note-native Ask checkpoint。** 2026-05-02 新增 [PRD_v2.md](../PRD_v2.md)：Phase 3 的用户侧方向从独立 wiki/graph 页面升级为 **Concept Lens + optional Concept Map**，source page/wiki 继续以 agent-facing substrate 为主；最新 v2 决策是：**用户不维护 concept wiki 或 graph，AI 在后台自主维护，用户行为默认只是阅读信号，显式操作只作为 correction/override**。paper-local concept 是 Sapientia 的 atom-like unit，`sourceLevelMeaning` 是 cross-paper clustering 的核心输入；agent 不再作为最终独立侧栏，而应折叠进 notes/marginalia，表现为 note-native AI replies。
 
 ---
 
@@ -57,7 +57,7 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 | TASK-019.2 | Spacing / motion / radius token alignment | 🚧 Phase A 已发 (`f58c448`)；B–F 待做 |
 | TASK-020 | Knowledge compilation pipeline (summary + concept extraction + wiki refinement) | 🚧 已重写并拆成子卡 ([TASK-020.md](TASK-020.md), [020A](TASK-020A.md), [020B](TASK-020B.md), [020C](TASK-020C.md), [020D](TASK-020D.md), [020F](TASK-020F.md), [020G](TASK-020G.md), [020H](TASK-020H.md), [020I](TASK-020I.md), [020J](TASK-020J.md)); `020A` 已改为 `paper-compile-v1` 单次编译并进入 hardening；`020F` 已建立 workspace concept cluster substrate；`020G` AI-maintained source-level concept descriptions 基础闭环已落地；`020H` 建立 AI-maintained semantic candidate layer；`020I` 将 `/graph` 默认面改为 paper graph，concept evidence 作为 paper-paper edge 解释层；`020J` 已 checkpoint ready：note/highlight reader signal 与 embedding/LLM judgement 解耦，`readerSignalDirtyAt` 和 `semanticDirtyAt` 分层；[020E](TASK-020E.md) 已退休 |
 | TASK-021 | Knowledge graph view (Cytoscape.js) | ⚠️ 需按 [PRD_v2.md](../PRD_v2.md) 和 [TASK-020I](TASK-020I.md) 重写：默认 Graph Page 应是 paper graph；Concept Lens + optional Concept Map 作为概念层入口 |
-| TASK-022 | Agent v0.1 (summon-only, Layer 1 + Layer 2 context) | ✅ checkpoint ready ([TASK-022.md](TASK-022.md)); note-native Ask checkpoint 已开始：在 Novel/Tiptap note selection bubble 中触发 Ask，并把回答写回 note；后续继续替代独立 agent sidebar |
+| TASK-022 | Agent v0.1 → note-native Ask (Layer 1 + Layer 2 context) | ✅ closed ([TASK-022.md](TASK-022.md)); Ask 已折叠进 notes/marginalia：选区、block、note selection 都写回 note，独立 AgentPanel 降级为 legacy infrastructure |
 | TASK-025 | Prompt reliability, taxonomy alignment, and regression evaluation | 🆕 已起草 ([TASK-025.md](TASK-025.md)) — 覆盖所有生产 prompt 的可靠性与评测主线 |
 
 ⓘ TASK-019 shipped 2026-04-29. It originally added `papers.summary`, the LLM client (`apps/api/src/services/llm-client.ts`), and the `paper-summarize` BullMQ worker auto-triggered after paper-parse. As of TASK-020A, that worker has evolved into the paper compile worker: it now runs `paper-compile-v1` to produce the agent-facing summary/source page plus local concept substrate in one pass. See [TASK-019.md](TASK-019.md) and [TASK-020A.md](TASK-020A.md).
@@ -65,11 +65,11 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 **Recommended ordering** (by user-visible value and complexity):
 
 1. **TASK-019 first**: source-summary is the cheapest demonstrable AI output. New paper uploaded → 30 seconds later wiki page appears. Immediate proof of the Zettelkasten side. ~1-2 days.
-2. **TASK-022 next**: agent summon-mode. Single-paper scope, uses the same Layer 2 context format as TASK-019. Core spine is already in place; remaining work is hardening, coverage, and final card close-out. ~1.5-2.5 days to finish.
+2. **TASK-022 closed**: agent summon-mode evolved into note-native Ask. Single-paper Layer 1 + Layer 2 context remains the backend contract, but the user-facing loop now lands in marginalia notes instead of a standalone agent sidebar.
 3. **TASK-020 third**: knowledge compilation. This is now active. `020A` no longer runs a separate wiki compile pass: the existing `paper-summarize` queue now calls `paper-compile-v1`, producing the agent-facing summary/source page plus local concept/entity substrate in one LLM call. `020B v1` covers block-highlight/note-citation salience, source-page reference refresh, and agent-context consumption. `020D` has started with inner-paper concept edges; cross-paper clusters and concept-first retrieval remain. `020A`'s summary/wiki artifacts are agent-facing substrate, not a user-facing page. Before `020G`, `TASK-025` should tighten concept extraction so the substrate contains load-bearing concepts rather than incidental technical noun phrases.
 4. **Rewrite TASK-021 before implementation**: PRD v2 changes the user-facing surface from a standalone graph page to **Concept Lens + optional Concept Map**. The compiled concept/wiki substrate from TASK-020 still powers it, but the default UX should stay inside the reader and foreground concepts/evidence rather than raw summary prose, graph dashboard, or user-maintained review queue.
 
-These should be drafted **just before being implemented**, using lessons from phases 1-2. `TASK-022` is now past the “draft-only” stage and should be treated as an active implementation card nearing close-out.
+These should be drafted **just before being implemented**, using lessons from phases 1-2. `TASK-022` is closed; future agent work should be framed as note-native AI polish or reader-signal integration, not as a standalone panel.
 
 ---
 

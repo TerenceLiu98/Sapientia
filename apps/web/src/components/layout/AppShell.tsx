@@ -1,6 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react"
 import { LeftNav } from "./LeftNav"
-import { RightPanel } from "./RightPanel"
 import { TopBar } from "./TopBar"
 
 const LEFT_NAV_VISIBLE_KEY = "appShell.leftNavVisible"
@@ -34,12 +33,8 @@ export function useAppShellLayout() {
 export function AppShell(props: {
 	title: string
 	children: ReactNode
-	isAgentPanelOpen?: boolean
-	onAgentPanelOpenChange?: (open: boolean) => void
-	rightPanel?: ReactNode
 }) {
 	const [isLeftNavOpen, setIsLeftNavOpen] = useState(() => loadLeftNavVisible())
-	const isAgentPanelOpen = props.isAgentPanelOpen ?? false
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
@@ -60,23 +55,13 @@ export function AppShell(props: {
 			<div
 				className={`h-screen overflow-hidden bg-bg-primary lg:grid lg:grid-rows-[var(--shell-header-height)_minmax(0,1fr)] ${
 					isLeftNavOpen
-						? isAgentPanelOpen
-							? "lg:grid-cols-[var(--shell-nav-width-expanded)_minmax(0,1fr)_var(--shell-rightpanel-width)]"
-							: "lg:grid-cols-[var(--shell-nav-width-expanded)_minmax(0,1fr)]"
-						: isAgentPanelOpen
-							? "lg:grid-cols-[minmax(0,1fr)_var(--shell-rightpanel-width)]"
-							: "lg:grid-cols-[minmax(0,1fr)]"
+						? "lg:grid-cols-[var(--shell-nav-width-expanded)_minmax(0,1fr)]"
+						: "lg:grid-cols-[minmax(0,1fr)]"
 				}`}
 			>
 				<header
 					className={`border-b border-border-subtle lg:row-start-1 ${
-						isLeftNavOpen
-							? isAgentPanelOpen
-								? "lg:col-span-3"
-								: "lg:col-span-2"
-							: isAgentPanelOpen
-								? "lg:col-span-2"
-								: "lg:col-span-1"
+						isLeftNavOpen ? "lg:col-span-2" : "lg:col-span-1"
 					}`}
 				>
 					<TopBar
@@ -97,16 +82,6 @@ export function AppShell(props: {
 				>
 					{props.children}
 				</main>
-
-				{isAgentPanelOpen ? (
-					<aside
-						className={`hidden overflow-y-auto border-l border-border-subtle bg-bg-secondary lg:row-start-2 lg:block ${
-							isLeftNavOpen ? "lg:col-start-3" : "lg:col-start-2"
-						}`}
-					>
-						{props.rightPanel ?? <RightPanel />}
-					</aside>
-				) : null}
 			</div>
 		</AppShellLayoutContext.Provider>
 	)

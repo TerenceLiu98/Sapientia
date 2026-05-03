@@ -1,10 +1,10 @@
 # TASK-022: Agent v0.1 — summon-only, paper-scoped reading assistant
 
 **Estimated effort**: 3-4 working days
-**Remaining effort**: closed for v0.1; optional heavier flow coverage can move to follow-up
+**Remaining effort**: closed; optional heavier flow coverage can move to follow-up
 **Depends on**: TASK-019 (LLM client + source-summary), TASK-017 (highlights), TASK-013 (note→block citations), AppShell agent-panel placeholder (already wired in `apps/web/src/components/layout/AppShell.tsx`)
 **Phase**: 3 — Zettelkasten Output (second card; first user-visible AI surface)
-**Status**: Implemented foundation / checkpoint ready
+**Status**: ✅ Closed — note-native Ask checkpoint
 
 ---
 
@@ -12,22 +12,23 @@
 
 ### Close-out checkpoint — 2026-05-03
 
-TASK-022 is closed as a v0.1 foundation card.
+TASK-022 is closed as the note-native Ask foundation card.
 
 What shipped:
 
-- paper-scoped streaming assistant route: `POST /api/v1/agent/ask`
+- paper-scoped streaming assistant route: `POST /api/v1/agent/ask` for legacy panel infrastructure
+- note-native grounded answer route: `POST /api/v1/agent/note-ask`
 - shared LLM streaming path through `services/llm-client.ts`
 - BYOK provider support for OpenAI-compatible and Anthropic-compatible interfaces
 - optional user `baseURL`, API key, and model name
-- selected-text / block-level summon context
-- paper-scoped session-local chat state
-- clickable block citations in assistant messages
+- selected-text / block-level note Ask context
+- note insertion path for grounded AI answers
+- clickable block citations in inserted note content
 - retry-once and stream-abort behavior
 - privacy-safe logging with no prompt/response body logging
-- tests covering route behavior, context assembly, transport shaping, citation rendering, close-while-streaming, and retry affordance
+- tests covering route behavior, context assembly, note Ask insertion support, transport shaping, citation rendering, close-while-streaming, and retry affordance
 
-The current UI still uses `AgentPanel` as the v0.1 delivery vehicle, but product copy should avoid presenting it as a separate destination. In the app chrome, the action should read more like **Ask** than **Show agent**.
+The standalone `AgentPanel` has been demoted to legacy infrastructure. It remains in the codebase for compatibility/testing of the original streaming path, but it is no longer exposed by `AppShell` as a primary product surface.
 
 ### v2 product direction note
 
@@ -41,7 +42,7 @@ For v2, Sapientia should fold agent interaction into the notes/marginalia model:
 - citations remain clickable block references
 - the resulting note thread can feed `020B/020C` salience and source-level meaning refinement
 
-This card documents the shipped v0.1 panel because that is the current implementation. The migration from `AgentPanel` toward note-native AI replies should be a follow-up task, not unfinished TASK-022 scope. That follow-up should reuse the backend context and streaming machinery built here.
+This card now treats note-native Ask as the active UX. The original `AgentPanel` implementation is legacy, not the intended reading loop.
 
 ### Note-native Ask checkpoint — Novel/Tiptap direction
 
@@ -53,7 +54,7 @@ Novel's public docs position it as a headless Notion-style editor built on Tipta
 - the answer still uses the existing paper-scoped `agent-summon-v2` context path and block-citation discipline
 - this is a bridge implementation: first non-streaming insertion is acceptable; future polish should stream into a temporary note block and parse `[blk ...]` citations into first-class note citations
 
-Current checkpoint implementation:
+Current closed implementation:
 
 - `POST /api/v1/agent/note-ask` returns one grounded answer for note insertion
 - `NoteEditor` adds a note selection bubble **Ask** action for paper-attached notes
@@ -61,21 +62,22 @@ Current checkpoint implementation:
 - returned AI text is inserted into the Tiptap document and saved by the existing note autosave path
 - reader selected-text **Ask** and block-toolbar **Ask** now create/open a paper-side marginalia note instead of opening the legacy `AgentPanel`
 - reader Ask creates the marginalia note immediately with a lightweight `Thinking...` body; success replaces it with the grounded answer, while failure preserves the question and writes an editable error note
-- `AgentPanel` remains as legacy infrastructure only; it is no longer the intended primary reading flow
+- `AgentPanel` remains as legacy infrastructure only; it is no longer exposed by the app shell
 - the notes/marginalia rail should remain visible in the reader. Users should not be able to hide the note surface because AI answers now land there.
 
-### Shipped
+### Legacy panel infrastructure
 
-- `AgentPanel` is live in the existing right-panel slot with:
+- `AgentPanel` remains available as a legacy component with:
   - empty state
   - per-paper header
   - composer
   - streamed assistant messages
   - retry-once and Settings affordances
-- Summon entry points are wired:
-  - selected-text toolbar
-  - block-level summon from the reader workspace
-  - empty summon from the existing top-bar toggle
+- The old right-panel slot has been removed from `AppShell`.
+- Summon entry points now route to notes:
+  - selected-text toolbar creates/opens a note with AI answer content
+  - block-level Ask creates/opens a note with AI answer content
+  - note editor selection Ask inserts the answer into the active note
 - `/api/v1/agent/ask` exists and returns an AI SDK UI message stream response.
 - `services/llm-client.ts` already uses AI SDK Core for both non-streaming and streaming calls, with:
   - provider resolution through saved credentials
@@ -109,11 +111,9 @@ Current checkpoint implementation:
 - Add heavier end-to-end-style flow coverage if needed, especially around:
   - viewport fallback when no explicit selection is provided
   - longer multi-turn paper-scoped chat flows
-- Build the v2 note-native AI reply surface:
-  - Ask from selected text/block creates or targets a note thread.
-  - Streamed AI response is persisted as an AI reply note.
-  - Agent replies can become reader signals for TASK-020B/020C.
-  - The user should not need to manage a standalone agent sidebar as the primary loop.
+- Upgrade note-native Ask from non-streaming insertion to streaming-in-place if the UX needs it.
+- Add heavier end-to-end coverage for note Ask → saved note → reader-signal observation.
+- Decide whether the legacy `AgentPanel` code should be deleted after the note-native path has enough runtime confidence.
 
 ---
 
@@ -167,7 +167,7 @@ The card also extends `services/llm-client.ts` with a streaming variant. For TAS
 - `8`: implemented enough to close the card; backend + panel/transport coverage exists, heavier E2E remains optional
 - `9`–`10`: implemented
 
-The original acceptance wording still names `Agent panel UI` because this card shipped that v0.1 surface. That should not be interpreted as a v2 product commitment. V2 should migrate the same ask/context/streaming mechanics into notes and marginalia.
+The original acceptance wording still names `Agent panel UI` because this card first shipped that v0.1 surface. The closed product direction is note-native Ask; the panel path is legacy.
 
 ---
 
