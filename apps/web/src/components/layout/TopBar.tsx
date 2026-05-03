@@ -10,15 +10,7 @@ import {
 import { signOut } from "@/lib/auth-client"
 import { useCurrentUser } from "@/lib/use-current-user"
 
-export function TopBar({
-	title,
-	isAgentPanelOpen,
-	onToggleAgentPanel,
-}: {
-	title: string
-	isAgentPanelOpen: boolean
-	onToggleAgentPanel: () => void
-}) {
+export function TopBar({ title }: { title: string }) {
 	const navigate = useNavigate()
 	const currentUser = useCurrentUser()
 
@@ -45,15 +37,6 @@ export function TopBar({
 			</div>
 
 			<div className="shrink-0 flex items-center gap-3">
-				<button
-					aria-expanded={isAgentPanelOpen}
-					className="hidden h-9 rounded-full border border-border-default px-3 text-sm text-text-secondary transition-colors hover:bg-surface-hover lg:inline-flex lg:items-center"
-					onClick={onToggleAgentPanel}
-					type="button"
-				>
-					{isAgentPanelOpen ? "Close Ask" : "Ask"}
-				</button>
-
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<button

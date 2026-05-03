@@ -88,7 +88,7 @@ describe("SelectedTextToolbar", () => {
 			/>,
 		)
 
-		await user.click(screen.getByRole("button", { name: "Ask the agent about this selected text" }))
+		await user.click(screen.getByRole("button", { name: "Ask AI in a note about this selected text" }))
 		expect(onAskAgent).toHaveBeenCalledWith(pdfSelection)
 	})
 })

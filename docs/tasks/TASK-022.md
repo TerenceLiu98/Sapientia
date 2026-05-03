@@ -59,6 +59,9 @@ Current checkpoint implementation:
 - `NoteEditor` adds a note selection bubble **Ask** action for paper-attached notes
 - the note Ask composer uses the note's anchor block as Layer 1 context when available
 - returned AI text is inserted into the Tiptap document and saved by the existing note autosave path
+- reader selected-text **Ask** and block-toolbar **Ask** now create/open a paper-side marginalia note instead of opening the legacy `AgentPanel`
+- `AgentPanel` remains as legacy infrastructure only; it is no longer the intended primary reading flow
+- the notes/marginalia rail should remain visible in the reader. Users should not be able to hide the note surface because AI answers now land there.
 
 ### Shipped
 

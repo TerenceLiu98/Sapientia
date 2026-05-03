@@ -1,8 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import {
-	type Dispatch,
 	memo,
-	type SetStateAction,
 	startTransition,
 	useCallback,
 	useEffect,
@@ -10,6 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react"
+import { useAskAgentForNote } from "@/api/hooks/agent"
 import { type Block, useBlocks } from "@/api/hooks/blocks"
 import {
 	useNotesForBlock,
@@ -28,10 +27,8 @@ import {
 	useUpdateReaderAnnotationColor,
 } from "@/api/hooks/reader-annotations"
 import { useCurrentWorkspace } from "@/api/hooks/workspaces"
-import { AgentPanel } from "@/components/agent/AgentPanel"
-import type { AgentSelectionContext } from "@/components/agent/types"
-import { getOrCreateAgentChatSession } from "@/components/agent/useAgentChat"
 import { AppShell, useAppShellLayout } from "@/components/layout/AppShell"
+import { buildAiAskDocument } from "@/components/notes/ai-note-content"
 import type { NoteEditorRef } from "@/components/notes/NoteEditor"
 import { BlockConceptLensPanel } from "@/components/reader/BlockConceptLensPanel"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
@@ -59,21 +56,15 @@ import {
 
 type ViewMode = "pdf-only" | "md-only"
 const VIEW_MODE_KEY = "paperWorkspace.viewMode"
-const NOTES_SIDEBAR_COLLAPSED_KEY = "paperWorkspace.notesSidebarCollapsed"
 const READER_ANNOTATION_COLOR_KEY = "paperWorkspace.readerAnnotationColor"
 const AUTO_FOLLOW_LOCK_MS = 1400
-const AGENT_QUOTE_MAX_CHARS = 480
+const READER_ASK_MAX_CHARS = 1800
 const READER_ANNOTATION_RECALL_MS = 5000
 
 function loadViewMode(): ViewMode {
 	if (typeof window === "undefined") return "pdf-only"
 	const v = window.localStorage.getItem(VIEW_MODE_KEY)
 	return v === "pdf-only" || v === "md-only" ? v : "pdf-only"
-}
-
-function loadNotesSidebarCollapsed() {
-	if (typeof window === "undefined") return false
-	return window.localStorage.getItem(NOTES_SIDEBAR_COLLAPSED_KEY) === "1"
 }
 
 function loadReaderAnnotationColor() {
@@ -105,11 +96,6 @@ export function PaperWorkspace({
 	const [currentPage, setCurrentPage] = useState(1)
 	const [currentAnchorYRatio, setCurrentAnchorYRatio] = useState(0.5)
 	const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
-	const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
-	const [agentSummonNonce, setAgentSummonNonce] = useState(0)
-	const [agentSummonSelectionContext, setAgentSummonSelectionContext] = useState<
-		AgentSelectionContext | undefined
-	>(undefined)
 	const [readerSelection, setReaderSelection] = useState<ReaderSelectionContext | undefined>(
 		undefined,
 	)
@@ -141,19 +127,11 @@ export function PaperWorkspace({
 	const setBlockHighlight = useSetBlockHighlight(paperId)
 	const clearBlockHighlight = useClearBlockHighlight(paperId)
 	const createReaderAnnotation = useCreateReaderAnnotation(paperId)
+	const askAgentForNote = useAskAgentForNote()
 	const deleteReaderAnnotation = useDeleteReaderAnnotation(paperId, workspace?.id)
 	const restoreReaderAnnotation = useRestoreReaderAnnotation(paperId, workspace?.id)
 	const updateReaderAnnotationColor = useUpdateReaderAnnotationColor(paperId, workspace?.id)
 	const { palette } = usePalette()
-	const agentSession = useMemo(() => {
-		if (!workspace?.id) return null
-		return getOrCreateAgentChatSession({
-			sessionKey: `${workspace.id}:${paperId}`,
-			paperId,
-			workspaceId: workspace.id,
-		})
-	}, [paperId, workspace?.id])
-
 	useEffect(() => {
 		if (typeof window !== "undefined") {
 			window.localStorage.setItem(VIEW_MODE_KEY, viewMode)
@@ -205,21 +183,11 @@ export function PaperWorkspace({
 				: null,
 		[blocks, selectedBlockId],
 	)
-	const viewportSelectionContext = useMemo<AgentSelectionContext | undefined>(() => {
-		const viewportBlockIds = getViewportBlockIds(blocks ?? [], currentPage, currentAnchorYRatio)
-		if (viewportBlockIds.length === 0) return undefined
-		return { blockIds: viewportBlockIds }
-	}, [blocks, currentAnchorYRatio, currentPage])
 	const previousViewModeRef = useRef<ViewMode | null>(null)
 
 	useEffect(() => {
 		setReaderSelection(undefined)
 	}, [paperId, viewMode])
-
-	if (agentSession) {
-		agentSession.selectionContextRef.current =
-			agentSummonSelectionContext ?? viewportSelectionContext
-	}
 
 	const requestMainPaneFocus = useCallback((block: Block) => {
 		setRequestedPage(block.page)
@@ -351,17 +319,58 @@ export function PaperWorkspace({
 		void copyTextToClipboard(selection.selectedText)
 	}, [])
 
-	const handleSummonAgentForReaderSelection = useCallback((selection: ReaderSelectionContext) => {
-		const selectedText = normalizeAgentSnippet(selection.selectedText)
-		setAgentSummonSelectionContext({
-			blockIds: selection.blockIds,
-			selectedText,
-		})
-		setAgentSummonNonce((value) => value + 1)
-		setIsAgentPanelOpen(true)
-		setReaderSelection(undefined)
-		clearBrowserSelection()
-	}, [])
+	const handleAskReaderSelection = useCallback(
+		async (selection: ReaderSelectionContext) => {
+			if (!workspace) return
+			const selectedText = normalizeReaderAskText(selection.selectedText)
+			if (!selectedText) return
+			const selectedBlock =
+				selection.blockIds
+					.map((blockId) => blocks?.find((block) => block.blockId === blockId) ?? null)
+					.find((block): block is Block => block != null) ?? null
+			const blocksById = new Map((blocks ?? []).map((block) => [block.blockId, block]))
+			setReaderSelection(undefined)
+			clearBrowserSelection()
+
+			const result = await askAgentForNote.mutateAsync({
+				paperId,
+				workspaceId: workspace.id,
+				question: selectedText,
+				selectionContext: {
+					blockIds: selection.blockIds,
+					selectedText,
+				},
+			})
+			const note = await createNote.mutateAsync({
+				paperId,
+				blocknoteJson: buildAiAskDocument({
+					question: selectedText,
+					selectedText,
+					answer: result.answer,
+					paperId,
+					blocksById,
+				}),
+				anchorPage: selectedBlock?.page ?? selection.annotationTarget?.page ?? currentPage,
+				anchorYRatio: selectedBlock?.bbox?.y ?? currentAnchorYRatio,
+				anchorKind: selectedBlock ? "block" : "page",
+				anchorBlockId: selectedBlock?.blockId ?? selection.blockIds[0] ?? null,
+			})
+			upsertOptimisticNote(note)
+			if (selectedBlock) handleSelectBlock(selectedBlock)
+			setExpandedNoteId(note.id)
+		},
+		[
+			askAgentForNote,
+			blocks,
+			createNote,
+			currentAnchorYRatio,
+			currentPage,
+			handleSelectBlock,
+			paperId,
+			upsertOptimisticNote,
+			workspace,
+		],
+	)
 
 	const handleOpenCitationBlock = useCallback(
 		(targetPaperId: string, blockId: string) => {
@@ -574,6 +583,42 @@ export function PaperWorkspace({
 		[createNote, expandedNoteId, handleSelectBlock, paperId, upsertOptimisticNote, workspace],
 	)
 
+	const handleAskBlock = useCallback(
+		async (block: Block) => {
+			if (!workspace) return
+			const selectedText = normalizeReaderAskText(block.caption || block.text)
+			const question = "Explain this block."
+			const blocksById = new Map((blocks ?? []).map((candidate) => [candidate.blockId, candidate]))
+			const result = await askAgentForNote.mutateAsync({
+				paperId,
+				workspaceId: workspace.id,
+				question,
+				selectionContext: {
+					blockIds: [block.blockId],
+					selectedText,
+				},
+			})
+			const note = await createNote.mutateAsync({
+				paperId,
+				blocknoteJson: buildAiAskDocument({
+					question,
+					selectedText,
+					answer: result.answer,
+					paperId,
+					blocksById,
+				}),
+				anchorPage: block.page,
+				anchorYRatio: block.bbox?.y ?? null,
+				anchorKind: "block",
+				anchorBlockId: block.blockId,
+			})
+			upsertOptimisticNote(note)
+			if (block.type !== "figure" && block.type !== "table") handleSelectBlock(block)
+			setExpandedNoteId(note.id)
+		},
+		[askAgentForNote, blocks, createNote, handleSelectBlock, paperId, upsertOptimisticNote, workspace],
+	)
+
 	const handleCiteAnnotation = useCallback(
 		(annotation: ReaderAnnotation) => {
 			if (!expandedNoteId) return
@@ -618,18 +663,13 @@ export function PaperWorkspace({
 		(block: Block) => (
 			<>
 				<button
-					aria-label="Ask the agent about this block"
+					aria-label="Ask AI in a note about this block"
 					className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
 					onClick={(e) => {
 						e.stopPropagation()
-						summonAgentForBlock({
-							block,
-							setAgentPanelOpen: setIsAgentPanelOpen,
-							setSelectionContext: setAgentSummonSelectionContext,
-							setSummonNonce: setAgentSummonNonce,
-						})
+						void handleAskBlock(block)
 					}}
-					title="Ask agent"
+					title="Ask in note"
 					type="button"
 				>
 					<AgentIcon />
@@ -654,7 +694,7 @@ export function PaperWorkspace({
 				</button>
 			</>
 		),
-		[expandedNoteId, handleCiteBlock, handleNewNoteForBlock],
+		[expandedNoteId, handleAskBlock, handleCiteBlock, handleNewNoteForBlock],
 	)
 
 	const renderAnnotationActions = useCallback(
@@ -1119,33 +1159,6 @@ export function PaperWorkspace({
 
 	return (
 		<AppShell
-			isAgentPanelOpen={isAgentPanelOpen}
-			onAgentPanelOpenChange={(open) => {
-				if (!open) {
-					void agentSession?.chat.stop()
-					setIsAgentPanelOpen(false)
-					return
-				}
-				setAgentSummonSelectionContext(undefined)
-				setAgentSummonNonce((value) => value + 1)
-				setIsAgentPanelOpen(true)
-			}}
-			rightPanel={
-				agentSession ? (
-					<AgentPanel
-						chat={agentSession.chat}
-						blockNumberByBlockId={blockNumberByBlockId}
-						isOpen={isAgentPanelOpen}
-						onClose={() => {
-							void agentSession.chat.stop()
-							setIsAgentPanelOpen(false)
-						}}
-						onOpenBlock={(blockId) => handleOpenCitationBlock(paperId, blockId)}
-						paperTitle={paper?.title ?? "Paper"}
-						summonNonce={agentSummonNonce}
-					/>
-				) : undefined
-			}
 			title={paper?.title ?? "Paper"}
 		>
 			<WorkspaceContent
@@ -1197,7 +1210,9 @@ export function PaperWorkspace({
 						<SelectedTextToolbar
 							annotationColor={readerAnnotationColor}
 							onChangeAnnotationColor={setReaderAnnotationColor}
-							onAskAgent={handleSummonAgentForReaderSelection}
+							onAskAgent={(selection) => {
+								void handleAskReaderSelection(selection)
+							}}
 							onCopy={handleCopyReaderSelection}
 							onDismiss={handleDismissReaderSelection}
 							onHighlight={(selection) => {
@@ -1380,14 +1395,6 @@ function WorkspaceContent({
 	viewMode,
 }: WorkspaceContentProps) {
 	const { isLeftNavOpen, toggleLeftNav } = useAppShellLayout()
-	const [isNotesSidebarCollapsed, setIsNotesSidebarCollapsed] = useState(() =>
-		loadNotesSidebarCollapsed(),
-	)
-
-	useEffect(() => {
-		if (typeof window === "undefined") return
-		window.localStorage.setItem(NOTES_SIDEBAR_COLLAPSED_KEY, isNotesSidebarCollapsed ? "1" : "0")
-	}, [isNotesSidebarCollapsed])
 
 	return isLoading ? (
 		<div className="p-8 text-sm text-text-tertiary">Loading…</div>
@@ -1402,8 +1409,6 @@ function WorkspaceContent({
 				<SidebarToggleButtons
 					leftOpen={isLeftNavOpen}
 					onToggleLeft={toggleLeftNav}
-					rightOpen={!isNotesSidebarCollapsed}
-					onToggleRight={() => setIsNotesSidebarCollapsed((collapsed) => !collapsed)}
 				/>
 			</div>
 
@@ -1451,8 +1456,6 @@ function WorkspaceContent({
 					onJumpToPage={onJumpToPage}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
-					isNotesSidebarCollapsed={isNotesSidebarCollapsed}
-					onRequestExpandNotesSidebar={() => setIsNotesSidebarCollapsed(false)}
 				/>
 			</div>
 			{readerAnnotationActionToast}
@@ -1559,13 +1562,9 @@ function MarkdownIcon() {
 function SidebarToggleButtons({
 	leftOpen,
 	onToggleLeft,
-	rightOpen,
-	onToggleRight,
 }: {
 	leftOpen: boolean
 	onToggleLeft: () => void
-	rightOpen: boolean
-	onToggleRight: () => void
 }) {
 	return (
 		<div className="inline-flex overflow-hidden rounded-lg border border-border-default bg-bg-primary/90 p-0.5 shadow-[var(--shadow-popover)]">
@@ -1578,16 +1577,6 @@ function SidebarToggleButtons({
 				type="button"
 			>
 				<SidebarIcon open={leftOpen} side="left" />
-			</button>
-			<button
-				aria-label={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
-				aria-pressed={rightOpen}
-				className="flex h-7 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
-				onClick={onToggleRight}
-				title={rightOpen ? "Collapse notes sidebar" : "Expand notes sidebar"}
-				type="button"
-			>
-				<SidebarIcon open={rightOpen} side="right" />
 			</button>
 		</div>
 	)
@@ -1785,8 +1774,6 @@ interface MainNotesSplitProps {
 		page?: number,
 		yRatio?: number,
 	) => void
-	isNotesSidebarCollapsed: boolean
-	onRequestExpandNotesSidebar: () => void
 }
 
 function MainNotesSplit({
@@ -1816,8 +1803,6 @@ function MainNotesSplit({
 	onEditorReady,
 	onOpenCitationBlock,
 	onOpenCitationAnnotation,
-	isNotesSidebarCollapsed,
-	onRequestExpandNotesSidebar,
 }: MainNotesSplitProps) {
 	// TASK-018 Phase A/B — gutter lives inside the PDF preview's right
 	// whitespace (rather than as its own column to the right of the
@@ -1837,9 +1822,7 @@ function MainNotesSplit({
 	const splitRef = useRef<HTMLDivElement | null>(null)
 	const gutterMode = useGutterMode(splitRef)
 	let lgGutterPadClass: string
-	if (isNotesSidebarCollapsed) {
-		lgGutterPadClass = "lg:pr-[44px]" // matches NotesPanel SIDEBAR_COLLAPSED_WIDTH
-	} else if (gutterMode === "compact") {
+	if (gutterMode === "compact") {
 		// SLIP_LANE_WIDTH_COMPACT (196) + RAIL_STRIP_WIDTH_COMPACT (36) + 2×SIDEBAR_INSET_X (8) = 240
 		lgGutterPadClass = "lg:pr-[240px]"
 	} else {
@@ -1883,8 +1866,8 @@ function MainNotesSplit({
 					onJumpToPage={onJumpToPage}
 					onOpenCitationBlock={onOpenCitationBlock}
 					onOpenCitationAnnotation={onOpenCitationAnnotation}
-					isSidebarCollapsed={isNotesSidebarCollapsed}
-					onRequestExpandSidebar={onRequestExpandNotesSidebar}
+					isSidebarCollapsed={false}
+					onRequestExpandSidebar={() => {}}
 				/>
 			</div>
 		</div>
@@ -1925,37 +1908,10 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 	)
 }
 
-function summonAgentForBlock(args: {
-	block: Block
-	setAgentPanelOpen: (open: boolean) => void
-	setSelectionContext: (selection: AgentSelectionContext | undefined) => void
-	setSummonNonce: Dispatch<SetStateAction<number>>
-}) {
-	const selectedText = normalizeAgentSnippet(args.block.caption || args.block.text)
-	args.setSelectionContext({
-		blockIds: [args.block.blockId],
-		selectedText,
-	})
-	args.setSummonNonce((value) => value + 1)
-	args.setAgentPanelOpen(true)
-}
-
-function getViewportBlockIds(blocks: Block[], currentPage: number, currentAnchorYRatio: number) {
-	const candidates = blocks
-		.filter((block) => block.page === currentPage)
-		.map((block) => ({
-			blockId: block.blockId,
-			distance: Math.abs((block.bbox?.y ?? 0.5) - currentAnchorYRatio),
-		}))
-		.sort((a, b) => a.distance - b.distance)
-
-	return candidates.slice(0, 3).map((candidate) => candidate.blockId)
-}
-
-function normalizeAgentSnippet(text: string) {
+function normalizeReaderAskText(text: string) {
 	const normalized = text.replace(/\s+/g, " ").trim()
-	if (normalized.length <= AGENT_QUOTE_MAX_CHARS) return normalized
-	return `${normalized.slice(0, AGENT_QUOTE_MAX_CHARS)}…`
+	if (normalized.length <= READER_ASK_MAX_CHARS) return normalized
+	return `${normalized.slice(0, READER_ASK_MAX_CHARS)}…`
 }
 
 function CiteIcon() {

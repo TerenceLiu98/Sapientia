@@ -39,15 +39,7 @@ export function AppShell(props: {
 	rightPanel?: ReactNode
 }) {
 	const [isLeftNavOpen, setIsLeftNavOpen] = useState(() => loadLeftNavVisible())
-	const [uncontrolledAgentPanelOpen, setUncontrolledAgentPanelOpen] = useState(false)
-	const isAgentPanelOpen = props.isAgentPanelOpen ?? uncontrolledAgentPanelOpen
-	const setIsAgentPanelOpen = (next: boolean | ((open: boolean) => boolean)) => {
-		const resolved = typeof next === "function" ? next(isAgentPanelOpen) : next
-		props.onAgentPanelOpenChange?.(resolved)
-		if (props.isAgentPanelOpen === undefined) {
-			setUncontrolledAgentPanelOpen(resolved)
-		}
-	}
+	const isAgentPanelOpen = props.isAgentPanelOpen ?? false
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
@@ -88,8 +80,6 @@ export function AppShell(props: {
 					}`}
 				>
 					<TopBar
-						isAgentPanelOpen={isAgentPanelOpen}
-						onToggleAgentPanel={() => setIsAgentPanelOpen((open) => !open)}
 						title={props.title}
 					/>
 				</header>

@@ -122,10 +122,10 @@ export function SelectedTextToolbar({
 				<CopyIcon />
 			</button>
 			<button
-				aria-label="Ask the agent about this selected text"
+				aria-label="Ask AI in a note about this selected text"
 				className="flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-accent"
 				onClick={() => onAskAgent(selection)}
-				title="Ask agent"
+				title="Ask in note"
 				type="button"
 			>
 				<AgentIcon />
