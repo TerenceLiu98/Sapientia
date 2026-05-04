@@ -19,6 +19,7 @@ The root object must be:
 Rules:
 
 - Preserve each localConceptId exactly.
+- Output exactly one concepts[] item for every concept in Concept evidence, even if evidence is weak.
 - Write 1-2 sentences per concept.
 - Describe what the concept means in this paper, not the generic encyclopedia definition.
 - Describe the concept's role in the paper's reading frame when evidence supports it:

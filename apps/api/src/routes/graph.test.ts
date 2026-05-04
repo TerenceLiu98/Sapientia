@@ -27,6 +27,217 @@ vi.mock("../middleware/workspace", () => ({
 	},
 }))
 
+function stableSnapshotMock(graphJson: Record<string, unknown>) {
+	return {
+		from: () => ({
+			where: () => ({
+				limit: async () => [{ graphJson, status: "stable" }],
+			}),
+		}),
+	}
+}
+
+const sharedEvidencePaperGraphPayload = {
+	workspaceId: "ws-1",
+	view: "papers",
+	graph: {
+		nodeCount: 2,
+		edgeCount: 1,
+		nodes: [
+			{
+				id: "paper-1",
+				paperId: "paper-1",
+				label: "Sparse Autoencoders for Retrieval",
+				title: "Sparse Autoencoders for Retrieval",
+				authors: ["Ada"],
+				year: 2026,
+				venue: "arXiv",
+				summaryStatus: "completed",
+				conceptCount: 2,
+				degree: 1,
+				topConcepts: [],
+			},
+			{
+				id: "paper-2",
+				paperId: "paper-2",
+				label: "SAE Feature Explanations",
+				title: "SAE Feature Explanations",
+				authors: ["Grace"],
+				year: 2026,
+				venue: "ICLR",
+				summaryStatus: "completed",
+				conceptCount: 2,
+				degree: 1,
+				topConcepts: [],
+			},
+		],
+		edges: [
+			{
+				id: "paper-edge:paper-1:paper-2",
+				source: "paper-1",
+				target: "paper-2",
+				edgeKind: "mixed",
+				weight: 1,
+				status: "active",
+				isRetained: false,
+				hasReaderNoteEvidence: false,
+				lastConfirmedAt: null,
+				evidenceCount: 2,
+				strongEvidenceCount: 2,
+				maxSimilarity: 1,
+				avgSimilarity: 0.92,
+				kinds: ["method", "task"],
+				topEvidence: [
+					{
+						kind: "method",
+						sourcePaperId: "paper-1",
+						targetPaperId: "paper-2",
+						sourceConceptId: "concept-1",
+						targetConceptId: "concept-2",
+						sourceConceptName: "Sparse Autoencoders",
+						targetConceptName: "Sparse Autoencoders",
+						matchMethod: "exact_cluster",
+						similarityScore: 1,
+						llmDecision: null,
+						llmConfidence: null,
+						decisionStatus: "auto_accepted",
+						rationale: "Shared method: Sparse Autoencoders",
+						sourceDescription: "Uses SAE features as retrieval signals.",
+						targetDescription: "Uses SAE features to explain model behavior.",
+						sourcePromptVersion: "paper-compile-hierarchical-v1",
+						targetPromptVersion: "paper-compile-hierarchical-v1",
+						sourceEvidenceBlockIds: ["blk-sae-source"],
+						targetEvidenceBlockIds: ["blk-sae-target"],
+						sourceEvidenceSnippets: [
+							{ blockId: "blk-sae-source", snippet: "SAE features are used for retrieval." },
+						],
+						targetEvidenceSnippets: [
+							{ blockId: "blk-sae-target", snippet: "SAE features explain model behavior." },
+						],
+					},
+					{
+						kind: "task",
+						sourcePaperId: "paper-1",
+						targetPaperId: "paper-2",
+						sourceConceptId: "concept-3",
+						targetConceptId: "concept-4",
+						sourceConceptName: "Feature Retrieval",
+						targetConceptName: "Feature Interpretability",
+						matchMethod: "embedding",
+						similarityScore: 0.84,
+						llmDecision: "related",
+						llmConfidence: 0.86,
+						decisionStatus: "ai_confirmed",
+						rationale: "Both tasks compare feature-level evidence across papers.",
+						sourceDescription: "Retrieves features for downstream analysis.",
+						targetDescription: "Interprets features in model activations.",
+						sourcePromptVersion: "paper-compile-hierarchical-v1",
+						targetPromptVersion: "paper-compile-hierarchical-v1",
+						sourceEvidenceBlockIds: ["blk-retrieval"],
+						targetEvidenceBlockIds: ["blk-interpretability"],
+						sourceEvidenceSnippets: [
+							{
+								blockId: "blk-retrieval",
+								snippet: "Feature retrieval supports downstream analysis.",
+							},
+						],
+						targetEvidenceSnippets: [
+							{
+								blockId: "blk-interpretability",
+								snippet: "Feature interpretability studies activations.",
+							},
+						],
+					},
+				],
+			},
+		],
+	},
+} satisfies Record<string, unknown>
+
+const suggestedPaperGraphPayload = {
+	workspaceId: "ws-1",
+	view: "papers",
+	graph: {
+		nodeCount: 2,
+		edgeCount: 1,
+		nodes: [
+			{
+				id: "paper-attention",
+				paperId: "paper-attention",
+				label: "Attention Is All You Need",
+				title: "Attention Is All You Need",
+				authors: ["Vaswani"],
+				year: 2017,
+				venue: "NeurIPS",
+				summaryStatus: "done",
+				conceptCount: 1,
+				degree: 1,
+				topConcepts: [],
+			},
+			{
+				id: "paper-survey",
+				paperId: "paper-survey",
+				label: "LLMs in Politics and Democracy",
+				title: "LLMs in Politics and Democracy",
+				authors: ["Ada"],
+				year: 2026,
+				venue: "arXiv",
+				summaryStatus: "done",
+				conceptCount: 1,
+				degree: 1,
+				topConcepts: [],
+			},
+		],
+		edges: [
+			{
+				id: "paper-edge:paper-attention:paper-survey",
+				source: "paper-attention",
+				target: "paper-survey",
+				edgeKind: "similar_methods",
+				weight: 0.807,
+				status: "active",
+				isRetained: false,
+				hasReaderNoteEvidence: false,
+				lastConfirmedAt: null,
+				evidenceCount: 1,
+				strongEvidenceCount: 0,
+				maxSimilarity: 0.717,
+				avgSimilarity: 0.717,
+				kinds: ["method"],
+				topEvidence: [
+					{
+						kind: "method",
+						sourcePaperId: "paper-survey",
+						targetPaperId: "paper-attention",
+						sourceConceptId: "concept-transformer-architecture",
+						targetConceptId: "concept-transformer",
+						sourceConceptName: "Transformer architecture",
+						targetConceptName: "Transformer",
+						matchMethod: "embedding",
+						similarityScore: 0.717,
+						llmDecision: null,
+						llmConfidence: null,
+						decisionStatus: "candidate",
+						rationale: "embedding=0.717",
+						sourceDescription: "A family of Transformer-based LLM architectures.",
+						targetDescription: "The Transformer architecture proposed by the paper.",
+						sourcePromptVersion: "paper-compile-hierarchical-v1",
+						targetPromptVersion: "paper-compile-hierarchical-v1",
+						sourceEvidenceBlockIds: ["blk-survey"],
+						targetEvidenceBlockIds: ["blk-transformer"],
+						sourceEvidenceSnippets: [
+							{ blockId: "blk-survey", snippet: "Modern LLMs use Transformer architectures." },
+						],
+						targetEvidenceSnippets: [
+							{ blockId: "blk-transformer", snippet: "The Transformer relies entirely on attention." },
+						],
+					},
+				],
+			},
+		],
+	},
+} satisfies Record<string, unknown>
+
 describe("graph route", () => {
 	beforeEach(() => {
 		selectMock.mockReset()
@@ -35,6 +246,7 @@ describe("graph route", () => {
 
 	it("returns a paper graph by default from shared and semantic concept evidence", async () => {
 		selectMock
+			.mockReturnValueOnce(stableSnapshotMock(sharedEvidencePaperGraphPayload))
 			.mockReturnValueOnce({
 				from: () => ({
 					innerJoin: () => ({
@@ -248,6 +460,7 @@ describe("graph route", () => {
 
 	it("surfaces high-signal unreviewed semantic candidates as suggested paper links", async () => {
 		selectMock
+			.mockReturnValueOnce(stableSnapshotMock(suggestedPaperGraphPayload))
 			.mockReturnValueOnce({
 				from: () => ({
 					innerJoin: () => ({

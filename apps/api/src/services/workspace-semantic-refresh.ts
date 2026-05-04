@@ -13,6 +13,7 @@ import {
 import { judgeWorkspaceSemanticCandidates } from "./semantic-candidate-judgement"
 import { LlmCredentialMissingError } from "./llm-client"
 import { compileWorkspaceConceptClusterCandidates } from "./workspace-concept-cluster-candidates"
+import { refreshWorkspacePaperGraph } from "./workspace-paper-graph"
 
 export async function refreshWorkspaceSemanticLayer(
 	args: WorkspaceSemanticRefreshJobData,
@@ -60,6 +61,7 @@ export async function refreshWorkspaceSemanticLayer(
 			}
 		}
 	}
+	await refreshWorkspacePaperGraph({ workspaceId: args.workspaceId, userId: args.userId })
 
 	return {
 		workspaceId: args.workspaceId,

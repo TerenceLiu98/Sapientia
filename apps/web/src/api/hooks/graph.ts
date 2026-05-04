@@ -120,6 +120,13 @@ export type PaperGraphNode = {
 		id: string
 		displayName: string
 		kind: PaperWikiConcept["kind"]
+		hasReaderNoteEvidence?: boolean
+	}>
+	searchConcepts?: Array<{
+		id: string
+		displayName: string
+		kind: PaperWikiConcept["kind"]
+		hasReaderNoteEvidence?: boolean
 	}>
 }
 
@@ -135,6 +142,10 @@ export type PaperGraphEdge = {
 		| "semantic_neighbor"
 		| "mixed"
 	weight: number
+	status?: "active" | "stale"
+	isRetained?: boolean
+	hasReaderNoteEvidence?: boolean
+	lastConfirmedAt?: string | null
 	evidenceCount: number
 	strongEvidenceCount: number
 	maxSimilarity: number | null
@@ -158,6 +169,8 @@ export type PaperGraphEdge = {
 		targetDescription: string | null
 		sourcePromptVersion?: string | null
 		targetPromptVersion?: string | null
+		sourceHasReaderNoteEvidence?: boolean
+		targetHasReaderNoteEvidence?: boolean
 		sourceEvidenceBlockIds: string[]
 		targetEvidenceBlockIds: string[]
 		sourceEvidenceSnippets: Array<{

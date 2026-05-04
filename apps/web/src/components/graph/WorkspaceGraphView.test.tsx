@@ -84,6 +84,10 @@ vi.mock("sigma", () => ({
 	default: sigmaMock,
 }))
 
+vi.mock("@sigma/edge-curve", () => ({
+	default: vi.fn(),
+}))
+
 vi.mock("@tanstack/react-router", () => ({
 	Link: ({
 		children,

@@ -44,7 +44,7 @@ describe("concept description", () => {
 		completeObjectMock.mockReset()
 	})
 
-	it("generates source-level descriptions and marks missing concept outputs failed", async () => {
+	it("generates source-level descriptions and retries missing concept outputs individually", async () => {
 		selectMock
 			.mockReturnValueOnce({
 				from: () => ({
@@ -167,20 +167,35 @@ describe("concept description", () => {
 			},
 		}))
 		getLlmCredentialMock.mockResolvedValue({ model: "model-1" })
-		completeObjectMock.mockResolvedValue({
-			model: "model-1",
-			object: {
-				concepts: [
-					{
-						localConceptId: "concept-1",
-						description:
-							"In this paper, sparse feature steering is the intervention used to modify model behavior through sparse features.",
-						confidence: 0.82,
-						usedEvidenceBlockIds: ["blk-1", "not-a-real-block"],
-					},
-				],
-			},
-		})
+		completeObjectMock
+			.mockResolvedValueOnce({
+				model: "model-1",
+				object: {
+					concepts: [
+						{
+							localConceptId: "concept-1",
+							description:
+								"In this paper, sparse feature steering is the intervention used to modify model behavior through sparse features.",
+							confidence: 0.82,
+							usedEvidenceBlockIds: ["blk-1", "not-a-real-block"],
+						},
+					],
+				},
+			})
+			.mockResolvedValueOnce({
+				model: "model-1",
+				object: {
+					concepts: [
+						{
+							localConceptId: "concept-2",
+							description:
+								"In this paper, faithfulness score measures whether the reported intervention preserves evidence.",
+							confidence: 0.76,
+							usedEvidenceBlockIds: ["blk-2"],
+						},
+					],
+				},
+			})
 
 		const { compilePaperConceptDescriptions } = await import("./concept-description")
 		const result = await compilePaperConceptDescriptions({
@@ -192,9 +207,9 @@ describe("concept description", () => {
 		expect(result).toMatchObject({
 			paperId: "paper-1",
 			workspaceId: "workspace-1",
-			describedConceptCount: 1,
+			describedConceptCount: 2,
 			skippedConceptCount: 0,
-			failedConceptCount: 1,
+			failedConceptCount: 0,
 			readerSignalConceptCount: 2,
 		})
 
@@ -208,6 +223,7 @@ describe("concept description", () => {
 				maxTokens: 12_000,
 			}),
 		)
+		expect(completeObjectMock).toHaveBeenCalledTimes(2)
 
 		expect(updatedRows).toEqual(
 			expect.arrayContaining([
@@ -237,8 +253,15 @@ describe("concept description", () => {
 					confidenceScore: 0.82,
 				}),
 				expect.objectContaining({
-					sourceLevelDescriptionStatus: "failed",
-					sourceLevelDescriptionError: "missing concept in LLM output",
+					sourceLevelDescription:
+						"In this paper, faithfulness score measures whether the reported intervention preserves evidence.",
+					sourceLevelDescriptionConfidence: 0.76,
+					sourceLevelDescriptionModel: "model-1",
+					sourceLevelDescriptionPromptVersion: "concept-source-description-v1",
+					sourceLevelDescriptionStatus: "done",
+					semanticDirtyAt: expect.any(Date),
+					semanticFingerprint: expect.any(String),
+					confidenceScore: 0.76,
 				}),
 			]),
 		)

@@ -13,9 +13,10 @@ import {
 import Graph from "graphology"
 import { ExternalLink, LocateFixed, Search, X } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import EdgeCurveProgram from "@sigma/edge-curve"
 import Sigma from "sigma"
+import type { EdgeProgramType } from "sigma/rendering"
 import { type PaperGraphPayload, useWorkspaceGraph } from "@/api/hooks/graph"
-import { useRetryPaperKnowledge } from "@/api/hooks/papers"
 import type { Workspace } from "@/api/hooks/workspaces"
 
 type Selection = { kind: "node"; id: string } | { kind: "edge"; id: string } | null
@@ -44,9 +45,16 @@ type SigmaEdgeAttributes = {
 	baseColor: string
 	relationType: string
 	confidence: number
+	status: "active" | "stale"
+	type?: string
+	curvature?: number
 	zIndex?: number
 }
 type PaperSigmaGraph = Graph<SigmaNodeAttributes, SigmaEdgeAttributes>
+const PaperEdgeCurveProgram = EdgeCurveProgram as unknown as EdgeProgramType<
+	SigmaNodeAttributes,
+	SigmaEdgeAttributes
+>
 
 const PAPER_EDGE_KIND_OPTIONS: Array<{ kind: PaperEdgeKind; label: string }> = [
 	{ kind: "shared_concepts", label: "shared concepts" },
@@ -56,7 +64,6 @@ const PAPER_EDGE_KIND_OPTIONS: Array<{ kind: PaperEdgeKind; label: string }> = [
 	{ kind: "semantic_neighbor", label: "semantic neighbor" },
 	{ kind: "mixed", label: "mixed evidence" },
 ]
-const NOTE_CONCEPT_PROMPT_VERSION = "note-concept-extract-v1"
 
 export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undefined }) {
 	const [selection, setSelection] = useState<Selection>(null)
@@ -131,11 +138,9 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 				data={paperData}
 				onClear={clearGraphState}
 				onFit={() => setFitNonce((value) => value + 1)}
-				onSearchChange={setSearchQuery}
 				onToggleKind={(kind) => {
 					setActiveEdgeKinds((current) => toggleEdgeKind(current, kind))
 				}}
-				searchQuery={searchQuery}
 				visibleLinkCount={filteredData?.graph.edgeCount ?? 0}
 			/>
 			<div className="min-h-0 flex-1 p-3 lg:p-4">
@@ -149,10 +154,10 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 					<GraphCanvasPanels
 						data={filteredData ?? paperData}
 						onClearSelection={() => setSelection(null)}
+						onSearchChange={setSearchQuery}
 						onSelect={setSelection}
 						searchQuery={searchQuery}
 						selection={selection}
-						workspaceId={workspace.id}
 					/>
 					<GraphLegend />
 				</section>
@@ -166,18 +171,14 @@ function GraphToolbar({
 	data,
 	onClear,
 	onFit,
-	onSearchChange,
 	onToggleKind,
-	searchQuery,
 	visibleLinkCount,
 }: {
 	activeEdgeKinds: Set<PaperEdgeKind>
 	data: PaperGraphPayload
 	onClear: () => void
 	onFit: () => void
-	onSearchChange: (value: string) => void
 	onToggleKind: (kind: PaperEdgeKind) => void
-	searchQuery: string
 	visibleLinkCount: number
 }) {
 	return (
@@ -194,17 +195,6 @@ function GraphToolbar({
 					</div>
 				</div>
 				<div className="flex flex-wrap items-center justify-end gap-2">
-					<label className="relative block min-w-0">
-						<span className="sr-only">Search papers</span>
-						<Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-text-tertiary" />
-						<input
-							className="h-9 w-[min(18rem,70vw)] rounded-md border border-border-subtle bg-bg-primary pr-3 pl-8 text-sm text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-border-strong"
-							onChange={(event) => onSearchChange(event.target.value)}
-							placeholder="Search papers, authors, concepts"
-							type="search"
-							value={searchQuery}
-						/>
-					</label>
 					<button
 						className="inline-flex h-9 items-center gap-2 rounded-md border border-border-subtle bg-bg-primary px-3 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
 						onClick={onFit}
@@ -282,15 +272,16 @@ function WorkspaceGraphCanvas({
 
 		const computedStyle = getComputedStyle(document.documentElement)
 		const textPrimary = cssColorVar("--color-text-primary", "#2f2a24")
-		const edgeDefault = cssColorVar("--graph-edge-default", "rgba(100, 92, 82, 0.45)")
-		const edgeActive = cssColorVar("--graph-edge-active", "#2f7f8f")
+		const edgeDefault = cssColorVar("--graph-edge-default", "rgb(34, 34, 34)")
+		const edgeActive = cssColorVar("--graph-edge-active", "rgb(18, 18, 18)")
 		const edgeMinWidth = cssNumberVar(computedStyle, "--graph-edge-width-min", 0.5)
 		const edgeMaxWidth = cssNumberVar(computedStyle, "--graph-edge-width-max", 3)
 		const nodeMinRadius = cssNumberVar(computedStyle, "--graph-node-radius-min", 4)
 		const nodeMaxRadius = cssNumberVar(computedStyle, "--graph-node-radius-max", 16)
 		const colors = {
-			paper: cssColorVar("--graph-node-source", "#7f7a72"),
-			fallback: cssColorVar("--graph-node-source", "#7f7a72"),
+			paper: cssColorVar("--graph-node-source", "rgb(0, 78, 80)"),
+			fallback: cssColorVar("--graph-node-source", "rgb(0, 78, 80)"),
+			mutedNode: cssColorVar("--color-border-strong", "rgb(135, 126, 114)"),
 			edgeDefault,
 			edgeActive,
 		}
@@ -307,8 +298,12 @@ function WorkspaceGraphCanvas({
 			autoCenter: true,
 			autoRescale: true,
 			enableEdgeEvents: true,
+			defaultEdgeType: "curved",
 			defaultDrawNodeHover: () => {},
 			defaultDrawNodeLabel: () => {},
+			edgeProgramClasses: {
+				curved: PaperEdgeCurveProgram,
+			},
 			labelColor: { color: textPrimary },
 			labelDensity: 0,
 			labelRenderedSizeThreshold: 12,
@@ -324,10 +319,10 @@ function WorkspaceGraphCanvas({
 				if (!involved) {
 					return {
 						...attributes,
-						color: colorWithAlpha(attributes.baseColor, 0.22),
+						color: colorWithAlpha(colors.mutedNode, 0.72),
 						forceLabel: false,
 						label: "",
-						size: Math.max(attributes.size * 0.76, nodeMinRadius),
+						size: Math.max(attributes.size * 0.86, nodeMinRadius),
 						zIndex: 0,
 					}
 				}
@@ -350,8 +345,8 @@ function WorkspaceGraphCanvas({
 				if (!involved) {
 					return {
 						...attributes,
-						color: colorWithAlpha(attributes.baseColor, 0.18),
-						size: Math.max(attributes.size * 0.6, edgeMinWidth),
+						color: colorWithAlpha(attributes.baseColor, 0.34),
+						size: Math.max(attributes.size * 0.78, edgeMinWidth),
 						zIndex: 0,
 					}
 				}
@@ -470,17 +465,17 @@ function GraphLegend() {
 function GraphCanvasPanels({
 	data,
 	onClearSelection,
+	onSearchChange,
 	onSelect,
 	selection,
 	searchQuery,
-	workspaceId,
 }: {
 	data: PaperGraphPayload
 	selection: Selection
 	searchQuery: string
-	workspaceId: string
 	onSelect: (selection: Selection) => void
 	onClearSelection: () => void
+	onSearchChange: (value: string) => void
 }) {
 	const selectedNode =
 		selection?.kind === "node" ? data.graph.nodes.find((node) => node.id === selection.id) : null
@@ -516,16 +511,18 @@ function GraphCanvasPanels({
 
 	return (
 		<>
-			{normalizedQuery ? (
-				<GraphSearchResults
-					onSelect={onSelect}
-					papers={topPapers}
-					papersById={papersById}
-					strongEdges={topEdges}
-				/>
-			) : !selection ? (
-				<GraphCanvasHint />
-			) : null}
+			<GraphSearchDock onSearchChange={onSearchChange} searchQuery={searchQuery}>
+				{normalizedQuery ? (
+					<GraphSearchResults
+						onSelect={onSelect}
+						papers={topPapers}
+						papersById={papersById}
+						strongEdges={topEdges}
+					/>
+				) : !selection ? (
+					<GraphCanvasHint />
+				) : null}
+			</GraphSearchDock>
 			{selectedEdge ? (
 				<GraphDetailSheet heading="Evidence" onClose={onClearSelection}>
 					<PaperEdgeCard edge={selectedEdge} papersById={papersById} onSelect={onSelect} />
@@ -537,7 +534,6 @@ function GraphCanvasPanels({
 						onSelect={onSelect}
 						paper={selectedNode}
 						papersById={papersById}
-						workspaceId={workspaceId}
 					/>
 				</GraphDetailSheet>
 			) : null}
@@ -545,9 +541,36 @@ function GraphCanvasPanels({
 	)
 }
 
+function GraphSearchDock({
+	children,
+	onSearchChange,
+	searchQuery,
+}: {
+	children: ReactNode
+	onSearchChange: (value: string) => void
+	searchQuery: string
+}) {
+	return (
+		<div className="absolute top-3 left-3 z-[var(--z-elevated)] w-[min(24rem,calc(100%-1.5rem))] rounded-lg border border-border-subtle bg-bg-secondary/95 p-2 shadow-[var(--shadow-md)] backdrop-blur">
+			<label className="relative block min-w-0">
+				<span className="sr-only">Search papers</span>
+				<Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-text-tertiary" />
+				<input
+					className="h-9 w-full rounded-md border border-border-subtle bg-bg-primary pr-3 pl-8 text-sm text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-border-strong"
+					onChange={(event) => onSearchChange(event.target.value)}
+					placeholder="Search papers, authors, concepts"
+					type="search"
+					value={searchQuery}
+				/>
+			</label>
+			{children}
+		</div>
+	)
+}
+
 function GraphCanvasHint() {
 	return (
-		<div className="pointer-events-none absolute top-3 left-3 max-w-[20rem] rounded-md border border-border-subtle bg-bg-primary/90 px-3 py-2 text-xs leading-5 text-text-secondary shadow-[var(--shadow-sm)]">
+		<div className="pointer-events-none mt-2 rounded-md border border-border-subtle bg-bg-primary px-3 py-2 text-xs leading-5 text-text-secondary">
 			Click a paper to expand its concepts and connections. Click a link to inspect the evidence.
 		</div>
 	)
@@ -565,7 +588,7 @@ function GraphSearchResults({
 	strongEdges: PaperEdge[]
 }) {
 	return (
-		<div className="absolute top-3 left-3 z-[var(--z-elevated)] max-h-[min(34rem,calc(100%-2rem))] w-[min(24rem,calc(100%-1.5rem))] overflow-auto rounded-lg border border-border-subtle bg-bg-secondary/95 p-3 shadow-[var(--shadow-md)] backdrop-blur">
+		<div className="mt-2 max-h-[min(30rem,calc(100vh-18rem))] overflow-auto rounded-md border border-border-subtle bg-bg-primary p-3">
 			<div className="text-xs uppercase tracking-[0.18em] text-text-tertiary">Search</div>
 			<div className="mt-2 rounded-md border border-border-subtle bg-bg-primary px-3 py-2 text-xs text-text-secondary">
 				{papers.length} paper match{papers.length === 1 ? "" : "es"} · {strongEdges.length}{" "}
@@ -639,16 +662,12 @@ function PaperNodeCard({
 	onSelect,
 	paper,
 	papersById,
-	workspaceId,
 }: {
 	edges: PaperEdge[]
 	onSelect: (selection: Selection) => void
 	paper: PaperNode
 	papersById: Map<string, PaperNode>
-	workspaceId: string
 }) {
-	const showRebuildAction = paper.conceptCount === 0 || paper.degree === 0
-
 	return (
 		<div className="mt-3 rounded-lg border border-border-subtle bg-bg-primary p-3">
 			<div className="text-sm font-medium text-text-primary">{paper.title}</div>
@@ -672,9 +691,6 @@ function PaperNodeCard({
 					<ExternalLink className="h-3.5 w-3.5" />
 					Open paper
 				</Link>
-				{showRebuildAction ? (
-					<PaperRebuildAction paperId={paper.paperId} workspaceId={workspaceId} />
-				) : null}
 			</div>
 			{paper.topConcepts.length > 0 ? (
 				<div className="mt-3 flex flex-wrap gap-1.5">
@@ -685,6 +701,9 @@ function PaperNodeCard({
 						>
 							<span className="font-medium text-text-primary">{concept.displayName}</span>
 							<span className="text-text-tertiary"> · {concept.kind}</span>
+							{concept.hasReaderNoteEvidence ? (
+								<span className="text-text-tertiary"> · reader note</span>
+							) : null}
 						</span>
 					))}
 				</div>
@@ -704,26 +723,6 @@ function PaperNodeCard({
 					<EmptyInspectorLine>No visible paper links.</EmptyInspectorLine>
 				)}
 			</InspectorSection>
-		</div>
-	)
-}
-
-function PaperRebuildAction({ paperId, workspaceId }: { paperId: string; workspaceId: string }) {
-	const retryKnowledge = useRetryPaperKnowledge(workspaceId)
-
-	return (
-		<div className="min-w-0">
-			<button
-				className="inline-flex h-8 items-center rounded-md border border-border-subtle bg-bg-secondary px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
-				disabled={retryKnowledge.isPending}
-				onClick={() => retryKnowledge.mutate(paperId)}
-				type="button"
-			>
-				{retryKnowledge.isPending ? "Queueing..." : "Rebuild links"}
-			</button>
-			{retryKnowledge.error instanceof Error ? (
-				<div className="mt-2 text-xs text-text-error">{retryKnowledge.error.message}</div>
-			) : null}
 		</div>
 	)
 }
@@ -753,6 +752,8 @@ function PaperNodeConnectionButton({
 			</span>
 			<span className="mt-0.5 block text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · strength {formatPercent(edge.weight)}
+				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
+				{edge.hasReaderNoteEvidence ? " · reader note" : ""}
 			</span>
 			{strongestEvidence ? (
 				<span className="mt-1 line-clamp-2 block leading-5 text-text-secondary">
@@ -786,6 +787,7 @@ function PaperEdgeButton({
 			<span className="mt-1 block text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · {edge.evidenceCount} evidence ·{" "}
 				{formatPercent(edge.weight)}
+				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
 			</span>
 		</button>
 	)
@@ -826,6 +828,8 @@ function PaperEdgeCard({
 			<div className="mt-1 text-xs leading-5 text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · {edge.evidenceCount} evidence ·{" "}
 				{edge.strongEvidenceCount} strong · strength {formatPercent(edge.weight)}
+				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
+				{edge.hasReaderNoteEvidence ? " · reader note" : ""}
 			</div>
 			<div className="mt-3 flex flex-wrap gap-2">
 				{source ? (
@@ -865,8 +869,7 @@ function PaperEdgeCard({
 							{evidence.decisionStatus === "candidate" || evidence.decisionStatus === "needs_review"
 								? " · suggested"
 								: ""}
-							{evidence.sourcePromptVersion === NOTE_CONCEPT_PROMPT_VERSION ||
-							evidence.targetPromptVersion === NOTE_CONCEPT_PROMPT_VERSION
+							{evidence.sourceHasReaderNoteEvidence || evidence.targetHasReaderNoteEvidence
 								? " · reader note"
 								: ""}
 						</div>
@@ -1094,13 +1097,22 @@ function buildPaperSigmaGraph(
 	}
 	for (const edge of data.graph.edges) {
 		if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue
+		const edgeColor =
+			edge.status === "stale"
+				? colorWithAlpha(colors.edgeDefault, 0.3)
+				: edge.isRetained
+					? colorWithAlpha(colors.edgeDefault, 0.5)
+					: colorWithAlpha(colors.edgeDefault, 0.66)
 		graph.addUndirectedEdgeWithKey(edge.id, edge.source, edge.target, {
 			size: edgeWidthForWeight(edge.weight, sizing.edgeMinWidth, sizing.edgeMaxWidth),
 			label: edge.edgeKind,
-			color: colors.edgeDefault,
-			baseColor: colors.edgeDefault,
+			color: edgeColor,
+			baseColor: edgeColor,
 			relationType: edge.edgeKind,
 			confidence: edge.weight,
+			status: edge.status ?? "active",
+			type: "curved",
+			curvature: curvatureForEdge(edge.id),
 			zIndex: Math.round(edge.weight * 10),
 		})
 	}
@@ -1141,13 +1153,13 @@ function computePaperForceLayout(data: PaperGraphPayload) {
 			"link",
 			forceLink<ForceNode, ForceLink>(links)
 				.id((node) => node.id)
-				.distance(90)
-				.strength(0.28),
+				.distance(190)
+				.strength(0.09),
 		)
-		.force("charge", forceManyBody().strength(-170))
+		.force("charge", forceManyBody().strength(-520))
 		.force(
 			"collide",
-			forceCollide<ForceNode>().radius((node) => node.radius + 8),
+			forceCollide<ForceNode>().radius((node) => node.radius + 30),
 		)
 		.force("center", forceCenter(0, 0))
 		.stop()
@@ -1197,27 +1209,27 @@ function startPaperPhysicsSimulation(
 	const simulation = forceSimulation<PhysicsNode>(nodes)
 		.alpha(0.8)
 		.alphaDecay(0.032)
-		.velocityDecay(0.34)
+		.velocityDecay(0.38)
 		.force(
 			"link",
 			forceLink<PhysicsNode, PhysicsLink>(links)
 				.id((node) => node.id)
-				.distance((link) => 165 - Math.max(0, Math.min(1, link.weight)) * 80)
-				.strength((link) => 0.06 + Math.max(0, Math.min(1, link.weight)) * 0.24),
+				.distance((link) => 300 - Math.max(0, Math.min(1, link.weight)) * 85)
+				.strength((link) => 0.018 + Math.max(0, Math.min(1, link.weight)) * 0.075),
 		)
 		.force(
 			"charge",
-			forceManyBody<PhysicsNode>().strength((node) => -120 - Math.min(130, node.radius * 5)),
+			forceManyBody<PhysicsNode>().strength((node) => -380 - Math.min(300, node.radius * 10)),
 		)
 		.force(
 			"collide",
 			forceCollide<PhysicsNode>()
-				.radius((node) => node.radius + 16)
-				.strength(0.85),
+				.radius((node) => node.radius + 34)
+				.strength(0.92),
 		)
 		.force("center", forceCenter(0, 0))
-		.force("gravity-x", forceX<PhysicsNode>(0).strength(0.018))
-		.force("gravity-y", forceY<PhysicsNode>(0).strength(0.018))
+		.force("gravity-x", forceX<PhysicsNode>(0).strength(0.006))
+		.force("gravity-y", forceY<PhysicsNode>(0).strength(0.006))
 		.on("tick", () => {
 			for (const node of nodes) {
 				if (graph.hasNode(node.id)) {
@@ -1300,6 +1312,7 @@ function matchesPaperSearch(paper: PaperNode, normalizedQuery: string) {
 		paper.venue,
 		String(paper.year ?? ""),
 		...paper.authors,
+		...(paper.searchConcepts ?? []).flatMap((concept) => [concept.displayName, concept.kind]),
 		...paper.topConcepts.flatMap((concept) => [concept.displayName, concept.kind]),
 	]
 	return haystack.some((value) => normalizeSearch(value ?? "").includes(normalizedQuery))
@@ -1350,6 +1363,15 @@ function edgeWidthForWeight(weight: number, min: number, max: number) {
 	return clampSize(min + (max - min) * Math.max(0, Math.min(1, weight)), min, max)
 }
 
+function curvatureForEdge(edgeId: string) {
+	let hash = 0
+	for (let index = 0; index < edgeId.length; index += 1) {
+		hash = (hash * 31 + edgeId.charCodeAt(index)) >>> 0
+	}
+	const sign = hash % 2 === 0 ? 1 : -1
+	return sign * (0.14 + (hash % 3) * 0.025)
+}
+
 function clampSize(value: number, min: number, max: number) {
 	return Math.min(Math.max(value, min), max)
 }
@@ -1378,11 +1400,12 @@ function normalizeSearch(value: string) {
 }
 
 function colorWithAlpha(color: string, alpha: number) {
-	if (color.startsWith("rgb(")) return color.replace("rgb(", "rgba(").replace(")", `, ${alpha})`)
-	if (color.startsWith("rgba(")) {
-		return color.replace(/rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)/, `rgba($1,$2,$3, ${alpha})`)
+	const resolved = resolveCssColor(color, color)
+	if (resolved.startsWith("rgb(")) return resolved.replace("rgb(", "rgba(").replace(")", `, ${alpha})`)
+	if (resolved.startsWith("rgba(")) {
+		return resolved.replace(/rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)/, `rgba($1,$2,$3, ${alpha})`)
 	}
-	return color
+	return resolved
 }
 
 function errorMessage(error: unknown) {
@@ -1392,13 +1415,20 @@ function errorMessage(error: unknown) {
 
 function cssColorVar(name: string, fallback: string) {
 	if (typeof document === "undefined") return fallback
+	return resolveCssColor(`var(${name})`, fallback)
+}
+
+function resolveCssColor(color: string, fallback: string) {
+	if (typeof document === "undefined") return fallback
 	const probe = document.createElement("span")
-	probe.style.color = `var(${name})`
+	probe.style.color = color
 	probe.style.display = "none"
 	document.body.appendChild(probe)
 	const value = getComputedStyle(probe).color
 	probe.remove()
-	return value || fallback
+	if (!value) return fallback
+	if (value.startsWith("rgb(") || value.startsWith("rgba(") || value.startsWith("#")) return value
+	return fallback
 }
 
 function cssNumberVar(style: CSSStyleDeclaration, name: string, fallback: number) {

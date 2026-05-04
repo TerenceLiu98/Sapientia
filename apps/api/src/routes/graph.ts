@@ -15,6 +15,7 @@ import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { loadStablePaperGraphPayload } from "../services/workspace-paper-graph"
 
 const GRAPH_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric"])
 const PAPER_GRAPH_DISPLAY_THRESHOLD = 0.7
@@ -37,7 +38,7 @@ graphRoutes.get(
 		const view = c.req.query("view") ?? "papers"
 
 		if (view === "papers") {
-			return c.json(await loadPaperGraphPayload({ workspaceId, userId: user.id }))
+			return c.json(await loadStablePaperGraphPayload({ workspaceId, userId: user.id }))
 		}
 		if (view !== "concepts") {
 			return c.json({ error: "invalid graph view" }, 400)
@@ -886,6 +887,8 @@ function uniqueEvidenceSnippets(items: Array<{ blockId: string; snippet: string 
 	}
 	return unique
 }
+
+void loadPaperGraphPayload
 
 function buildSemanticCandidateCounts(rows: Array<{ decisionStatus: string; count: number }>) {
 	const counts = {

@@ -141,7 +141,25 @@ export async function compileWorkspaceConceptClusterCandidates(args: {
 					promptVersion: candidate.promptVersion ?? LEXICAL_PROMPT_VERSION,
 				})),
 			)
-			.onConflictDoNothing()
+			.onConflictDoUpdate({
+				target: [
+					workspaceConceptClusterCandidates.workspaceId,
+					workspaceConceptClusterCandidates.ownerUserId,
+					workspaceConceptClusterCandidates.sourceLocalConceptId,
+					workspaceConceptClusterCandidates.targetLocalConceptId,
+				],
+				set: {
+					sourceClusterId: sql`excluded.source_cluster_id`,
+					targetClusterId: sql`excluded.target_cluster_id`,
+					matchMethod: sql`excluded.match_method`,
+					similarityScore: sql`excluded.similarity_score`,
+					rationale: sql`excluded.rationale`,
+					modelName: sql`excluded.model_name`,
+					promptVersion: sql`excluded.prompt_version`,
+					deletedAt: null,
+					updatedAt: new Date(),
+				},
+			})
 			.returning({ id: workspaceConceptClusterCandidates.id })
 		insertedCandidateCount = inserted.length
 	})

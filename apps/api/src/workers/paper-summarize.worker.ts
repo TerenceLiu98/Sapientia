@@ -21,6 +21,7 @@ import {
 	PAPER_COMPILE_PROMPT_VERSION,
 } from "../services/paper-compile"
 import { compileWorkspaceConceptClusters } from "../services/workspace-concept-clusters"
+import { refreshWorkspacePaperGraph } from "../services/workspace-paper-graph"
 
 const CURRENT_PROMPT_VERSION = PAPER_COMPILE_PROMPT_VERSION
 
@@ -101,6 +102,7 @@ async function processPaperSummarize(
 				reason: "paper-compile",
 			})
 			await enqueuePaperInnerGraphCompile({ paperId, userId, workspaceId })
+			await refreshWorkspacePaperGraph({ workspaceId, userId })
 		}
 
 		return {

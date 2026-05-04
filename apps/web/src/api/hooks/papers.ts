@@ -271,6 +271,7 @@ export function usePaperBlockConceptLens(
 			),
 		enabled: Boolean(workspaceId) && Boolean(paperId) && Boolean(blockId),
 		retry: false,
+		refetchInterval: 15_000,
 	})
 }
 

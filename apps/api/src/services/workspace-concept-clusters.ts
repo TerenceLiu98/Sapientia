@@ -4,7 +4,7 @@ import {
 	workspaceConceptClusterMembers,
 	workspaceConceptClusters,
 } from "@sapientia/db"
-import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm"
 import { db } from "../db"
 
 type ConceptKind = "concept" | "method" | "task" | "metric" | "dataset" | "person" | "organization"
@@ -71,16 +71,30 @@ export async function compileWorkspaceConceptClusters(args: {
 			sql`select pg_advisory_xact_lock(hashtext(${`workspace-concept-clusters:${workspaceId}:${userId}`}))`,
 		)
 
-		await tx
-			.delete(workspaceConceptClusters)
-			.where(
-				and(
-					eq(workspaceConceptClusters.workspaceId, workspaceId),
-					eq(workspaceConceptClusters.ownerUserId, userId),
-				),
-			)
-
-		if (clusterDrafts.length === 0) return
+		if (clusterDrafts.length === 0) {
+			const staleClusters = await tx
+				.update(workspaceConceptClusters)
+				.set({ deletedAt: now, updatedAt: now })
+				.where(
+					and(
+						eq(workspaceConceptClusters.workspaceId, workspaceId),
+						eq(workspaceConceptClusters.ownerUserId, userId),
+						isNull(workspaceConceptClusters.deletedAt),
+					),
+				)
+				.returning({ id: workspaceConceptClusters.id })
+			if (staleClusters.length > 0) {
+				await tx
+					.delete(workspaceConceptClusterMembers)
+					.where(
+						inArray(
+							workspaceConceptClusterMembers.clusterId,
+							staleClusters.map((cluster) => cluster.id),
+						),
+					)
+			}
+			return
+		}
 
 		const insertedClusters = await tx
 			.insert(workspaceConceptClusters)
@@ -98,8 +112,28 @@ export async function compileWorkspaceConceptClusters(args: {
 					status: "done" as const,
 					error: null,
 					updatedAt: now,
+					deletedAt: null,
 				})),
 			)
+			.onConflictDoUpdate({
+				target: [
+					workspaceConceptClusters.ownerUserId,
+					workspaceConceptClusters.workspaceId,
+					workspaceConceptClusters.kind,
+					workspaceConceptClusters.canonicalName,
+				],
+				set: {
+					displayName: sql`excluded.display_name`,
+					memberCount: sql`excluded.member_count`,
+					paperCount: sql`excluded.paper_count`,
+					salienceScore: sql`excluded.salience_score`,
+					confidence: sql`excluded.confidence`,
+					status: "done",
+					error: null,
+					deletedAt: null,
+					updatedAt: now,
+				},
+			})
 			.returning({
 				id: workspaceConceptClusters.id,
 				kind: workspaceConceptClusters.kind,
@@ -112,6 +146,27 @@ export async function compileWorkspaceConceptClusters(args: {
 				cluster.id,
 			]),
 		)
+		const activeClusterIds = insertedClusters.map((cluster) => cluster.id)
+		const staleClusters = await tx
+			.update(workspaceConceptClusters)
+			.set({ deletedAt: now, updatedAt: now })
+			.where(
+				and(
+					eq(workspaceConceptClusters.workspaceId, workspaceId),
+					eq(workspaceConceptClusters.ownerUserId, userId),
+					activeClusterIds.length > 0
+						? notInArray(workspaceConceptClusters.id, activeClusterIds)
+						: sql`true`,
+					isNull(workspaceConceptClusters.deletedAt),
+				),
+			)
+			.returning({ id: workspaceConceptClusters.id })
+		const clusterIdsToClear = [...activeClusterIds, ...staleClusters.map((cluster) => cluster.id)]
+		if (clusterIdsToClear.length > 0) {
+			await tx
+				.delete(workspaceConceptClusterMembers)
+				.where(inArray(workspaceConceptClusterMembers.clusterId, clusterIdsToClear))
+		}
 		const memberRows = clusterDrafts.flatMap((cluster) => {
 			const clusterId = clusterIdByKey.get(cluster.key)
 			if (!clusterId) return []

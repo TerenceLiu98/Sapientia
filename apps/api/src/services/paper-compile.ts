@@ -10,7 +10,7 @@ import {
 	workspacePapers,
 } from "@sapientia/db"
 import { fillPrompt, formatBlocksForAgent, loadPrompt } from "@sapientia/shared"
-import { and, asc, eq, isNull, ne, or } from "drizzle-orm"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { db } from "../db"
 import { getLlmCredential } from "./credentials"
@@ -21,7 +21,6 @@ export const PAPER_COMPILE_PROMPT_VERSION = "paper-compile-hierarchical-v1"
 const SINGLE_PASS_PROMPT_ID = "paper-compile-v1"
 const WINDOW_PROMPT_ID = "paper-compile-window-v1"
 const REDUCE_PROMPT_ID = "paper-compile-reduce-v1"
-const NOTE_CONCEPT_EXTRACT_PROMPT_VERSION = "note-concept-extract-v1"
 const MAX_BLOCK_CONTENT_CHARS = 120_000
 const HIERARCHICAL_WINDOW_CONCURRENCY = 4
 const MAX_CONCEPT_EVIDENCE_BLOCK_IDS = 200
@@ -460,50 +459,71 @@ export async function compilePaper(args: {
 					),
 				)
 
-			await tx
-				.delete(compiledLocalConceptsTable)
-				.where(
-					and(
-						eq(compiledLocalConceptsTable.workspaceId, workspaceId),
-						eq(compiledLocalConceptsTable.ownerUserId, userId),
-						eq(compiledLocalConceptsTable.paperId, paperId),
-						or(
-							isNull(compiledLocalConceptsTable.promptVersion),
-							ne(compiledLocalConceptsTable.promptVersion, NOTE_CONCEPT_EXTRACT_PROMPT_VERSION),
-						),
-					),
-				)
-
-			const insertedConcepts =
-				sanitizedConcepts.length > 0
-					? await tx
-							.insert(compiledLocalConceptsTable)
-							.values(
-								sanitizedConcepts.map((concept) => ({
-									workspaceId,
-									ownerUserId: userId,
-									paperId,
-									kind: concept.kind,
-									canonicalName: concept.canonicalName,
-									displayName: concept.displayName,
+			let insertedConcepts: Array<{ id: string; canonicalName: string; kind: string }> = []
+			if (sanitizedConcepts.length > 0) {
+				const insertConceptsQuery = tx
+					.insert(compiledLocalConceptsTable)
+					.values(
+						sanitizedConcepts.map((concept) => ({
+							workspaceId,
+							ownerUserId: userId,
+							paperId,
+							kind: concept.kind,
+							canonicalName: concept.canonicalName,
+							displayName: concept.displayName,
+							generatedAt,
+							modelName: compileResult.model,
+							promptVersion: PAPER_COMPILE_PROMPT_VERSION,
+							status: "done" as const,
+							error: null,
+							deletedAt: null,
+						})),
+					)
+				const returningConceptsQuery =
+					"onConflictDoUpdate" in insertConceptsQuery
+						? insertConceptsQuery.onConflictDoUpdate({
+								target: [
+									compiledLocalConceptsTable.ownerUserId,
+									compiledLocalConceptsTable.workspaceId,
+									compiledLocalConceptsTable.paperId,
+									compiledLocalConceptsTable.kind,
+									compiledLocalConceptsTable.canonicalName,
+								],
+								set: {
+									displayName: sql`excluded.display_name`,
 									generatedAt,
 									modelName: compileResult.model,
 									promptVersion: PAPER_COMPILE_PROMPT_VERSION,
-									status: "done" as const,
+									status: "done",
 									error: null,
-								})),
-							)
-							.returning({
-								id: compiledLocalConceptsTable.id,
-								canonicalName: compiledLocalConceptsTable.canonicalName,
-								kind: compiledLocalConceptsTable.kind,
+									sourceLevelDescriptionStatus: "pending",
+									sourceLevelDescriptionDirtyAt: generatedAt,
+									readerSignalDirtyAt: generatedAt,
+									semanticDirtyAt: generatedAt,
+									deletedAt: null,
+									updatedAt: generatedAt,
+								},
 							})
-					: []
+						: insertConceptsQuery
+				insertedConcepts = await returningConceptsQuery.returning({
+					id: compiledLocalConceptsTable.id,
+					canonicalName: compiledLocalConceptsTable.canonicalName,
+					kind: compiledLocalConceptsTable.kind,
+				})
+			}
 
 			if (insertedConcepts.length > 0) {
 				const conceptIdByKey = new Map(
 					insertedConcepts.map((row) => [`${row.kind}::${row.canonicalName}`, row.id] as const),
 				)
+				await tx
+					.delete(compiledLocalConceptEvidenceTable)
+					.where(
+						inArray(
+							compiledLocalConceptEvidenceTable.conceptId,
+							insertedConcepts.map((row) => row.id),
+						),
+					)
 				const evidenceRows = sanitizedConcepts.flatMap((concept) => {
 					const conceptId = conceptIdByKey.get(`${concept.kind}::${concept.canonicalName}`)
 					if (!conceptId) return []

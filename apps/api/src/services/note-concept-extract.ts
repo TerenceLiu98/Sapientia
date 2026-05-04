@@ -11,7 +11,7 @@ import {
 	readerAnnotations,
 } from "@sapientia/db"
 import { fillPrompt, loadPrompt } from "@sapientia/shared"
-import { and, asc, eq, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { z } from "zod"
 import { db } from "../db"
 import { enqueuePaperConceptDescription } from "../queues/paper-concept-description"
@@ -22,6 +22,7 @@ import { getLlmCredential } from "./credentials"
 import { completeObject, LlmCredentialMissingError } from "./llm-client"
 import { appendAgentQuestionsToNote } from "./note"
 import { compileWorkspaceConceptClusters } from "./workspace-concept-clusters"
+import { refreshWorkspacePaperGraph } from "./workspace-paper-graph"
 
 export const NOTE_CONCEPT_EXTRACT_PROMPT_VERSION = "note-concept-extract-v1"
 const NOTE_OBSERVATION_WEIGHT = 1
@@ -30,27 +31,59 @@ const MAX_NOTE_MARKDOWN_CHARS = 4_000
 
 const conceptKindSchema = z.enum(["concept", "method", "task", "metric", "dataset"])
 
-const noteConceptExtractSchema = z.object({
-	groundedConcepts: z.array(
-		z.object({
-			kind: conceptKindSchema,
-			canonicalName: z.string().min(1),
-			displayName: z.string().min(1),
-			evidenceBlockIds: z.array(z.string().min(1)).default([]),
-			rationale: z.string().min(1),
-		}),
-	).default([]),
-	questions: z.array(
-		z.object({
-			conceptName: z.string().min(1),
-			question: z.string().min(1),
-		}),
-	).default([]),
+const noteConceptItemSchema = z.object({
+	kind: conceptKindSchema,
+	canonicalName: z.string().min(1),
+	displayName: z.string().min(1),
+	evidenceBlockIds: z.array(z.string().min(1)).default([]),
+	rationale: z.string().min(1),
 })
 
-type ConceptKind = z.infer<typeof conceptKindSchema>
+const noteDiscoveredConceptSchema = noteConceptItemSchema.extend({
+	noteExcerpt: z.string().min(1).optional(),
+	relationToPaper: z.string().min(1).optional(),
+	confidence: z.coerce.number().min(0).max(1).optional(),
+})
 
-export async function extractNoteBornConcepts(args: { noteId: string }) {
+const noteConceptExtractSchema = z.preprocess(
+	normalizeNoteConceptExtractResult,
+	z.object({
+		existingConceptSignals: z.array(noteConceptItemSchema).default([]),
+		discoveredConcepts: z.array(noteDiscoveredConceptSchema).default([]),
+		questions: z.array(
+			z.object({
+				conceptName: z.string().min(1),
+				question: z.string().min(1),
+			}),
+		).default([]),
+	}),
+)
+
+type ConceptKind = z.infer<typeof conceptKindSchema>
+type ExistingConcept = Awaited<ReturnType<typeof loadExistingConcepts>>[number]
+type EvidenceBlock = { blockId: string; text: string | null }
+
+function normalizeNoteConceptExtractResult(value: unknown) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value
+	const record = value as Record<string, unknown>
+	return {
+		...record,
+		existingConceptSignals:
+			record.existingConceptSignals ??
+			record.existing_concept_signals ??
+			record.existingConcepts ??
+			[],
+		discoveredConcepts:
+			record.discoveredConcepts ??
+			record.discovered_concepts ??
+			record.groundedConcepts ??
+			record.grounded_concepts ??
+			[],
+		questions: record.questions ?? [],
+	}
+}
+
+export async function extractNoteBornConcepts(args: { noteId: string; force?: boolean }) {
 	const [note] = await db
 		.select()
 		.from(notes)
@@ -62,6 +95,7 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 	if (!paper || paper.deletedAt || paper.parseStatus !== "done" || paper.summaryStatus !== "done") {
 		return skipped(args.noteId, "paper-not-ready")
 	}
+	const noteWithPaper = { ...note, paperId: note.paperId }
 
 	const existingObservation = await db
 		.select({ observedAt: conceptObservations.observedAt })
@@ -77,11 +111,12 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 			),
 		)
 		.limit(1)
-	if (existingObservation[0]?.observedAt && existingObservation[0].observedAt >= note.updatedAt) {
+	if (!args.force && existingObservation[0]?.observedAt && existingObservation[0].observedAt >= note.updatedAt) {
 		return skipped(args.noteId, "already-processed")
 	}
 
-	const evidenceBlockIds = await resolveNoteEvidenceBlockIds(note)
+	const evidenceBlocks = await resolveNoteEvidenceBlocks(note)
+	const evidenceBlockIds = evidenceBlocks.map((block) => block.blockId)
 	const credential = await getLlmCredential(note.ownerUserId)
 	if (!credential) throw new LlmCredentialMissingError()
 
@@ -100,7 +135,12 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 				displayName: concept.displayName,
 			})),
 		),
-		evidenceBlockIds: JSON.stringify(evidenceBlockIds),
+		evidenceBlocks: JSON.stringify(
+			evidenceBlocks.map((block) => ({
+				blockId: block.blockId,
+				text: truncateText(block.text ?? "", 1_200),
+			})),
+		),
 		noteMarkdown: note.agentMarkdownCache.slice(0, MAX_NOTE_MARKDOWN_CHARS),
 	})
 	const result = await completeObject({
@@ -124,40 +164,34 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 	const validEvidence = new Set(evidenceBlockIds)
 	let groundedCount = 0
 	const conceptIds = new Set<string>()
-	for (const rawConcept of result.object.groundedConcepts) {
-		const blockIds = uniqueStrings(rawConcept.evidenceBlockIds).filter((blockId) =>
-			validEvidence.has(blockId),
-		)
-		if (blockIds.length === 0) continue
-		const canonicalName = normalizeCanonicalName(rawConcept.canonicalName || rawConcept.displayName)
-		if (!canonicalName) continue
-
-		const concept = await upsertNoteBornConcept({
-			workspaceId: note.workspaceId,
-			paperId: note.paperId,
-			userId: note.ownerUserId,
-			kind: rawConcept.kind,
-			canonicalName,
-			displayName: rawConcept.displayName.trim(),
+	const touchedConceptNames = new Set<string>()
+	const existingConceptByKey = buildExistingConceptKeyMap(existingConcepts)
+	for (const rawConcept of result.object.existingConceptSignals) {
+		const applied = await applyNoteConceptSignal({
+			rawConcept,
+			validEvidence,
+			existingConceptByKey,
+			note: noteWithPaper,
 			model: result.model,
+			allowCreate: false,
 		})
-		await upsertEvidenceRows({
-			conceptId: concept.id,
-			paperId: note.paperId,
-			blockIds,
-			snippet: rawConcept.rationale,
+		if (!applied) continue
+		conceptIds.add(applied.conceptId)
+		touchedConceptNames.add(applied.canonicalName)
+		groundedCount += 1
+	}
+	for (const rawConcept of result.object.discoveredConcepts) {
+		const applied = await applyNoteConceptSignal({
+			rawConcept,
+			validEvidence,
+			existingConceptByKey,
+			note: noteWithPaper,
+			model: result.model,
+			allowCreate: true,
 		})
-		await upsertNoteObservation({
-			conceptId: concept.id,
-			workspaceId: note.workspaceId,
-			paperId: note.paperId,
-			userId: note.ownerUserId,
-			noteId: note.id,
-			blockIds,
-			observationText: note.agentMarkdownCache.slice(0, 1_200),
-			observedAt: note.updatedAt,
-		})
-		conceptIds.add(concept.id)
+		if (!applied) continue
+		conceptIds.add(applied.conceptId)
+		touchedConceptNames.add(applied.canonicalName)
 		groundedCount += 1
 	}
 
@@ -167,6 +201,7 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 			question: question.question.trim(),
 		}))
 		.filter((question) => question.conceptName && question.question)
+		.filter((question) => !touchedConceptNames.has(normalizeCanonicalName(question.conceptName)))
 	if (freshQuestions.length > 0) {
 		await appendAgentQuestionsToNote({
 			noteId: note.id,
@@ -201,6 +236,10 @@ export async function extractNoteBornConcepts(args: { noteId: string }) {
 			userId: note.ownerUserId,
 			workspaceId: note.workspaceId,
 		})
+		await refreshWorkspacePaperGraph({
+			workspaceId: note.workspaceId,
+			userId: note.ownerUserId,
+		})
 	}
 
 	return {
@@ -219,12 +258,9 @@ export async function enqueueDueNoteConceptExtractions(args: { limit?: number } 
 	const rows = await db
 		.select({
 			noteId: notes.id,
-			noteUpdatedAt: notes.updatedAt,
 			workspaceId: notes.workspaceId,
 			ownerUserId: notes.ownerUserId,
 			paperId: notes.paperId,
-			parseStatus: papers.parseStatus,
-			summaryStatus: papers.summaryStatus,
 		})
 		.from(notes)
 		.innerJoin(papers, eq(papers.id, notes.paperId))
@@ -234,32 +270,26 @@ export async function enqueueDueNoteConceptExtractions(args: { limit?: number } 
 				isNull(papers.deletedAt),
 				eq(papers.parseStatus, "done"),
 				eq(papers.summaryStatus, "done"),
+				sql`not exists (
+					select 1
+					from ${conceptObservations} co
+					where
+						co.workspace_id = ${notes.workspaceId}
+						and co.owner_user_id = ${notes.ownerUserId}
+						and co.paper_id = ${notes.paperId}
+						and co.source_type = 'note'
+						and co.source_id = concat('note:', ${notes.id})
+						and co.deleted_at is null
+						and co.observed_at >= ${notes.updatedAt}
+				)`,
 			),
 		)
-		.orderBy(asc(notes.updatedAt))
+		.orderBy(desc(notes.updatedAt))
 		.limit(limit)
 
-	const due: Array<{ noteId: string; workspaceId: string; userId: string }> = []
-	for (const row of rows) {
-		if (!row.paperId) continue
-		const [observation] = await db
-			.select({ observedAt: conceptObservations.observedAt })
-			.from(conceptObservations)
-			.where(
-				and(
-					eq(conceptObservations.workspaceId, row.workspaceId),
-					eq(conceptObservations.ownerUserId, row.ownerUserId),
-					eq(conceptObservations.paperId, row.paperId),
-					eq(conceptObservations.sourceType, "note"),
-					eq(conceptObservations.sourceId, noteSourceId(row.noteId)),
-					isNull(conceptObservations.deletedAt),
-				),
-			)
-			.limit(1)
-		if (observation?.observedAt && observation.observedAt >= row.noteUpdatedAt) continue
-		due.push({ noteId: row.noteId, workspaceId: row.workspaceId, userId: row.ownerUserId })
-	}
-	return due
+	return rows.flatMap((row) =>
+		row.paperId ? [{ noteId: row.noteId, workspaceId: row.workspaceId, userId: row.ownerUserId }] : [],
+	)
 }
 
 export async function cleanupNoteBornConceptsForNote(args: { noteId: string }) {
@@ -330,7 +360,7 @@ async function cleanupStaleNoteBornObservations(args: {
 	return { cleanedConceptCount }
 }
 
-async function resolveNoteEvidenceBlockIds(note: typeof notes.$inferSelect) {
+async function resolveNoteEvidenceBlocks(note: typeof notes.$inferSelect): Promise<EvidenceBlock[]> {
 	const blockRows = await db
 		.select({ blockId: noteBlockRefs.blockId })
 		.from(noteBlockRefs)
@@ -366,7 +396,20 @@ async function resolveNoteEvidenceBlockIds(note: typeof notes.$inferSelect) {
 			if (blockId) blockIds.push(blockId)
 		}
 	}
-	return uniqueStrings(blockIds)
+	const uniqueBlockIds = uniqueStrings(blockIds)
+	if (!note.paperId || uniqueBlockIds.length === 0) return []
+	const rows = await db
+		.select({
+			blockId: blocksTable.blockId,
+			text: blocksTable.text,
+		})
+		.from(blocksTable)
+		.where(and(eq(blocksTable.paperId, note.paperId), inArray(blocksTable.blockId, uniqueBlockIds)))
+	const blockById = new Map(rows.map((row) => [row.blockId, row] as const))
+	return uniqueBlockIds.flatMap((blockId) => {
+		const block = blockById.get(blockId)
+		return block ? [{ blockId, text: block.text }] : []
+	})
 }
 
 async function loadExistingConcepts(args: { workspaceId: string; paperId: string; userId: string }) {
@@ -386,6 +429,71 @@ async function loadExistingConcepts(args: { workspaceId: string; paperId: string
 				isNull(compiledLocalConcepts.deletedAt),
 			),
 		)
+}
+
+async function applyNoteConceptSignal(args: {
+	rawConcept: z.infer<typeof noteConceptItemSchema>
+	validEvidence: Set<string>
+	existingConceptByKey: Map<string, ExistingConcept>
+	note: typeof notes.$inferSelect & { paperId: string }
+	model: string
+	allowCreate: boolean
+}) {
+	const blockIds = uniqueStrings(args.rawConcept.evidenceBlockIds).filter((blockId) =>
+		args.validEvidence.has(blockId),
+	)
+	if (blockIds.length === 0) return null
+	const canonicalName = normalizeCanonicalName(
+		args.rawConcept.canonicalName || args.rawConcept.displayName,
+	)
+	if (!canonicalName) return null
+
+	const existingConcept = args.existingConceptByKey.get(conceptKey(args.rawConcept.kind, canonicalName))
+	const concept = existingConcept
+		? { id: existingConcept.id }
+		: args.allowCreate
+			? await upsertNoteBornConcept({
+					workspaceId: args.note.workspaceId,
+					paperId: args.note.paperId,
+					userId: args.note.ownerUserId,
+					kind: args.rawConcept.kind,
+					canonicalName,
+					displayName: args.rawConcept.displayName.trim(),
+					model: args.model,
+				})
+			: null
+	if (!concept) return null
+
+	await upsertEvidenceRows({
+		conceptId: concept.id,
+		paperId: args.note.paperId,
+		blockIds,
+		snippet: args.rawConcept.rationale,
+	})
+	await upsertNoteObservation({
+		conceptId: concept.id,
+		workspaceId: args.note.workspaceId,
+		paperId: args.note.paperId,
+		userId: args.note.ownerUserId,
+		noteId: args.note.id,
+		blockIds,
+		observationText: args.note.agentMarkdownCache.slice(0, 1_200),
+		observedAt: args.note.updatedAt,
+	})
+	return { conceptId: concept.id, canonicalName }
+}
+
+function buildExistingConceptKeyMap(concepts: ExistingConcept[]) {
+	const map = new Map<string, ExistingConcept>()
+	for (const concept of concepts) {
+		map.set(conceptKey(concept.kind as ConceptKind, concept.canonicalName), concept)
+		map.set(conceptKey(concept.kind as ConceptKind, concept.displayName), concept)
+	}
+	return map
+}
+
+function conceptKey(kind: ConceptKind, name: string) {
+	return `${kind}::${normalizeCanonicalName(name)}`
 }
 
 async function upsertNoteBornConcept(args: {
@@ -546,6 +654,12 @@ function uniqueStrings(values: string[]) {
 		result.push(trimmed)
 	}
 	return result
+}
+
+function truncateText(value: string, maxLength: number) {
+	const normalized = value.replace(/\s+/g, " ").trim()
+	if (normalized.length <= maxLength) return normalized
+	return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
 }
 
 type BlockWithBbox = { blockId: string; page: number | null; bbox: unknown }

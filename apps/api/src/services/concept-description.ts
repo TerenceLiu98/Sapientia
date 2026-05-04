@@ -177,28 +177,45 @@ export async function compilePaperConceptDescriptions(args: {
 
 	for (const batch of chunk(eligibleInputs, MAX_CONCEPTS_PER_BATCH)) {
 		try {
-			const prompt = fillPrompt(loadPrompt(CONCEPT_SOURCE_DESCRIPTION_PROMPT_VERSION), {
-				title: paper.title,
-				authors: (paper.authors ?? []).join(", "),
-				conceptEvidence: formatConceptEvidenceForPrompt(batch),
-			})
-			const result = await completeObject({
+			const result = await completeConceptDescriptionBatch({
 				userId,
 				workspaceId,
-				promptId: CONCEPT_SOURCE_DESCRIPTION_PROMPT_VERSION,
 				model: credential.model,
-				messages: [{ role: "user", content: prompt }],
-				schema: conceptDescriptionOutputSchema,
-				maxTokens: 12_000,
-				temperature: 0.2,
+				paper,
+				batch,
 			})
 			const batchResult = await applyConceptDescriptionOutput({
 				batch,
 				output: result.object,
 				model: result.model,
+				markMissingFailed: false,
 			})
 			describedConceptCount += batchResult.describedConceptCount
-			failedConceptCount += batchResult.failedConceptCount
+			for (const missingInput of batchResult.missingInputs) {
+				try {
+					const retryResult = await completeConceptDescriptionBatch({
+						userId,
+						workspaceId,
+						model: credential.model,
+						paper,
+						batch: [missingInput],
+					})
+					const retryBatchResult = await applyConceptDescriptionOutput({
+						batch: [missingInput],
+						output: retryResult.object,
+						model: retryResult.model,
+						markMissingFailed: true,
+					})
+					describedConceptCount += retryBatchResult.describedConceptCount
+					failedConceptCount += retryBatchResult.failedConceptCount
+				} catch (error) {
+					failedConceptCount += 1
+					await markConceptDescriptionsFailed(
+						[missingInput.localConceptId],
+						error instanceof Error ? error.message : "concept description generation failed",
+					)
+				}
+			}
 		} catch (error) {
 			failedConceptCount += batch.length
 			await markConceptDescriptionsFailed(
@@ -655,23 +672,52 @@ async function buildConceptDescriptionInputs(args: {
 	})
 }
 
+async function completeConceptDescriptionBatch(args: {
+	userId: string
+	workspaceId: string
+	model: string
+	paper: Paper
+	batch: ConceptDescriptionInput[]
+}) {
+	const prompt = fillPrompt(loadPrompt(CONCEPT_SOURCE_DESCRIPTION_PROMPT_VERSION), {
+		title: args.paper.title,
+		authors: (args.paper.authors ?? []).join(", "),
+		conceptEvidence: formatConceptEvidenceForPrompt(args.batch),
+	})
+	return completeObject({
+		userId: args.userId,
+		workspaceId: args.workspaceId,
+		promptId: CONCEPT_SOURCE_DESCRIPTION_PROMPT_VERSION,
+		model: args.model,
+		messages: [{ role: "user", content: prompt }],
+		schema: conceptDescriptionOutputSchema,
+		maxTokens: 12_000,
+		temperature: 0.2,
+	})
+}
+
 async function applyConceptDescriptionOutput(args: {
 	batch: ConceptDescriptionInput[]
 	output: z.infer<typeof conceptDescriptionOutputSchema>
 	model: string
+	markMissingFailed: boolean
 }) {
-	const { batch, output, model } = args
+	const { batch, output, model, markMissingFailed } = args
 	const inputById = new Map(batch.map((input) => [input.localConceptId, input]))
 	const outputById = new Map(output.concepts.map((item) => [item.localConceptId, item]))
 	let describedConceptCount = 0
 	let failedConceptCount = 0
+	const missingInputs: ConceptDescriptionInput[] = []
 	const now = new Date()
 
 	for (const input of batch) {
 		const item = outputById.get(input.localConceptId)
 		if (!item) {
-			failedConceptCount += 1
-			await markConceptDescriptionsFailed([input.localConceptId], "missing concept in LLM output")
+			missingInputs.push(input)
+			if (markMissingFailed) {
+				failedConceptCount += 1
+				await markConceptDescriptionsFailed([input.localConceptId], "missing concept in LLM output")
+			}
 			continue
 		}
 		const validEvidence = new Set(input.evidenceBlocks.map((block) => block.blockId))
@@ -707,7 +753,7 @@ async function applyConceptDescriptionOutput(args: {
 		describedConceptCount += inputById.has(input.localConceptId) ? 1 : 0
 	}
 
-	return { describedConceptCount, failedConceptCount }
+	return { describedConceptCount, failedConceptCount, missingInputs }
 }
 
 async function markConceptDescriptionsFailed(conceptIds: string[], error: string) {
