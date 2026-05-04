@@ -111,7 +111,7 @@ services:
     restart: "no"
 
   migrate:
-    image: sapientia-api:local
+    image: ${API_IMAGE:-sapientia-api:local}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
@@ -124,7 +124,7 @@ services:
     restart: "no"
 
   api:
-    image: sapientia-api:local
+    image: ${API_IMAGE:-sapientia-api:local}
     restart: unless-stopped
     build:
       context: ../..
@@ -151,7 +151,7 @@ services:
       retries: 20
 
   worker:
-    image: sapientia-api:local
+    image: ${API_IMAGE:-sapientia-api:local}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
@@ -172,7 +172,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: sapientia-web:local
+    image: ${WEB_IMAGE:-sapientia-web:local}
     restart: unless-stopped
     build:
       context: ../..

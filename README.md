@@ -60,6 +60,21 @@ cp infra/docker/.env.example infra/docker/.env
 docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml up -d --build --force-recreate
 ```
 
+GitHub Actions publishes `sapientia-api` and `sapientia-web` images to GHCR on
+pushes to the `publish` branch, version branches such as `v0.1`, and manual
+dispatch. The `publish` branch produces `latest`; each `v*` branch produces its
+own version tag. To deploy from published images instead of building locally, set
+`API_IMAGE` and `WEB_IMAGE` in `infra/docker/.env`, then pull and start without
+building:
+
+```bash
+API_IMAGE=ghcr.io/<owner>/sapientia-api:latest
+WEB_IMAGE=ghcr.io/<owner>/sapientia-web:latest
+
+docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml pull api worker web migrate
+docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml up -d --no-build --force-recreate
+```
+
 After signing in, configure your **MinerU token** and **LLM API key** in
 `/settings`; user credentials are stored encrypted using `ENCRYPTION_KEY`.
 
