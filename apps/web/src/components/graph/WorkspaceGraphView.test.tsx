@@ -6,87 +6,51 @@ import type { PaperGraphPayload } from "@/api/hooks/graph"
 import { WorkspaceGraphView } from "./WorkspaceGraphView"
 
 const useWorkspaceGraphMock = vi.fn()
-type GraphEventPayload = {
-	node?: string
-	edge?: string
-	preventSigmaDefault?: () => void
+type ForceGraphProps = {
+	graphData?: {
+		nodes: Array<Record<string, unknown>>
+		links: Array<Record<string, unknown>>
+	}
+	nodeVal?: (node: Record<string, unknown>) => number
+	nodeColor?: (node: Record<string, unknown>) => string
+	linkColor?: (link: Record<string, unknown>) => string
+	linkWidth?: (link: Record<string, unknown>) => number
+	onNodeClick?: (node: Record<string, unknown>) => void
+	onLinkClick?: (link: Record<string, unknown>) => void
+	onBackgroundClick?: () => void
 }
-type GraphHandler = (event: GraphEventPayload) => void
-type MouseHandler = (event: {
-	x: number
-	y: number
-	original: { preventDefault: () => void; stopPropagation: () => void }
-	preventSigmaDefault: () => void
-}) => void
 
-const { cameraResetMock, sigmaMock, handlers } = vi.hoisted(() => ({
-	cameraResetMock: vi.fn(),
-	sigmaMock: vi.fn(function SigmaMock() {
-		const mouseCaptor = {
-			on: vi.fn((eventName: string, handler: unknown) => {
-				if (eventName === "mousemovebody" && typeof handler === "function") {
-					handlers.mousemovebody = handler as MouseHandler
-				}
-				if (eventName === "mouseup" && typeof handler === "function") {
-					handlers.mouseup = handler as () => void
-				}
-				if (eventName === "mouseleave" && typeof handler === "function") {
-					handlers.mouseleave = handler as () => void
-				}
-				return undefined
-			}),
-		}
-		return {
-			getCamera: () => ({
-				animatedReset: cameraResetMock,
-			}),
-			getMouseCaptor: () => mouseCaptor,
-			kill: vi.fn(),
-			refresh: vi.fn(),
-			viewportToGraph: vi.fn((event: { x: number; y: number }) => ({ x: event.x, y: event.y })),
-			on: vi.fn((eventName: string, handler: unknown) => {
-				if (eventName === "clickNode" && typeof handler === "function") {
-					handlers.node = handler as GraphHandler
-				}
-				if (eventName === "clickEdge" && typeof handler === "function") {
-					handlers.edge = handler as GraphHandler
-				}
-				if (eventName === "clickStage" && typeof handler === "function") {
-					handlers.stage = handler as GraphHandler
-				}
-				if (eventName === "downNode" && typeof handler === "function") {
-					handlers.downNode = handler as GraphHandler
-				}
-				if (eventName === "enterNode" && typeof handler === "function") {
-					handlers.enterNode = handler as GraphHandler
-				}
-				if (eventName === "leaveNode" && typeof handler === "function") {
-					handlers.leaveNode = handler as GraphHandler
-				}
-				return undefined
-			}),
-		}
+const { forceGraphProps, zoomToFitMock, d3ForceMock, d3ReheatSimulationMock } = vi.hoisted(
+	() => ({
+		forceGraphProps: { current: null as ForceGraphProps | null },
+		zoomToFitMock: vi.fn(),
+		d3ForceMock: vi.fn(() => ({
+			distance: vi.fn(),
+			strength: vi.fn(),
+		})),
+		d3ReheatSimulationMock: vi.fn(),
 	}),
-	handlers: {
-		node: undefined as GraphHandler | undefined,
-		edge: undefined as GraphHandler | undefined,
-		stage: undefined as GraphHandler | undefined,
-		downNode: undefined as GraphHandler | undefined,
-		enterNode: undefined as GraphHandler | undefined,
-		leaveNode: undefined as GraphHandler | undefined,
-		mousemovebody: undefined as MouseHandler | undefined,
-		mouseup: undefined as (() => void) | undefined,
-		mouseleave: undefined as (() => void) | undefined,
-	},
-}))
+)
 
-vi.mock("sigma", () => ({
-	default: sigmaMock,
-}))
-
-vi.mock("@sigma/edge-curve", () => ({
-	default: vi.fn(),
-}))
+vi.mock("react-force-graph-3d", async () => {
+	const React = await vi.importActual<typeof import("react")>("react")
+	return {
+		default: React.forwardRef(function ForceGraph3DMock(props: ForceGraphProps, ref) {
+			forceGraphProps.current = props
+			const methods = {
+				zoomToFit: zoomToFitMock,
+				d3Force: d3ForceMock,
+				d3ReheatSimulation: d3ReheatSimulationMock,
+			}
+			if (typeof ref === "function") ref(methods)
+			else if (ref) ref.current = methods
+			return React.createElement("div", {
+				"aria-label": "3D graph canvas",
+				"data-testid": "force-graph-3d",
+			})
+		}),
+	}
+})
 
 vi.mock("@tanstack/react-router", () => ({
 	Link: ({
@@ -118,35 +82,31 @@ vi.mock("@/api/hooks/graph", () => ({
 describe("WorkspaceGraphView", () => {
 	beforeEach(() => {
 		useWorkspaceGraphMock.mockReset()
-		sigmaMock.mockClear()
-		cameraResetMock.mockReset()
-		handlers.node = undefined
-		handlers.edge = undefined
-		handlers.stage = undefined
-		handlers.downNode = undefined
-		handlers.enterNode = undefined
-		handlers.leaveNode = undefined
-		handlers.mousemovebody = undefined
-		handlers.mouseup = undefined
-		handlers.mouseleave = undefined
+		forceGraphProps.current = null
+		zoomToFitMock.mockReset()
+		d3ForceMock.mockClear()
+		d3ReheatSimulationMock.mockClear()
 	})
 
-	it("renders toolbar stats and graph actions", async () => {
-		const user = userEvent.setup()
+	it("renders the 3D graph as the primary surface", () => {
 		useWorkspaceGraphMock.mockReturnValue(makeGraphQuery())
 
 		render(<WorkspaceGraphView workspace={workspaceFixture} />)
 
 		expect(useWorkspaceGraphMock).toHaveBeenCalledWith("workspace-1", "papers")
-		expect(screen.getByRole("heading", { name: "Paper Map" })).toBeInTheDocument()
-		expect(screen.getByText("3 papers · 3 of 3 links visible")).toBeInTheDocument()
-		expect(screen.getByPlaceholderText("Search papers, authors, concepts")).toBeInTheDocument()
+		expect(screen.queryByRole("heading", { name: "Paper Map" })).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: /fit/i })).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: /clear/i })).not.toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Search papers" })).toBeInTheDocument()
+		expect(screen.queryByPlaceholderText("Search")).not.toBeInTheDocument()
 		expect(screen.getByLabelText("Workspace graph")).toBeInTheDocument()
 		expect(screen.getByText("Node size")).toBeInTheDocument()
-		expect(sigmaMock).toHaveBeenCalledOnce()
-
-		await user.click(screen.getByRole("button", { name: /fit/i }))
-		expect(cameraResetMock).toHaveBeenCalledWith({ duration: 220 })
+		expect(screen.getByTestId("force-graph-3d")).toBeInTheDocument()
+		expect(forceGraphProps.current?.graphData?.nodes).toHaveLength(3)
+		expect(forceGraphProps.current?.graphData?.links).toHaveLength(3)
+		expect(
+			forceGraphProps.current?.nodeVal?.(forceGraphProps.current.graphData?.nodes[0] ?? {}),
+		).toBeGreaterThan(0)
 	})
 
 	it("shows search results on the canvas and clears the query", async () => {
@@ -154,9 +114,11 @@ describe("WorkspaceGraphView", () => {
 		useWorkspaceGraphMock.mockReturnValue(makeGraphQuery())
 		render(<WorkspaceGraphView workspace={workspaceFixture} />)
 
-		expect(screen.getByText(/Click a paper to expand/)).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Search papers" })).toBeInTheDocument()
 
-		await user.type(screen.getByPlaceholderText("Search papers, authors, concepts"), "Grace")
+		await user.click(screen.getByRole("button", { name: "Search papers" }))
+		const searchInput = screen.getByPlaceholderText("Search")
+		await user.type(searchInput, "Grace")
 
 		expect(screen.getByText("Search")).toBeInTheDocument()
 		expect(screen.getByText("1 paper match · 2 connection matches")).toBeInTheDocument()
@@ -164,23 +126,10 @@ describe("WorkspaceGraphView", () => {
 			screen.getAllByRole("button", { name: /Mechanistic Interpretability/ }).length,
 		).toBeGreaterThan(0)
 
-		await user.click(screen.getByRole("button", { name: /clear/i }))
-		expect(screen.getByPlaceholderText("Search papers, authors, concepts")).toHaveValue("")
+		await user.click(screen.getByRole("button", { name: "Close search" }))
+		expect(screen.queryByPlaceholderText("Search")).not.toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Search papers" })).toBeInTheDocument()
 		expect(screen.queryByText("1 paper match · 2 connection matches")).not.toBeInTheDocument()
-		expect(screen.getByText(/Click a paper to expand/)).toBeInTheDocument()
-	})
-
-	it("filters canvas and search results by edge kind", async () => {
-		const user = userEvent.setup()
-		useWorkspaceGraphMock.mockReturnValue(makeGraphQuery())
-		render(<WorkspaceGraphView workspace={workspaceFixture} />)
-
-		await user.type(screen.getByPlaceholderText("Search papers, authors, concepts"), "Scaling")
-		await user.click(screen.getByRole("button", { name: "same task" }))
-
-		expect(screen.getByText("3 papers · 2 of 3 links visible")).toBeInTheDocument()
-		expect(screen.queryByRole("button", { name: /same task · 1 evidence/ })).not.toBeInTheDocument()
-		expect(screen.getByRole("button", { name: /similar methods · 1 evidence/ })).toBeInTheDocument()
 	})
 
 	it("opens paper and evidence detail sheets from graph clicks", async () => {
@@ -189,7 +138,10 @@ describe("WorkspaceGraphView", () => {
 		render(<WorkspaceGraphView workspace={workspaceFixture} />)
 
 		await act(async () => {
-			handlers.node?.({ node: "paper-1" })
+			forceGraphProps.current?.onNodeClick?.({
+				id: "paper-1",
+				paper: graphFixture.graph.nodes[0],
+			})
 		})
 
 		expect(screen.getByText("Paper")).toBeInTheDocument()
@@ -203,7 +155,12 @@ describe("WorkspaceGraphView", () => {
 		expect(screen.queryByText("Connected Papers")).not.toBeInTheDocument()
 
 		await act(async () => {
-			handlers.edge?.({ edge: "paper-edge:paper-1:paper-2" })
+			forceGraphProps.current?.onLinkClick?.({
+				id: "paper-edge:paper-1:paper-2",
+				source: "paper-1",
+				target: "paper-2",
+				edge: graphFixture.graph.edges[0],
+			})
 		})
 
 		expect(screen.getByText("Evidence")).toBeInTheDocument()

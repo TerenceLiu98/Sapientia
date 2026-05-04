@@ -165,19 +165,22 @@
 
 	/* Knowledge graph tokens use the same restrained surface/accent family as buttons. */
 	--graph-node-source: oklch(0.34 0.075 195);
+	--graph-node-source-active: oklch(0.39 0.085 195);
+	--graph-node-source-muted: oklch(0.29 0.055 195);
 	--graph-node-entity: oklch(0.55 0.11 30);
 	--graph-node-concept: oklch(0.5 0.12 195);
 	--graph-node-method: oklch(0.5 0.1 145);
 	--graph-node-task: oklch(0.58 0.12 75);
 	--graph-node-metric: oklch(0.5 0.13 25);
-	--graph-edge-default: rgb(34 34 34);
-	--graph-edge-active: rgb(18 18 18);
+	--graph-edge-default: rgb(74 74 74);
+	--graph-edge-active: rgb(38 38 38);
 	--graph-node-radius-min: 4px;
 	--graph-node-radius-max: 16px;
 	--graph-node-border-width: 2px;
-	--graph-edge-width-min: 0.5px;
-	--graph-edge-width-max: 3px;
+	--graph-edge-width-min: 0.25px;
+	--graph-edge-width-max: 1.35px;
 	--graph-label-font-size: var(--text-xs);
+	--graph-canvas-bg: color-mix(in oklch, var(--color-reading-bg) 92%, var(--color-bg-secondary) 8%);
 }
 
 /* TASK-019.2 Phase A — spacing / radius / motion / shadow / z-index
@@ -342,13 +345,16 @@
 		--note-background-bg: var(--color-neutral-800);
 		--note-background-text: var(--color-neutral-300);
 		--graph-node-source: oklch(0.62 0.08 195);
+		--graph-node-source-active: oklch(0.72 0.09 195);
+		--graph-node-source-muted: oklch(0.48 0.05 195);
 		--graph-node-entity: oklch(0.7 0.11 30);
 		--graph-node-concept: oklch(0.65 0.12 195);
 		--graph-node-method: oklch(0.65 0.1 145);
 		--graph-node-task: oklch(0.73 0.12 75);
 		--graph-node-metric: oklch(0.65 0.13 25);
-		--graph-edge-default: rgb(190 190 190);
-		--graph-edge-active: rgb(235 235 235);
+		--graph-edge-default: rgb(175 175 175);
+		--graph-edge-active: rgb(225 225 225);
+		--graph-canvas-bg: color-mix(in oklch, var(--color-reading-bg) 88%, var(--color-bg-secondary) 12%);
 		--pdf-dark-display-filter: invert(1) hue-rotate(180deg) sepia(0.14) contrast(0.88) saturate(0.72)
 			brightness(0.93);
 		--pdf-dark-display-opacity: 0.84;

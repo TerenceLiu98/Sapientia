@@ -1,21 +1,8 @@
 import { Link } from "@tanstack/react-router"
-import {
-	forceCenter,
-	forceCollide,
-	forceLink,
-	forceManyBody,
-	forceSimulation,
-	forceX,
-	forceY,
-	type SimulationLinkDatum,
-	type SimulationNodeDatum,
-} from "d3-force"
-import Graph from "graphology"
-import { ExternalLink, LocateFixed, Search, X } from "lucide-react"
+import { ExternalLink, Search, X } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
-import EdgeCurveProgram from "@sigma/edge-curve"
-import Sigma from "sigma"
-import type { EdgeProgramType } from "sigma/rendering"
+import ForceGraph3D from "react-force-graph-3d"
+import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-3d"
 import { type PaperGraphPayload, useWorkspaceGraph } from "@/api/hooks/graph"
 import type { Workspace } from "@/api/hooks/workspaces"
 
@@ -25,77 +12,39 @@ type PaperNode = PaperGraphPayload["graph"]["nodes"][number]
 type PaperEdge = PaperGraphPayload["graph"]["edges"][number]
 type PaperEvidence = PaperEdge["topEvidence"][number]
 
-type SigmaNodeAttributes = {
-	x: number
-	y: number
-	size: number
+type Paper3DNode = NodeObject<{
+	id: string
+	paper: PaperNode
 	label: string
-	title: string
-	color: string
-	baseColor: string
-	kind: string
-	weight: number
-	forceLabel?: boolean
-	zIndex?: number
-}
-type SigmaEdgeAttributes = {
-	size: number
-	label: string
-	color: string
-	baseColor: string
-	relationType: string
-	confidence: number
-	status: "active" | "stale"
-	type?: string
-	curvature?: number
-	zIndex?: number
-}
-type PaperSigmaGraph = Graph<SigmaNodeAttributes, SigmaEdgeAttributes>
-const PaperEdgeCurveProgram = EdgeCurveProgram as unknown as EdgeProgramType<
-	SigmaNodeAttributes,
-	SigmaEdgeAttributes
->
-
-const PAPER_EDGE_KIND_OPTIONS: Array<{ kind: PaperEdgeKind; label: string }> = [
-	{ kind: "shared_concepts", label: "shared concepts" },
-	{ kind: "similar_methods", label: "similar methods" },
-	{ kind: "same_task", label: "same task" },
-	{ kind: "related_metrics", label: "related metrics" },
-	{ kind: "semantic_neighbor", label: "semantic neighbor" },
-	{ kind: "mixed", label: "mixed evidence" },
-]
+	value: number
+	depth: number
+}>
+type Paper3DLink = LinkObject<Paper3DNode, { id: string; edge: PaperEdge }>
+type Paper3DGraphData = GraphData<Paper3DNode, Paper3DLink>
 
 export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undefined }) {
 	const [selection, setSelection] = useState<Selection>(null)
 	const [searchQuery, setSearchQuery] = useState("")
-	const [fitNonce, setFitNonce] = useState(0)
-	const [activeEdgeKinds, setActiveEdgeKinds] = useState<Set<PaperEdgeKind>>(
-		() => new Set(PAPER_EDGE_KIND_OPTIONS.map((option) => option.kind)),
-	)
 	const graphQuery = useWorkspaceGraph(workspace?.id, "papers")
 	const data = graphQuery.data
 
 	const paperData = data?.view === "papers" ? data : null
-	const filteredData = useMemo(
-		() => (paperData ? filterPaperGraphByKinds(paperData, activeEdgeKinds) : null),
-		[activeEdgeKinds, paperData],
-	)
 
 	useEffect(() => {
-		if (!selection || !filteredData) return
+		if (!selection || !paperData) return
 		if (
 			selection.kind === "edge" &&
-			!filteredData.graph.edges.some((edge) => edge.id === selection.id)
+			!paperData.graph.edges.some((edge) => edge.id === selection.id)
 		) {
 			setSelection(null)
 		}
 		if (
 			selection.kind === "node" &&
-			!filteredData.graph.nodes.some((node) => node.id === selection.id)
+			!paperData.graph.nodes.some((node) => node.id === selection.id)
 		) {
 			setSelection(null)
 		}
-	}, [filteredData, selection])
+	}, [paperData, selection])
 
 	if (!workspace) {
 		return <GraphLoadingState label="Loading workspace..." />
@@ -124,35 +73,17 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 		return <GraphEmptyState variant="links" />
 	}
 
-	const clearGraphState = () => {
-		setSelection(null)
-		setSearchQuery("")
-		setActiveEdgeKinds(new Set(PAPER_EDGE_KIND_OPTIONS.map((option) => option.kind)))
-		setFitNonce((value) => value + 1)
-	}
-
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-bg-primary">
-			<GraphToolbar
-				activeEdgeKinds={activeEdgeKinds}
-				data={paperData}
-				onClear={clearGraphState}
-				onFit={() => setFitNonce((value) => value + 1)}
-				onToggleKind={(kind) => {
-					setActiveEdgeKinds((current) => toggleEdgeKind(current, kind))
-				}}
-				visibleLinkCount={filteredData?.graph.edgeCount ?? 0}
-			/>
 			<div className="min-h-0 flex-1 p-3 lg:p-4">
 				<section className="relative h-full min-h-[24rem] overflow-hidden rounded-lg border border-border-subtle bg-[var(--color-reading-bg)]">
 					<WorkspaceGraphCanvas
-						data={filteredData ?? paperData}
-						fitNonce={fitNonce}
+						data={paperData}
 						onSelect={setSelection}
 						selection={selection}
 					/>
 					<GraphCanvasPanels
-						data={filteredData ?? paperData}
+						data={paperData}
 						onClearSelection={() => setSelection(null)}
 						onSearchChange={setSearchQuery}
 						onSelect={setSelection}
@@ -166,281 +97,146 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 	)
 }
 
-function GraphToolbar({
-	activeEdgeKinds,
-	data,
-	onClear,
-	onFit,
-	onToggleKind,
-	visibleLinkCount,
-}: {
-	activeEdgeKinds: Set<PaperEdgeKind>
-	data: PaperGraphPayload
-	onClear: () => void
-	onFit: () => void
-	onToggleKind: (kind: PaperEdgeKind) => void
-	visibleLinkCount: number
-}) {
-	return (
-		<header className="shrink-0 border-b border-border-subtle bg-[var(--color-reading-bg)] px-4 py-3">
-			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div className="min-w-0">
-					<h1 className="text-lg font-semibold text-text-primary">Paper Map</h1>
-					<p className="mt-1 text-sm leading-5 text-text-secondary">
-						Connections inferred from shared concepts and semantic evidence.
-					</p>
-					<div className="mt-2 text-xs text-text-tertiary">
-						{data.graph.nodeCount} papers · {visibleLinkCount} of {data.graph.edgeCount} links
-						visible
-					</div>
-				</div>
-				<div className="flex flex-wrap items-center justify-end gap-2">
-					<button
-						className="inline-flex h-9 items-center gap-2 rounded-md border border-border-subtle bg-bg-primary px-3 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-						onClick={onFit}
-						type="button"
-					>
-						<LocateFixed className="h-4 w-4" />
-						Fit
-					</button>
-					<button
-						className="inline-flex h-9 items-center gap-2 rounded-md border border-border-subtle bg-bg-primary px-3 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-						onClick={onClear}
-						type="button"
-					>
-						<X className="h-4 w-4" />
-						Clear
-					</button>
-				</div>
-			</div>
-			<div className="mt-3 flex flex-wrap gap-1.5">
-				{PAPER_EDGE_KIND_OPTIONS.map((option) => {
-					const active = activeEdgeKinds.has(option.kind)
-					return (
-						<button
-							aria-pressed={active}
-							className={[
-								"rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-								active
-									? "border-border-strong bg-surface-selected text-text-primary"
-									: "border-border-subtle bg-bg-primary text-text-tertiary hover:bg-surface-hover hover:text-text-primary",
-							].join(" ")}
-							key={option.kind}
-							onClick={() => onToggleKind(option.kind)}
-							type="button"
-						>
-							{option.label}
-						</button>
-					)
-				})}
-			</div>
-		</header>
-	)
-}
-
 function WorkspaceGraphCanvas({
 	data,
-	fitNonce,
 	selection,
 	onSelect,
 }: {
 	data: PaperGraphPayload
-	fitNonce: number
 	selection: Selection
 	onSelect: (selection: Selection) => void
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null)
-	const rendererRef = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null)
-	const selectionRef = useRef<Selection>(selection)
-	const hoverRef = useRef<Selection>(null)
-	const draggedNodeRef = useRef<string | null>(null)
-	const physicsRef = useRef<PaperPhysicsSimulation | null>(null)
-
-	useEffect(() => {
-		selectionRef.current = selection
-		rendererRef.current?.refresh()
-	}, [selection])
-
-	useEffect(() => {
-		if (fitNonce === 0) return
-		resetSigmaCamera(rendererRef.current)
-	}, [fitNonce])
+	const graphRef = useRef<ForceGraphMethods<any, any> | undefined>(undefined)
+	const initialFitDoneRef = useRef(false)
+	const [canvasSize, setCanvasSize] = useState({ width: 960, height: 640 })
+	const [hoverSelection, setHoverSelection] = useState<Selection>(null)
 
 	useEffect(() => {
 		const container = containerRef.current
 		if (!container) return undefined
 
-		const computedStyle = getComputedStyle(document.documentElement)
-		const textPrimary = cssColorVar("--color-text-primary", "#2f2a24")
-		const edgeDefault = cssColorVar("--graph-edge-default", "rgb(34, 34, 34)")
-		const edgeActive = cssColorVar("--graph-edge-active", "rgb(18, 18, 18)")
-		const edgeMinWidth = cssNumberVar(computedStyle, "--graph-edge-width-min", 0.5)
-		const edgeMaxWidth = cssNumberVar(computedStyle, "--graph-edge-width-max", 3)
-		const nodeMinRadius = cssNumberVar(computedStyle, "--graph-node-radius-min", 4)
-		const nodeMaxRadius = cssNumberVar(computedStyle, "--graph-node-radius-max", 16)
-		const colors = {
-			paper: cssColorVar("--graph-node-source", "rgb(0, 78, 80)"),
-			fallback: cssColorVar("--graph-node-source", "rgb(0, 78, 80)"),
-			mutedNode: cssColorVar("--color-border-strong", "rgb(135, 126, 114)"),
-			edgeDefault,
-			edgeActive,
+		const measure = () => {
+			setCanvasSize({
+				width: Math.max(container.clientWidth, 320),
+				height: Math.max(container.clientHeight, 384),
+			})
+		}
+		measure()
+
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", measure)
+			return () => window.removeEventListener("resize", measure)
 		}
 
-		const graph = buildPaperSigmaGraph(data, colors, {
-			edgeMinWidth,
-			edgeMaxWidth,
-			nodeMinRadius,
-			nodeMaxRadius,
-		})
-		const adjacency = buildPaperAdjacency(data.graph.edges)
-		const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(graph, container, {
-			allowInvalidContainer: true,
-			autoCenter: true,
-			autoRescale: true,
-			enableEdgeEvents: true,
-			defaultEdgeType: "curved",
-			defaultDrawNodeHover: () => {},
-			defaultDrawNodeLabel: () => {},
-			edgeProgramClasses: {
-				curved: PaperEdgeCurveProgram,
-			},
-			labelColor: { color: textPrimary },
-			labelDensity: 0,
-			labelRenderedSizeThreshold: 12,
-			labelSize: cssNumberVar(computedStyle, "--graph-label-font-size", 12),
-			renderLabels: false,
-			renderEdgeLabels: false,
-			stagePadding: 42,
-			zIndex: true,
-			nodeReducer: (node, attributes) => {
-				const active = selectionRef.current ?? hoverRef.current
-				if (!active) return attributes
-				const involved = isNodeInFocus(node, active, adjacency)
-				if (!involved) {
-					return {
-						...attributes,
-						color: colorWithAlpha(colors.mutedNode, 0.72),
-						forceLabel: false,
-						label: "",
-						size: Math.max(attributes.size * 0.86, nodeMinRadius),
-						zIndex: 0,
-					}
-				}
-				return {
-					...attributes,
-					color: attributes.baseColor,
-					forceLabel: active.kind === "node" && active.id === node,
-					label: attributes.title,
-					size:
-						active.kind === "node" && active.id === node
-							? Math.min(attributes.size * 1.34, nodeMaxRadius + 4)
-							: Math.min(attributes.size * 1.12, nodeMaxRadius + 2),
-					zIndex: active.kind === "node" && active.id === node ? 5 : 3,
-				}
-			},
-			edgeReducer: (edge, attributes) => {
-				const active = selectionRef.current ?? hoverRef.current
-				if (!active) return attributes
-				const involved = isEdgeInFocus(edge, active, graph)
-				if (!involved) {
-					return {
-						...attributes,
-						color: colorWithAlpha(attributes.baseColor, 0.34),
-						size: Math.max(attributes.size * 0.78, edgeMinWidth),
-						zIndex: 0,
-					}
-				}
-				return {
-					...attributes,
-					color: edgeActive,
-					size:
-						active.kind === "edge" && active.id === edge
-							? Math.min(Math.max(attributes.size * 1.7, edgeMinWidth + 1.5), edgeMaxWidth + 1.4)
-							: Math.min(Math.max(attributes.size * 1.3, edgeMinWidth + 0.7), edgeMaxWidth + 0.8),
-					zIndex: active.kind === "edge" && active.id === edge ? 5 : 3,
-				}
-			},
-		})
+		const observer = new ResizeObserver(measure)
+		observer.observe(container)
+		return () => observer.disconnect()
+	}, [])
 
-		const physics = startPaperPhysicsSimulation(data, graph, renderer)
-		physicsRef.current = physics
-		const mouseCaptor = renderer.getMouseCaptor()
-		renderer.on("clickNode", ({ node }) => onSelect({ kind: "node", id: node }))
-		renderer.on("clickEdge", ({ edge }) => onSelect({ kind: "edge", id: edge }))
-		renderer.on("clickStage", () => onSelect(null))
-		renderer.on("enterNode", ({ node }) => {
-			hoverRef.current = { kind: "node", id: node }
-			container.style.cursor = "pointer"
-			renderer.refresh()
-		})
-		renderer.on("leaveNode", () => {
-			hoverRef.current = null
-			container.style.cursor = ""
-			renderer.refresh()
-		})
-		renderer.on("enterEdge", ({ edge }) => {
-			hoverRef.current = { kind: "edge", id: edge }
-			container.style.cursor = "pointer"
-			renderer.refresh()
-		})
-		renderer.on("leaveEdge", () => {
-			hoverRef.current = null
-			container.style.cursor = ""
-			renderer.refresh()
-		})
-		renderer.on("downNode", (event) => {
-			draggedNodeRef.current = event.node
-			physicsRef.current?.pinNode(
-				event.node,
-				graph.getNodeAttribute(event.node, "x"),
-				graph.getNodeAttribute(event.node, "y"),
-			)
-			container.style.cursor = "grabbing"
-			event.preventSigmaDefault()
-		})
-		mouseCaptor.on("mousemovebody", (event) => {
-			const draggedNode = draggedNodeRef.current
-			if (!draggedNode) return
-			const position = renderer.viewportToGraph(event)
-			physicsRef.current?.pinNode(draggedNode, position.x, position.y)
-			event.preventSigmaDefault()
-			event.original.preventDefault()
-			event.original.stopPropagation()
-		})
-		mouseCaptor.on("mouseup", () => {
-			const draggedNode = draggedNodeRef.current
-			if (!draggedNode) return
-			draggedNodeRef.current = null
-			physicsRef.current?.releaseNode(draggedNode)
-			container.style.cursor = ""
-		})
-		mouseCaptor.on("mouseleave", () => {
-			const draggedNode = draggedNodeRef.current
-			if (!draggedNode) return
-			draggedNodeRef.current = null
-			physicsRef.current?.releaseNode(draggedNode)
-			container.style.cursor = ""
-		})
+	const graphData = useMemo(() => buildPaper3DGraphData(data), [data])
+	const adjacency = useMemo(() => buildPaperAdjacency(data.graph.edges), [data.graph.edges])
+	const activeSelection = selection ?? hoverSelection
+	const edgeMinWidth = cssNumberVar("--graph-edge-width-min", 0.5)
+	const edgeMaxWidth = cssNumberVar("--graph-edge-width-max", 3)
+	const colors = {
+		node: cssColorVar("--graph-node-source", "rgb(0, 78, 80)"),
+		nodeActive: cssColorVar("--graph-node-source-active", "rgb(0, 101, 103)"),
+		nodeFar: cssColorVar("--graph-node-source-muted", "rgb(0, 58, 60)"),
+		mutedNode: cssColorVar("--color-border-strong", "rgb(135, 126, 114)"),
+		edge: cssColorVar("--graph-edge-default", "rgb(34, 34, 34)"),
+		edgeActive: cssColorVar("--graph-edge-active", "rgb(18, 18, 18)"),
+	}
 
-		rendererRef.current = renderer
-
-		return () => {
-			draggedNodeRef.current = null
-			hoverRef.current = null
-			physics.stop()
-			physicsRef.current = null
-			renderer.kill()
-			rendererRef.current = null
-		}
-	}, [data, onSelect])
+	useEffect(() => {
+		const graph = graphRef.current
+		if (!graph) return
+		const linkForce = graph.d3Force("link") as
+			| {
+					distance?: (value: number | ((link: Paper3DLink) => number)) => unknown
+					strength?: (value: number | ((link: Paper3DLink) => number)) => unknown
+			  }
+			| undefined
+		linkForce?.distance?.((link) => 380 - Math.max(0, Math.min(1, link.edge.weight)) * 110)
+		linkForce?.strength?.((link) => 0.012 + Math.max(0, Math.min(1, link.edge.weight)) * 0.05)
+		const chargeForce = graph.d3Force("charge") as
+			| { strength?: (value: number | ((node: Paper3DNode) => number)) => unknown }
+			| undefined
+		chargeForce?.strength?.((node) => -230 - Math.min(360, paper3DNodeValue(node.paper) * 18))
+		graph.d3ReheatSimulation()
+	}, [graphData])
 
 	return (
 		<div
 			aria-label="Workspace graph"
-			className="h-full min-h-[24rem] [background-image:linear-gradient(color-mix(in_srgb,var(--color-border-subtle)_34%,transparent)_1px,transparent_1px),linear-gradient(90deg,color-mix(in_srgb,var(--color-border-subtle)_34%,transparent)_1px,transparent_1px)] [background-size:32px_32px]"
+			className="h-full min-h-[24rem] bg-[var(--graph-canvas-bg)] [background-image:linear-gradient(color-mix(in_srgb,var(--color-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(90deg,color-mix(in_srgb,var(--color-border-subtle)_24%,transparent)_1px,transparent_1px)] [background-size:48px_48px]"
 			ref={containerRef}
 			role="img"
-		/>
+		>
+			<ForceGraph3D
+				backgroundColor="rgba(0,0,0,0)"
+				cooldownTicks={180}
+				d3AlphaDecay={0.022}
+				d3VelocityDecay={0.28}
+				enableNodeDrag
+				enablePointerInteraction
+				forceEngine="d3"
+				graphData={graphData}
+				height={canvasSize.height}
+				linkColor={(link) => paper3DLinkColor(link as Paper3DLink, activeSelection, colors)}
+				linkCurvature={(link) =>
+					curvatureForEdge((link as Paper3DLink).id, (link as Paper3DLink).edge.weight)
+				}
+				linkDirectionalParticleColor={(link) =>
+					paper3DLinkColor(link as Paper3DLink, activeSelection, colors)
+				}
+				linkDirectionalParticles={(link) =>
+					activeSelection?.kind === "edge" && activeSelection.id === (link as Paper3DLink).id
+						? 2
+						: 0
+				}
+				linkDirectionalParticleSpeed={0.004}
+				linkDirectionalParticleWidth={(link) =>
+					activeSelection?.kind === "edge" && activeSelection.id === (link as Paper3DLink).id
+						? 1.4
+						: 0
+				}
+				linkHoverPrecision={6}
+				linkLabel={(link) =>
+					`${formatPaperEdgeKind((link as Paper3DLink).edge.edgeKind)} · strength ${formatPercent((link as Paper3DLink).edge.weight)}`
+				}
+				linkOpacity={1}
+				linkWidth={(link) =>
+					paper3DLinkWidth(link as Paper3DLink, activeSelection, edgeMinWidth, edgeMaxWidth)
+				}
+				nodeColor={(node) => paper3DNodeColor(node, activeSelection, adjacency, colors)}
+				nodeLabel={(node) => node.paper.title}
+				nodeOpacity={0.96}
+				nodeRelSize={4}
+				nodeResolution={16}
+				nodeVal={(node) => paper3DNodeValue(node.paper)}
+				numDimensions={3}
+				onBackgroundClick={() => onSelect(null)}
+				onEngineStop={() => {
+					if (initialFitDoneRef.current) return
+					initialFitDoneRef.current = true
+					graphRef.current?.zoomToFit(650, 80)
+				}}
+				onLinkClick={(link) => onSelect({ kind: "edge", id: (link as Paper3DLink).id })}
+				onLinkHover={(link) =>
+					setHoverSelection(link ? { kind: "edge", id: (link as Paper3DLink).id } : null)
+				}
+				onNodeClick={(node) => onSelect({ kind: "node", id: node.id })}
+				onNodeHover={(node) =>
+					setHoverSelection(node ? { kind: "node", id: node.id } : null)
+				}
+				ref={graphRef}
+				showNavInfo={false}
+				showPointerCursor
+				width={canvasSize.width}
+				warmupTicks={80}
+			/>
+		</div>
 	)
 }
 
@@ -452,11 +248,14 @@ function GraphLegend() {
 				count
 			</div>
 			<div>
-				<span className="font-medium text-text-secondary">Edge width</span> = relationship strength
+				<span className="font-medium text-text-secondary">Link thickness</span> = relationship
+				strength
 			</div>
 			<div>
-				<span className="font-medium text-text-secondary">Accent</span> = selected or neighboring
-				evidence
+				<span className="font-medium text-text-secondary">Drag / wheel</span> = rotate + zoom
+			</div>
+			<div>
+				<span className="font-medium text-text-secondary">Gray</span> = out-of-focus context
 			</div>
 		</div>
 	)
@@ -519,8 +318,6 @@ function GraphCanvasPanels({
 						papersById={papersById}
 						strongEdges={topEdges}
 					/>
-				) : !selection ? (
-					<GraphCanvasHint />
 				) : null}
 			</GraphSearchDock>
 			{selectedEdge ? (
@@ -550,28 +347,49 @@ function GraphSearchDock({
 	onSearchChange: (value: string) => void
 	searchQuery: string
 }) {
-	return (
-		<div className="absolute top-3 left-3 z-[var(--z-elevated)] w-[min(24rem,calc(100%-1.5rem))] rounded-lg border border-border-subtle bg-bg-secondary/95 p-2 shadow-[var(--shadow-md)] backdrop-blur">
-			<label className="relative block min-w-0">
-				<span className="sr-only">Search papers</span>
-				<Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-text-tertiary" />
-				<input
-					className="h-9 w-full rounded-md border border-border-subtle bg-bg-primary pr-3 pl-8 text-sm text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-border-strong"
-					onChange={(event) => onSearchChange(event.target.value)}
-					placeholder="Search papers, authors, concepts"
-					type="search"
-					value={searchQuery}
-				/>
-			</label>
-			{children}
-		</div>
-	)
-}
+	const [expanded, setExpanded] = useState(false)
 
-function GraphCanvasHint() {
+	if (!expanded) {
+		return (
+			<button
+				aria-label="Search papers"
+				className="absolute top-3 left-3 z-[var(--z-elevated)] inline-flex h-9 w-9 items-center justify-center rounded-md border border-border-subtle bg-bg-secondary/90 text-text-secondary shadow-[var(--shadow-sm)] backdrop-blur transition-colors hover:bg-surface-hover hover:text-text-primary"
+				onClick={() => setExpanded(true)}
+				type="button"
+			>
+				<Search className="h-4 w-4" />
+			</button>
+		)
+	}
+
 	return (
-		<div className="pointer-events-none mt-2 rounded-md border border-border-subtle bg-bg-primary px-3 py-2 text-xs leading-5 text-text-secondary">
-			Click a paper to expand its concepts and connections. Click a link to inspect the evidence.
+		<div className="absolute top-3 left-3 z-[var(--z-elevated)] w-[min(18rem,calc(100%-1.5rem))] rounded-md border border-border-subtle bg-bg-secondary/95 p-1.5 shadow-[var(--shadow-md)] backdrop-blur">
+			<div className="flex items-center gap-1.5">
+				<label className="relative block min-w-0 flex-1">
+					<span className="sr-only">Search papers</span>
+					<Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-text-tertiary" />
+					<input
+						autoFocus
+						className="h-8 w-full rounded-md border border-border-subtle bg-bg-primary pr-2 pl-8 text-sm text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-border-strong"
+						onChange={(event) => onSearchChange(event.target.value)}
+						placeholder="Search"
+						type="search"
+						value={searchQuery}
+					/>
+				</label>
+				<button
+					aria-label="Close search"
+					className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-bg-primary text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
+					onClick={() => {
+						onSearchChange("")
+						setExpanded(false)
+					}}
+					type="button"
+				>
+					<X className="h-4 w-4" />
+				</button>
+			</div>
+			{children}
 		</div>
 	)
 }
@@ -640,7 +458,7 @@ function GraphDetailSheet({
 	onClose: () => void
 }) {
 	return (
-		<div className="absolute bottom-3 left-3 z-[var(--z-elevated)] max-h-[min(42rem,calc(100%-2rem))] w-[min(32rem,calc(100%-1.5rem))] overflow-auto rounded-lg border border-border-subtle bg-bg-secondary/95 p-3 shadow-[var(--shadow-md)] backdrop-blur md:bottom-4 md:left-4">
+		<div className="absolute bottom-3 left-3 z-[var(--z-elevated)] max-h-[min(28rem,calc(100%-2rem))] w-[min(22rem,calc(100%-1.5rem))] overflow-auto rounded-lg border border-border-subtle bg-bg-secondary/95 p-2.5 shadow-[var(--shadow-md)] backdrop-blur md:bottom-4 md:left-4">
 			<div className="flex items-center justify-between gap-3">
 				<div className="text-xs uppercase tracking-[0.18em] text-text-tertiary">{heading}</div>
 				<button
@@ -1037,231 +855,29 @@ function GraphErrorState({ error, onRetry }: { error: unknown; onRetry: () => vo
 	)
 }
 
-function filterPaperGraphByKinds(data: PaperGraphPayload, activeEdgeKinds: Set<PaperEdgeKind>) {
-	const edges = data.graph.edges.filter((edge) => activeEdgeKinds.has(edge.edgeKind))
+function buildPaper3DGraphData(data: PaperGraphPayload): Paper3DGraphData {
+	const nodeIds = new Set(data.graph.nodes.map((node) => node.id))
 	return {
-		...data,
-		graph: {
-			...data.graph,
-			edgeCount: edges.length,
-			edges,
-		},
-	} satisfies PaperGraphPayload
-}
-
-function toggleEdgeKind(current: Set<PaperEdgeKind>, kind: PaperEdgeKind) {
-	const next = new Set(current)
-	if (next.has(kind)) next.delete(kind)
-	else next.add(kind)
-	return next
-}
-
-function buildPaperSigmaGraph(
-	data: PaperGraphPayload,
-	colors: { paper: string; fallback: string; edgeDefault: string },
-	sizing: {
-		edgeMinWidth: number
-		edgeMaxWidth: number
-		nodeMinRadius: number
-		nodeMaxRadius: number
-	},
-): PaperSigmaGraph {
-	const graph = new Graph<SigmaNodeAttributes, SigmaEdgeAttributes>({
-		multi: true,
-		type: "undirected",
-	})
-	const layout = computePaperForceLayout(data)
-	const topLabelNodeIds = new Set(
-		[...data.graph.nodes]
-			.sort((a, b) => b.degree + b.conceptCount / 10 - (a.degree + a.conceptCount / 10))
-			.slice(0, 8)
-			.map((node) => node.id),
-	)
-
-	for (const node of data.graph.nodes) {
-		const weight = Math.max(node.degree, node.conceptCount / 10)
-		const position = layout.get(node.id) ?? { x: 0, y: 0 }
-		graph.addNode(node.id, {
-			x: position.x,
-			y: position.y,
-			size: clampSize(6 + Math.sqrt(weight + 1) * 2.7, sizing.nodeMinRadius, sizing.nodeMaxRadius),
-			label: topLabelNodeIds.has(node.id) ? shortPaperLabel(node.title) : "",
-			title: node.title,
-			color: colors.paper,
-			baseColor: colors.paper || colors.fallback,
-			kind: "paper",
-			weight,
-			forceLabel: topLabelNodeIds.has(node.id),
-			zIndex: Math.round(weight),
-		})
+		nodes: data.graph.nodes.map((paper) => ({
+			id: paper.id,
+			paper,
+			label: paper.title,
+			value: paper3DNodeValue(paper),
+			depth: depthForNode(paper.id),
+		})),
+		links: data.graph.edges
+			.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+			.map((edge) => ({
+				id: edge.id,
+				source: edge.source,
+				target: edge.target,
+				edge,
+			})),
 	}
-	for (const edge of data.graph.edges) {
-		if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue
-		const edgeColor =
-			edge.status === "stale"
-				? colorWithAlpha(colors.edgeDefault, 0.3)
-				: edge.isRetained
-					? colorWithAlpha(colors.edgeDefault, 0.5)
-					: colorWithAlpha(colors.edgeDefault, 0.66)
-		graph.addUndirectedEdgeWithKey(edge.id, edge.source, edge.target, {
-			size: edgeWidthForWeight(edge.weight, sizing.edgeMinWidth, sizing.edgeMaxWidth),
-			label: edge.edgeKind,
-			color: edgeColor,
-			baseColor: edgeColor,
-			relationType: edge.edgeKind,
-			confidence: edge.weight,
-			status: edge.status ?? "active",
-			type: "curved",
-			curvature: curvatureForEdge(edge.id),
-			zIndex: Math.round(edge.weight * 10),
-		})
-	}
-
-	return graph
 }
 
-function computePaperForceLayout(data: PaperGraphPayload) {
-	const nodes = data.graph.nodes.map((node, index) => {
-		const angle = (index / Math.max(data.graph.nodes.length, 1)) * Math.PI * 2
-		const radius = 80 + data.graph.nodes.length * 5
-		const nodeWeight = Math.max(node.degree, node.conceptCount / 10)
-		return {
-			id: node.id,
-			x: Math.cos(angle) * radius,
-			y: Math.sin(angle) * radius,
-			radius: 12 + Math.sqrt(nodeWeight + 1) * 3,
-		}
-	}) satisfies ForceNode[]
-	const nodeIds = new Set(nodes.map((node) => node.id))
-	const links = data.graph.edges
-		.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-		.map<ForceLink>((edge) => ({ source: edge.source, target: edge.target }))
-
-	if (nodes.length === 0) return new Map<string, { x: number; y: number }>()
-	if (links.length === 0) {
-		return new Map(
-			nodes.map((node, index) => {
-				const angle = (index / Math.max(nodes.length, 1)) * Math.PI * 2
-				const radius = 140
-				return [node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }]
-			}),
-		)
-	}
-
-	const simulation = forceSimulation<ForceNode>(nodes)
-		.force(
-			"link",
-			forceLink<ForceNode, ForceLink>(links)
-				.id((node) => node.id)
-				.distance(190)
-				.strength(0.09),
-		)
-		.force("charge", forceManyBody().strength(-520))
-		.force(
-			"collide",
-			forceCollide<ForceNode>().radius((node) => node.radius + 30),
-		)
-		.force("center", forceCenter(0, 0))
-		.stop()
-
-	for (let i = 0; i < 180; i += 1) simulation.tick()
-
-	return new Map(nodes.map((node) => [node.id, { x: node.x ?? 0, y: node.y ?? 0 }]))
-}
-
-type ForceNode = SimulationNodeDatum & { id: string; radius: number }
-type ForceLink = SimulationLinkDatum<ForceNode>
-type PhysicsNode = SimulationNodeDatum & {
-	id: string
-	radius: number
-	fx?: number | null
-	fy?: number | null
-}
-type PhysicsLink = SimulationLinkDatum<PhysicsNode> & { weight: number }
-type PaperPhysicsSimulation = {
-	pinNode: (nodeId: string, x: number, y: number) => void
-	releaseNode: (nodeId: string) => void
-	stop: () => void
-}
-
-function startPaperPhysicsSimulation(
-	data: PaperGraphPayload,
-	graph: PaperSigmaGraph,
-	renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>,
-): PaperPhysicsSimulation {
-	const nodes = data.graph.nodes
-		.filter((node) => graph.hasNode(node.id))
-		.map<PhysicsNode>((node) => ({
-			id: node.id,
-			x: graph.getNodeAttribute(node.id, "x"),
-			y: graph.getNodeAttribute(node.id, "y"),
-			radius: graph.getNodeAttribute(node.id, "size") + 10,
-		}))
-	const nodesById = new Map(nodes.map((node) => [node.id, node] as const))
-	const links = data.graph.edges
-		.filter((edge) => nodesById.has(edge.source) && nodesById.has(edge.target))
-		.map<PhysicsLink>((edge) => ({
-			source: edge.source,
-			target: edge.target,
-			weight: edge.weight,
-		}))
-
-	const simulation = forceSimulation<PhysicsNode>(nodes)
-		.alpha(0.8)
-		.alphaDecay(0.032)
-		.velocityDecay(0.38)
-		.force(
-			"link",
-			forceLink<PhysicsNode, PhysicsLink>(links)
-				.id((node) => node.id)
-				.distance((link) => 300 - Math.max(0, Math.min(1, link.weight)) * 85)
-				.strength((link) => 0.018 + Math.max(0, Math.min(1, link.weight)) * 0.075),
-		)
-		.force(
-			"charge",
-			forceManyBody<PhysicsNode>().strength((node) => -380 - Math.min(300, node.radius * 10)),
-		)
-		.force(
-			"collide",
-			forceCollide<PhysicsNode>()
-				.radius((node) => node.radius + 34)
-				.strength(0.92),
-		)
-		.force("center", forceCenter(0, 0))
-		.force("gravity-x", forceX<PhysicsNode>(0).strength(0.006))
-		.force("gravity-y", forceY<PhysicsNode>(0).strength(0.006))
-		.on("tick", () => {
-			for (const node of nodes) {
-				if (graph.hasNode(node.id)) {
-					graph.setNodeAttribute(node.id, "x", node.x ?? 0)
-					graph.setNodeAttribute(node.id, "y", node.y ?? 0)
-				}
-			}
-			renderer.refresh()
-		})
-
-	return {
-		pinNode: (nodeId, x, y) => {
-			const node = nodesById.get(nodeId)
-			if (!node) return
-			node.fx = x
-			node.fy = y
-			node.x = x
-			node.y = y
-			graph.setNodeAttribute(nodeId, "x", x)
-			graph.setNodeAttribute(nodeId, "y", y)
-			simulation.alphaTarget(0.18).restart()
-			renderer.refresh()
-		},
-		releaseNode: (nodeId) => {
-			const node = nodesById.get(nodeId)
-			if (!node) return
-			node.fx = null
-			node.fy = null
-			simulation.alphaTarget(0).alpha(0.35).restart()
-		},
-		stop: () => simulation.stop(),
-	}
+function paper3DNodeValue(paper: PaperNode) {
+	return Math.max(1, paper.degree + paper.conceptCount / 8)
 }
 
 function buildPaperAdjacency(edges: PaperEdge[]) {
@@ -1290,11 +906,64 @@ function isNodeInFocus(
 	return Boolean(edge && (edge[0] === nodeId || edge[1] === nodeId))
 }
 
-function isEdgeInFocus(edgeId: string, active: Selection, graph: PaperSigmaGraph) {
+function paper3DNodeColor(
+	node: Paper3DNode,
+	active: Selection,
+	adjacency: ReturnType<typeof buildPaperAdjacency>,
+	colors: {
+		node: string
+		nodeActive: string
+		nodeFar: string
+		mutedNode: string
+	},
+) {
+	if (!active) {
+		return paperNodeColorForDepth(node.depth, {
+			paper: colors.node,
+			paperActive: colors.nodeActive,
+			paperFar: colors.nodeFar,
+		})
+	}
+	if (!isNodeInFocus(node.id, active, adjacency)) return colorWithAlpha(colors.mutedNode, 0.68)
+	if (active.kind === "node" && active.id === node.id) return colors.nodeActive
+	return paperNodeColorForDepth(node.depth, {
+		paper: colors.node,
+		paperActive: colors.nodeActive,
+		paperFar: colors.nodeFar,
+	})
+}
+
+function paper3DLinkColor(
+	link: Paper3DLink,
+	active: Selection,
+	colors: { edge: string; edgeActive: string },
+) {
+	const baseAlpha = link.edge.status === "stale" ? 0.14 : link.edge.isRetained ? 0.24 : 0.38
+	if (!active) return colorWithAlpha(colors.edge, baseAlpha)
+	if (!isPaper3DLinkInFocus(link, active)) return colorWithAlpha(colors.edge, 0.1)
+	return colorWithAlpha(colors.edgeActive, active.kind === "edge" && active.id === link.id ? 0.72 : 0.52)
+}
+
+function paper3DLinkWidth(link: Paper3DLink, active: Selection, min: number, max: number) {
+	const base = edgeWidthForWeight(link.edge.weight, min, max)
+	if (!active) return link.edge.status === "stale" ? Math.max(min, base * 0.62) : base
+	if (!isPaper3DLinkInFocus(link, active)) return Math.max(min, base * 0.56)
+	if (active.kind === "edge" && active.id === link.id) return Math.min(max + 0.55, base * 1.5)
+	return Math.min(max + 0.25, base * 1.16)
+}
+
+function isPaper3DLinkInFocus(link: Paper3DLink, active: Selection) {
 	if (!active) return true
-	if (active.kind === "edge") return active.id === edgeId
-	const [source, target] = graph.extremities(edgeId)
+	if (active.kind === "edge") return active.id === link.id
+	const source = graphEndpointId(link.source)
+	const target = graphEndpointId(link.target)
 	return source === active.id || target === active.id
+}
+
+function graphEndpointId(endpoint: Paper3DLink["source"] | Paper3DLink["target"]) {
+	if (typeof endpoint === "string" || typeof endpoint === "number") return String(endpoint)
+	if (endpoint && typeof endpoint === "object") return String(endpoint.id)
+	return ""
 }
 
 function sortedPaperEvidence(evidence: PaperEvidence[]) {
@@ -1342,34 +1011,34 @@ function matchesEdgeSearch(
 	return haystack.some((value) => normalizeSearch(value).includes(normalizedQuery))
 }
 
-function resetSigmaCamera(renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null) {
-	if (!renderer) return
-	const camera = (
-		renderer as unknown as {
-			getCamera?: () => {
-				animatedReset?: (options?: { duration?: number }) => void
-				setState?: (state: { x: number; y: number; ratio: number }) => void
-			}
-		}
-	).getCamera?.()
-	if (camera?.animatedReset) {
-		camera.animatedReset({ duration: 220 })
-		return
-	}
-	camera?.setState?.({ x: 0, y: 0, ratio: 1 })
-}
-
 function edgeWidthForWeight(weight: number, min: number, max: number) {
 	return clampSize(min + (max - min) * Math.max(0, Math.min(1, weight)), min, max)
 }
 
-function curvatureForEdge(edgeId: string) {
+function depthForNode(nodeId: string) {
+	let hash = 0
+	for (let index = 0; index < nodeId.length; index += 1) {
+		hash = (hash * 33 + nodeId.charCodeAt(index)) >>> 0
+	}
+	return ((hash % 1000) / 1000) * 2 - 1
+}
+
+function paperNodeColorForDepth(
+	depth: number,
+	colors: { paper: string; paperActive: string; paperFar: string },
+) {
+	if (depth > 0.45) return colors.paperActive
+	if (depth < -0.45) return colors.paperFar
+	return colors.paper
+}
+
+function curvatureForEdge(edgeId: string, weight: number) {
 	let hash = 0
 	for (let index = 0; index < edgeId.length; index += 1) {
 		hash = (hash * 31 + edgeId.charCodeAt(index)) >>> 0
 	}
 	const sign = hash % 2 === 0 ? 1 : -1
-	return sign * (0.14 + (hash % 3) * 0.025)
+	return sign * (0.18 + (hash % 4) * 0.028 + (1 - Math.max(0, Math.min(1, weight))) * 0.035)
 }
 
 function clampSize(value: number, min: number, max: number) {
@@ -1388,11 +1057,6 @@ function formatPaperEdgeKind(kind: PaperEdgeKind) {
 	if (kind === "related_metrics") return "related metrics"
 	if (kind === "semantic_neighbor") return "semantic neighbor"
 	return "mixed evidence"
-}
-
-function shortPaperLabel(title: string) {
-	const normalized = title.replace(/\s+/g, " ").trim()
-	return normalized.length <= 34 ? normalized : `${normalized.slice(0, 31)}...`
 }
 
 function normalizeSearch(value: string) {
@@ -1431,8 +1095,9 @@ function resolveCssColor(color: string, fallback: string) {
 	return fallback
 }
 
-function cssNumberVar(style: CSSStyleDeclaration, name: string, fallback: number) {
-	const value = style.getPropertyValue(name).trim()
+function cssNumberVar(name: string, fallback: number) {
+	if (typeof document === "undefined") return fallback
+	const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 	const number = Number.parseFloat(value)
 	return Number.isFinite(number) ? number : fallback
 }
