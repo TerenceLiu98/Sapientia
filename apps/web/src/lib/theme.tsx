@@ -27,6 +27,7 @@ function resolveTheme(preference: ThemePreference): "light" | "dark" {
 const ThemeContext = createContext<{
 	themePreference: ThemePreference
 	resolvedTheme: "light" | "dark"
+	systemTheme: "light" | "dark"
 	setThemePreference: (preference: ThemePreference) => void
 } | null>(null)
 
@@ -68,9 +69,10 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 		() => ({
 			themePreference,
 			resolvedTheme,
+			systemTheme,
 			setThemePreference,
 		}),
-		[resolvedTheme, themePreference],
+		[resolvedTheme, systemTheme, themePreference],
 	)
 
 	return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

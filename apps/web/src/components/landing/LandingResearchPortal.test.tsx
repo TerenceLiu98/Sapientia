@@ -22,7 +22,7 @@ vi.mock("@/api/hooks/papers", () => ({
 }))
 
 vi.mock("@/lib/theme", () => ({
-	useTheme: () => ({ resolvedTheme: "dark" }),
+	useTheme: () => ({ resolvedTheme: "dark", systemTheme: "light" }),
 }))
 
 vi.mock("@/lib/auth-client", () => ({

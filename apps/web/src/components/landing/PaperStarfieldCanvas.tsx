@@ -94,6 +94,8 @@ export function PaperStarfieldCanvas({
 	const sceneRef = useRef<any>(null)
 	const particlesRef = useRef<Particle[]>([])
 	const paperMeshesRef = useRef<any[]>([])
+	const paperStarsRef = useRef<PaperStarItem[]>([])
+	const pointsMaterialRef = useRef<any>(null)
 	const pointsRef = useRef<any>(null)
 	const animationRef = useRef<number | null>(null)
 	const pointerRef = useRef(new THREE.Vector2(10, 10))
@@ -104,8 +106,24 @@ export function PaperStarfieldCanvas({
 	const paperStars = useMemo(() => items.slice(0, MAX_INTERACTIVE_STARS), [items])
 
 	useEffect(() => {
+		paperStarsRef.current = paperStars
+		syncParticleItems(particlesRef.current, paperMeshesRef.current, paperStars)
+	}, [paperStars])
+
+	useEffect(() => {
 		isInputFocusedRef.current = isInputFocused
 	}, [isInputFocused])
+
+	useEffect(() => {
+		const material = pointsMaterialRef.current
+		if (material?.uniforms?.uColor?.value) {
+			material.uniforms.uColor.value.set(colorMode === "dark" ? 0xffffff : 0x000000)
+		}
+		const paperColor = colorMode === "dark" ? 0xffffff : 0x1f1f1f
+		for (const mesh of paperMeshesRef.current) {
+			mesh.material.color.set(paperColor)
+		}
+	}, [colorMode])
 
 	const resetParticle = useCallback((particle: Particle, seedOffset = 0) => {
 		const seed = Math.random() * 10000 + seedOffset
@@ -146,7 +164,7 @@ export function PaperStarfieldCanvas({
 		camera.position.set(0, 0, 14)
 		cameraRef.current = camera
 
-		const particles = buildParticles(paperStars)
+		const particles = buildParticles(paperStarsRef.current)
 		particlesRef.current = particles
 
 		const pointsGeometry = new THREE.BufferGeometry()
@@ -163,7 +181,7 @@ export function PaperStarfieldCanvas({
 			new THREE.Float32BufferAttribute(new Float32Array(particles.length * TRAIL_SAMPLES), 1),
 		)
 		const pointsMaterial = new THREE.ShaderMaterial({
-			blending: colorMode === "dark" ? THREE.AdditiveBlending : THREE.NormalBlending,
+			blending: THREE.NormalBlending,
 			depthWrite: false,
 			fragmentShader: STARFIELD_FRAGMENT_SHADER,
 			uniforms: {
@@ -178,12 +196,13 @@ export function PaperStarfieldCanvas({
 			vertexShader: STARFIELD_VERTEX_SHADER,
 			transparent: true,
 		})
+		pointsMaterialRef.current = pointsMaterial
 		const points = new THREE.Points(pointsGeometry, pointsMaterial)
 		pointsRef.current = points
 		scene.add(points)
 
 		const paperMeshes = particles
-			.filter((particle) => particle.item)
+			.slice(0, MAX_INTERACTIVE_STARS)
 			.map((particle) => {
 				const geometry = new THREE.SphereGeometry(0.045, 16, 16)
 				const material = new THREE.MeshBasicMaterial({
@@ -194,10 +213,12 @@ export function PaperStarfieldCanvas({
 				const mesh = new THREE.Mesh(geometry, material)
 				mesh.userData.item = particle.item
 				mesh.userData.particle = particle
+				mesh.visible = Boolean(particle.item)
 				scene.add(mesh)
 				return mesh
 			})
 		paperMeshesRef.current = paperMeshes
+		syncParticleItems(particles, paperMeshes, paperStarsRef.current)
 
 		const resize = () => {
 			const rect = container.getBoundingClientRect()
@@ -219,7 +240,7 @@ export function PaperStarfieldCanvas({
 			const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05)
 			lastFrameTime = now
 			elapsedSeconds += deltaSeconds
-			const focusedMultiplier = isInputFocusedRef.current ? 0.42 : 1
+			const focusedMultiplier = isInputFocusedRef.current ? 0.9 : 1
 			const pulse = 0.96 + Math.sin(elapsedSeconds * 0.8) * 0.04
 			const pointPositions = pointsGeometry.getAttribute("position")
 			const pointSizes = pointsGeometry.getAttribute("aSize")
@@ -252,6 +273,7 @@ export function PaperStarfieldCanvas({
 				const particle = mesh.userData.particle as Particle
 				mesh.position.set(particle.x, particle.y, particle.z)
 				mesh.scale.setScalar(mesh === hoveredMeshRef.current ? 2.1 : 1)
+				mesh.visible = Boolean(particle.item)
 			}
 
 			raycaster.setFromCamera(pointerRef.current, camera)
@@ -283,13 +305,14 @@ export function PaperStarfieldCanvas({
 			if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current)
 			pointsGeometry.dispose()
 			pointsMaterial.dispose()
+			pointsMaterialRef.current = null
 			for (const mesh of paperMeshes) {
 				mesh.geometry.dispose()
 				mesh.material.dispose()
 			}
 			renderer.dispose()
 		}
-	}, [colorMode, paperStars, resetParticle])
+	}, [resetParticle])
 
 	const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
 		const rect = event.currentTarget.getBoundingClientRect()
@@ -353,7 +376,7 @@ export function PaperStarfieldCanvas({
 
 function buildParticles(items: PaperStarItem[]) {
 	const particles: Particle[] = []
-	const totalCount = AMBIENT_PARTICLE_COUNT + items.length
+	const totalCount = AMBIENT_PARTICLE_COUNT + MAX_INTERACTIVE_STARS
 	for (let index = 0; index < totalCount; index += 1) {
 		const item = index < items.length ? items[index] : null
 		const seed = Math.random() * 10000 + index + 1
@@ -374,6 +397,27 @@ function buildParticles(items: PaperStarItem[]) {
 		})
 	}
 	return particles
+}
+
+function syncParticleItems(
+	particles: Particle[],
+	paperMeshes: any[],
+	items: PaperStarItem[],
+) {
+	for (let index = 0; index < Math.min(MAX_INTERACTIVE_STARS, particles.length); index += 1) {
+		const item = items[index] ?? null
+		const particle = particles[index]
+		particle.item = item
+		const mesh = paperMeshes[index]
+		if (mesh) {
+			mesh.userData.item = item
+			mesh.userData.particle = particle
+			mesh.visible = Boolean(item)
+		}
+	}
+	for (let index = Math.min(MAX_INTERACTIVE_STARS, particles.length); index < particles.length; index += 1) {
+		particles[index].item = null
+	}
 }
 
 function randomRange(min: number, max: number) {

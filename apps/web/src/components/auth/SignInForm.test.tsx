@@ -19,6 +19,14 @@ vi.mock("@/lib/auth-client", () => ({
 	}),
 }))
 
+vi.mock("@/lib/theme", () => ({
+	useTheme: () => ({ systemTheme: "light" }),
+}))
+
+vi.mock("@/components/landing/PaperStarfieldCanvas", () => ({
+	PaperStarfieldCanvas: () => <div data-testid="paper-starfield" />,
+}))
+
 vi.mock("@tanstack/react-router", async () => {
 	const actual =
 		await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router")

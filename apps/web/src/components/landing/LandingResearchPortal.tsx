@@ -8,13 +8,13 @@ import {
 	Map,
 	ScrollText,
 	Settings,
-	UserPlus,
 	Upload,
 } from "lucide-react"
 import {
 	type FormEvent,
 	type ReactNode,
 	useCallback,
+	useEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -28,7 +28,7 @@ import { PaperStarfieldCanvas, type PaperStarItem } from "./PaperStarfieldCanvas
 
 const MAX_VISIBLE_RESULTS = 6
 const COMMAND_PLACEHOLDER = "Interroga Sapientiam..."
-type CommandRoute = "/library" | "/graph" | "/settings" | "/sign-in" | "/sign-up"
+type CommandRoute = "/library" | "/graph" | "/settings" | "/sign-in"
 type CommandActionDefinition = {
 	icon: LucideIcon
 	label: string
@@ -41,21 +41,34 @@ const COMMAND_ACTIONS: CommandActionDefinition[] = [
 ]
 const AUTH_ACTIONS: CommandActionDefinition[] = [
 	{ icon: LogIn, label: "Sign in", to: "/sign-in" as const },
-	{ icon: UserPlus, label: "Create account", to: "/sign-up" as const },
 ]
 
 export function LandingResearchPortal() {
 	const navigate = useNavigate()
-	const { resolvedTheme } = useTheme()
-	const isDark = resolvedTheme === "dark"
+	const { resolvedTheme, systemTheme } = useTheme()
 	const { data: session } = useSession()
 	const isAuthenticated = Boolean(session)
+	const landingTheme = isAuthenticated ? resolvedTheme : systemTheme
+	const isDark = landingTheme === "dark"
 	const { data: workspace } = useCurrentWorkspace({ enabled: isAuthenticated })
 	const { data: papers = [] } = usePapers(workspace?.id ?? "")
 	const [query, setQuery] = useState("")
 	const [isFocused, setIsFocused] = useState(false)
 	const [emptyPanelSeed, setEmptyPanelSeed] = useState(0)
 	const inputRef = useRef<HTMLInputElement | null>(null)
+
+	useEffect(() => {
+		if (isAuthenticated || typeof document === "undefined") return
+		const previousTheme = document.documentElement.dataset.theme
+		document.documentElement.dataset.theme = systemTheme
+		return () => {
+			if (previousTheme) {
+				document.documentElement.dataset.theme = previousTheme
+			} else {
+				delete document.documentElement.dataset.theme
+			}
+		}
+	}, [isAuthenticated, systemTheme])
 
 	const paperItems = useMemo(
 		() => (isAuthenticated ? papers.map(toPaperStarItem) : []),
@@ -71,6 +84,7 @@ export function LandingResearchPortal() {
 	}, [emptyPanelSeed, isAuthenticated, normalizedQuery, papers])
 	const matchingActions = useMemo(() => {
 		const availableActions = isAuthenticated ? COMMAND_ACTIONS : AUTH_ACTIONS
+		if (!isAuthenticated) return AUTH_ACTIONS
 		if (!normalizedQuery) {
 			return seededShuffle(availableActions, emptyPanelSeed + 0.53).slice(
 				0,
@@ -132,7 +146,7 @@ export function LandingResearchPortal() {
 			}`}
 		>
 			<PaperStarfieldCanvas
-				colorMode={resolvedTheme}
+				colorMode={landingTheme}
 				isInputFocused={shouldShowPanel}
 				items={paperItems}
 				onPaperSelect={openPaper}
@@ -148,7 +162,7 @@ export function LandingResearchPortal() {
 			<div className="relative z-10 flex h-full items-center justify-center px-4">
 				<div className="relative w-full max-w-[46rem]">
 					<form
-						className={`group relative flex h-14 items-center overflow-hidden rounded-[22px] border backdrop-blur-md transition-colors ${
+						className={`group relative flex h-14 items-center overflow-hidden rounded-[22px] border transition-colors ${
 							isDark
 								? "border-white/42 bg-black/38 shadow-[0_0_42px_rgb(255_255_255_/_0.10),0_24px_80px_rgb(0_0_0_/_0.46)] focus-within:border-white/68"
 								: "border-border-default bg-bg-overlay shadow-[var(--shadow-popover)] focus-within:border-border-strong"
@@ -161,7 +175,7 @@ export function LandingResearchPortal() {
 								aria-label="Ask anything"
 								autoComplete="off"
 								className="absolute inset-0 z-20 h-full w-full appearance-none border-0 bg-transparent pr-20 pl-6 text-xl text-transparent caret-transparent opacity-0 outline-none selection:bg-transparent placeholder:text-transparent focus:outline-none focus:ring-0 focus-visible:outline-none [-webkit-appearance:none]"
-								onBlur={() => window.setTimeout(() => setIsFocused(false), 120)}
+								onBlur={() => setIsFocused(false)}
 								onChange={(event) => setQuery(event.target.value)}
 								onFocus={handleFocus}
 								placeholder={COMMAND_PLACEHOLDER}
@@ -207,7 +221,7 @@ export function LandingResearchPortal() {
 
 					{shouldShowPanel ? (
 						<div
-							className={`absolute top-[calc(100%+1rem)] right-0 left-0 rounded-[28px] border p-2 backdrop-blur-xl ${
+							className={`absolute top-[calc(100%+1rem)] right-0 left-0 rounded-[28px] border p-2 ${
 								isDark
 									? "border-white/16 bg-black/44 shadow-[0_18px_70px_rgb(0_0_0_/_0.42)]"
 									: "border-border-subtle bg-bg-overlay shadow-[var(--shadow-popover)]"
@@ -283,10 +297,16 @@ export function LandingResearchPortal() {
 				</div>
 			</div>
 			<div
-				className={`pointer-events-none absolute right-6 bottom-5 left-6 z-10 text-center font-serif ${
+				className={`pointer-events-none absolute right-6 bottom-5 left-6 z-10 flex items-center justify-center gap-3 text-center font-serif ${
 					isDark ? "text-white/46" : "text-text-tertiary"
 				}`}
 			>
+				<img
+					alt=""
+					aria-hidden="true"
+					className="h-7 w-7 shrink-0 rounded-[7px]"
+					src={isDark ? "/logo-light.svg" : "/logo-dark.svg"}
+				/>
 				<div className="text-lg leading-6 sm:text-xl">
 					Humans do Marginalia, AIs do Zettelkasten
 				</div>
@@ -368,7 +388,27 @@ function toPaperStarItem(paper: Paper): PaperStarItem {
 }
 
 function shuffledPapers(papers: Paper[], seed: number) {
-	return seededShuffle(papers, seed + 0.17).slice(0, MAX_VISIBLE_RESULTS)
+	if (papers.length <= MAX_VISIBLE_RESULTS) return seededShuffle(papers, seed + 0.17)
+	const sample: Paper[] = []
+	const seen = new Set<number>()
+	let attempt = 0
+	while (sample.length < MAX_VISIBLE_RESULTS && attempt < MAX_VISIBLE_RESULTS * 12) {
+		const index = Math.floor(seededUnit(seed * 997 + attempt * 37.17) * papers.length)
+		if (!seen.has(index)) {
+			seen.add(index)
+			sample.push(papers[index])
+		}
+		attempt += 1
+	}
+	if (sample.length >= MAX_VISIBLE_RESULTS) return sample
+	const start = Math.floor(seededUnit(seed + 0.41) * papers.length)
+	for (let offset = 0; sample.length < MAX_VISIBLE_RESULTS && offset < papers.length; offset += 1) {
+		const index = (start + offset) % papers.length
+		if (seen.has(index)) continue
+		seen.add(index)
+		sample.push(papers[index])
+	}
+	return sample
 }
 
 function randomActionCount(seed: number, maxCount: number, isAuthenticated: boolean) {
