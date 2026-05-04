@@ -3,23 +3,23 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BlockConceptLensPanel } from "./BlockConceptLensPanel"
 
-const usePaperBlockConceptLensMock = vi.fn()
+const usePaperConceptLensMock = vi.fn()
 
 vi.mock("@/api/hooks/papers", async () => {
 	const actual = await vi.importActual<typeof import("@/api/hooks/papers")>("@/api/hooks/papers")
 	return {
 		...actual,
-		usePaperBlockConceptLens: (...args: Array<unknown>) => usePaperBlockConceptLensMock(...args),
+		usePaperConceptLens: (...args: Array<unknown>) => usePaperConceptLensMock(...args),
 	}
 })
 
 describe("BlockConceptLensPanel", () => {
 	beforeEach(() => {
-		usePaperBlockConceptLensMock.mockReset()
+		usePaperConceptLensMock.mockReset()
 	})
 
 	it("does not render until a block is selected", () => {
-		usePaperBlockConceptLensMock.mockReturnValue({ data: undefined, isLoading: false, isError: false })
+		usePaperConceptLensMock.mockReturnValue({ data: undefined, isLoading: false, isError: false })
 
 		const { container } = render(
 			<BlockConceptLensPanel blockId={null} paperId="paper-1" workspaceId="workspace-1" />,
@@ -28,8 +28,34 @@ describe("BlockConceptLensPanel", () => {
 		expect(container).toBeEmptyDOMElement()
 	})
 
+	it("can anchor the lens to an open note", async () => {
+		const user = userEvent.setup()
+		usePaperConceptLensMock.mockReturnValue({
+			data: undefined,
+			isLoading: false,
+			isError: false,
+		})
+
+		render(
+			<BlockConceptLensPanel
+				blockId={null}
+				noteId="note-1"
+				paperId="paper-1"
+				variant="marginalia"
+				workspaceId="workspace-1"
+			/>,
+		)
+
+		await user.click(screen.getByRole("button", { name: "Open Concept Lens" }))
+
+		expect(screen.getByText("Open note")).toBeInTheDocument()
+		expect(usePaperConceptLensMock).toHaveBeenCalledWith("workspace-1", "paper-1", {
+			noteId: "note-1",
+		})
+	})
+
 	it("renders grounded concepts and related semantic hints without creating a review task", () => {
-		usePaperBlockConceptLensMock.mockReturnValue({
+		usePaperConceptLensMock.mockReturnValue({
 			isLoading: false,
 			isError: false,
 			data: {
@@ -88,6 +114,41 @@ describe("BlockConceptLensPanel", () => {
 						},
 					},
 				],
+				relatedPapers: [
+					{
+						id: "edge-1",
+						edgeKind: "shared_concepts",
+						weight: 0.81,
+						status: "active",
+						isRetained: false,
+						hasReaderNoteEvidence: true,
+						paper: {
+							id: "paper-node-2",
+							paperId: "paper-2",
+							title: "A Related Paper",
+							authors: ["Ada Lovelace"],
+							year: 2026,
+							venue: "arXiv",
+						},
+						strongestEvidence: {
+							sourceConceptId: "concept-1",
+							targetConceptId: "concept-2",
+							sourceConceptName: "Contrastive Activation Steering",
+							targetConceptName: "Representation Steering",
+							rationale: "Both papers discuss activation-level interventions.",
+							sourceEvidenceBlockIds: ["block-1"],
+							targetEvidenceBlockIds: ["block-9"],
+							currentEvidenceBlockIds: ["block-1"],
+							otherEvidenceBlockIds: ["block-9"],
+							sourceEvidenceSnippets: [
+								{ blockId: "block-1", snippet: "We steer activations contrastively." },
+							],
+							targetEvidenceSnippets: [
+								{ blockId: "block-9", snippet: "We alter representations." },
+							],
+						},
+					},
+				],
 			},
 		})
 
@@ -102,18 +163,27 @@ describe("BlockConceptLensPanel", () => {
 
 		expect(screen.getByText("Concept Lens")).toBeInTheDocument()
 		expect(screen.getByText("Block 7")).toBeInTheDocument()
-		expect(screen.getByText("Contrastive Activation Steering")).toBeInTheDocument()
-		expect(screen.getByText("Highlighted once and cited twice.")).toBeInTheDocument()
-		expect(screen.getByText("Related concept hints")).toBeInTheDocument()
+		expect(screen.getAllByText("Contrastive Activation Steering").length).toBeGreaterThan(0)
+		expect(screen.getAllByText("Highlighted once and cited twice.").length).toBeGreaterThan(0)
+		expect(screen.getByText("In this passage")).toBeInTheDocument()
+		expect(screen.getByText("Across papers")).toBeInTheDocument()
+		expect(screen.getByText("A Related Paper")).toBeInTheDocument()
+		expect(screen.queryByText(/reader note/)).not.toBeInTheDocument()
+		expect(screen.getByRole("link", { name: "Open evidence" })).toHaveAttribute(
+			"href",
+			"/papers/paper-2?blockId=block-9",
+		)
+		expect(screen.getByText("From your notes")).toBeInTheDocument()
 		expect(screen.getByText("Representation Steering")).toBeInTheDocument()
-		expect(screen.getByText(/LLM: related/)).toBeInTheDocument()
+		expect(screen.queryByText(/LLM: related/)).not.toBeInTheDocument()
+		expect(screen.queryByText(/shared concepts/)).not.toBeInTheDocument()
 		expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument()
 		expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument()
 	})
 
 	it("shows all concepts after opening the marginalia lens", async () => {
 		const user = userEvent.setup()
-		usePaperBlockConceptLensMock.mockReturnValue({
+		usePaperConceptLensMock.mockReturnValue({
 			isLoading: false,
 			isError: false,
 			data: {
@@ -155,14 +225,14 @@ describe("BlockConceptLensPanel", () => {
 
 		await user.click(screen.getByRole("button", { name: "Open Concept Lens" }))
 
-		expect(screen.getByText("Concept 1")).toBeInTheDocument()
+		expect(screen.getAllByText("Concept 1").length).toBeGreaterThan(0)
 		expect(screen.getByText("Concept 5")).toBeInTheDocument()
 		expect(screen.queryByText(/more concepts grounded here/)).not.toBeInTheDocument()
 	})
 
 	it("preserves marginalia expand state across selected block changes", async () => {
 		const user = userEvent.setup()
-		usePaperBlockConceptLensMock.mockReturnValue({
+		usePaperConceptLensMock.mockReturnValue({
 			isLoading: false,
 			isError: false,
 			data: {

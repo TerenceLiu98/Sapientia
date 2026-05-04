@@ -1509,6 +1509,11 @@ function WorkspaceContent({
 	selectedTextToolbar,
 	viewMode,
 }: WorkspaceContentProps) {
+	const expandedNote = expandedNoteId
+		? (notes.find((candidate) => candidate.id === expandedNoteId) ?? null)
+		: null
+	const lensBlockId = expandedNote?.anchorBlockId ?? selectedBlockId
+
 	return isLoading ? (
 		<div className="p-8 text-sm text-text-tertiary">Loading…</div>
 	) : !paper ? (
@@ -1534,10 +1539,13 @@ function WorkspaceContent({
 					colorByBlock={colorByBlock}
 					contextPanel={
 						<BlockConceptLensPanel
-							blockId={selectedBlockId}
+							blockId={lensBlockId}
 							blockNumber={
-								selectedBlockId ? (blockNumberByBlockId.get(selectedBlockId) ?? null) : null
+								lensBlockId
+									? (blockNumberByBlockId.get(lensBlockId) ?? null)
+									: null
 							}
+							noteId={expandedNote?.id ?? null}
 							paperId={paper.id}
 							variant="marginalia"
 							workspaceId={workspaceId}

@@ -99,6 +99,9 @@ export function useCreateNote(workspaceId: string) {
 				qc.invalidateQueries({
 					queryKey: ["paper-block-concept-lens", created.workspaceId, targetPaperId],
 				})
+				qc.invalidateQueries({
+					queryKey: ["paper-concept-lens", created.workspaceId, targetPaperId],
+				})
 				qc.invalidateQueries({ queryKey: ["workspace-graph", created.workspaceId] })
 			}
 			qc.invalidateQueries({ queryKey: ["notes", workspaceId] })
@@ -132,6 +135,9 @@ export function useUpdateNote() {
 				qc.invalidateQueries({
 					queryKey: ["paper-block-concept-lens", updated.workspaceId, updated.paperId],
 				})
+				qc.invalidateQueries({
+					queryKey: ["paper-concept-lens", updated.workspaceId, updated.paperId],
+				})
 				qc.invalidateQueries({ queryKey: ["workspace-graph", updated.workspaceId] })
 			}
 		},
@@ -145,6 +151,7 @@ export function useDeleteNote(workspaceId: string) {
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["notes", workspaceId] })
 			qc.invalidateQueries({ queryKey: ["paper-block-concept-lens", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper-concept-lens", workspaceId] })
 			qc.invalidateQueries({ queryKey: ["workspace-graph", workspaceId] })
 		},
 	})

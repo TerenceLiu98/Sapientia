@@ -296,7 +296,7 @@ async function completeObjectWithJsonMode<T>(args: {
 	startedAt: number
 }): Promise<CompleteObjectResult<T>> {
 	const { params, model, provider, startedAt } = args
-	const maxParseAttempts = 2
+	const maxParseAttempts = 3
 	let lastParseError: ObjectTextParseError | null = null
 
 	for (let attempt = 0; attempt < maxParseAttempts; attempt += 1) {
@@ -304,6 +304,7 @@ async function completeObjectWithJsonMode<T>(args: {
 			model,
 			system: buildJsonObjectSystem(params.system, params.schema, {
 				repairAttempt: attempt > 0,
+				minimalAttempt: attempt > 1,
 			}),
 			messages: params.messages,
 			maxOutputTokens:
@@ -451,6 +452,20 @@ function mapLlmError(error: unknown, provider: LlmProvider): Error {
 		return error
 	}
 
+	if (error instanceof ObjectTextParseError) {
+		return new LlmCallError(error.message, {
+			provider,
+			permanent: false,
+			diagnostics: {
+				rawType: "ObjectTextParseError",
+				kind: error.kind,
+				candidateChars: error.candidate.length,
+				startsWithBrace: error.candidate.trimStart().startsWith("{"),
+				endsWithBrace: error.candidate.trimEnd().endsWith("}"),
+			},
+		})
+	}
+
 	if (APICallError.isInstance(error)) {
 		const status = error.statusCode
 		return new LlmCallError(error.message, {
@@ -486,7 +501,7 @@ function isPermanentHttpStatus(status: number): boolean {
 function buildJsonObjectSystem<T>(
 	system: string | undefined,
 	schema: z.ZodType<T>,
-	options: { repairAttempt?: boolean } = {},
+	options: { repairAttempt?: boolean; minimalAttempt?: boolean } = {},
 ) {
 	const schemaJson = JSON.stringify(z.toJSONSchema(schema), null, 2)
 	const instructions = [
@@ -496,6 +511,9 @@ function buildJsonObjectSystem<T>(
 		"The JSON must be complete and parseable; never stop in the middle of an array, string, or object.",
 		options.repairAttempt
 			? "Your previous response for this request was invalid or truncated. Return a smaller complete JSON object now."
+			: null,
+		options.minimalAttempt
+			? "Return the smallest useful valid object for this schema. Prefer fewer array items over a long or truncated response."
 			: null,
 		`The JSON must satisfy this schema:\n${schemaJson}`,
 	]

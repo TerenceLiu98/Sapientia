@@ -5,18 +5,16 @@ import {
 	compiledLocalConcepts,
 	wikiPageReferences,
 	wikiPages,
-	workspaceConceptClusterCandidates,
-	workspaceConceptClusterMembers,
-	workspaceConceptClusters,
 } from "@sapientia/db"
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, asc, desc, eq, isNull } from "drizzle-orm"
 import { Hono } from "hono"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { loadBlockConceptLensPayload, loadConceptLensPayload } from "../services/concept-lens"
 
 export const wikiRoutes = new Hono<AuthContext>()
-const PUBLIC_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric"])
+const PUBLIC_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric", "dataset"])
 
 wikiRoutes.get(
 	"/workspaces/:workspaceId/papers/:paperId/wiki",
@@ -78,6 +76,37 @@ wikiRoutes.get(
 			userId: user.id,
 		})
 		return c.json(payload)
+	},
+)
+
+wikiRoutes.get(
+	"/workspaces/:workspaceId/papers/:paperId/lens",
+	requireAuth,
+	requireMembership("reader"),
+	async (c) => {
+		const workspaceId = c.req.param("workspaceId")
+		const paperId = c.req.param("paperId")
+		const user = c.get("user")
+		const blockId = c.req.query("blockId") ?? undefined
+		const noteId = c.req.query("noteId") ?? undefined
+		const annotationId = c.req.query("annotationId") ?? undefined
+		const conceptId = c.req.query("conceptId") ?? undefined
+
+		if (!blockId && !noteId && !annotationId && !conceptId) {
+			return c.json({ error: "lens requires blockId, noteId, annotationId, or conceptId" }, 400)
+		}
+
+		return c.json(
+			await loadConceptLensPayload({
+				workspaceId,
+				paperId,
+				userId: user.id,
+				blockId,
+				noteId,
+				annotationId,
+				conceptId,
+			}),
+		)
 	},
 )
 
@@ -280,206 +309,6 @@ async function loadPaperWikiPayload(args: {
 	}
 }
 
-async function loadBlockConceptLensPayload(args: {
-	workspaceId: string
-	paperId: string
-	blockId: string
-	userId: string
-}) {
-	const { workspaceId, paperId, blockId, userId } = args
-	const rows = await db
-		.select({
-			conceptId: compiledLocalConcepts.id,
-			kind: compiledLocalConcepts.kind,
-			canonicalName: compiledLocalConcepts.canonicalName,
-			displayName: compiledLocalConcepts.displayName,
-			status: compiledLocalConcepts.status,
-			salienceScore: compiledLocalConcepts.salienceScore,
-			highlightCount: compiledLocalConcepts.highlightCount,
-			noteCitationCount: compiledLocalConcepts.noteCitationCount,
-			sourceLevelDescription: compiledLocalConcepts.sourceLevelDescription,
-			sourceLevelDescriptionStatus: compiledLocalConcepts.sourceLevelDescriptionStatus,
-			readerSignalSummary: compiledLocalConcepts.readerSignalSummary,
-			promptVersion: compiledLocalConcepts.promptVersion,
-			evidenceSnippet: compiledLocalConceptEvidence.snippet,
-			evidenceConfidence: compiledLocalConceptEvidence.confidence,
-			clusterId: workspaceConceptClusters.id,
-			clusterDisplayName: workspaceConceptClusters.displayName,
-			clusterCanonicalName: workspaceConceptClusters.canonicalName,
-			clusterKind: workspaceConceptClusters.kind,
-			clusterMemberCount: workspaceConceptClusters.memberCount,
-			clusterPaperCount: workspaceConceptClusters.paperCount,
-		})
-		.from(compiledLocalConceptEvidence)
-		.innerJoin(
-			compiledLocalConcepts,
-			eq(compiledLocalConcepts.id, compiledLocalConceptEvidence.conceptId),
-		)
-		.leftJoin(
-			workspaceConceptClusterMembers,
-			eq(workspaceConceptClusterMembers.localConceptId, compiledLocalConcepts.id),
-		)
-		.leftJoin(
-			workspaceConceptClusters,
-			eq(workspaceConceptClusters.id, workspaceConceptClusterMembers.clusterId),
-		)
-		.where(
-			and(
-				eq(compiledLocalConceptEvidence.paperId, paperId),
-				eq(compiledLocalConceptEvidence.blockId, blockId),
-				eq(compiledLocalConcepts.workspaceId, workspaceId),
-				eq(compiledLocalConcepts.ownerUserId, userId),
-				isNull(compiledLocalConcepts.deletedAt),
-				or(
-					isNull(workspaceConceptClusters.deletedAt),
-					eq(workspaceConceptClusters.workspaceId, workspaceId),
-				),
-			),
-		)
-		.orderBy(desc(compiledLocalConcepts.salienceScore), asc(compiledLocalConcepts.displayName))
-
-	const publicRows = rows.filter((row) => PUBLIC_CONCEPT_KINDS.has(row.kind))
-	const clusterIds = [
-		...new Set(publicRows.flatMap((row) => (row.clusterId ? [row.clusterId] : []))),
-	]
-	const candidates =
-		clusterIds.length === 0
-			? []
-			: await db
-					.select({
-						id: workspaceConceptClusterCandidates.id,
-						sourceLocalConceptId: workspaceConceptClusterCandidates.sourceLocalConceptId,
-						targetLocalConceptId: workspaceConceptClusterCandidates.targetLocalConceptId,
-						sourceClusterId: workspaceConceptClusterCandidates.sourceClusterId,
-						targetClusterId: workspaceConceptClusterCandidates.targetClusterId,
-						kind: workspaceConceptClusterCandidates.kind,
-						matchMethod: workspaceConceptClusterCandidates.matchMethod,
-						similarityScore: workspaceConceptClusterCandidates.similarityScore,
-						llmDecision: workspaceConceptClusterCandidates.llmDecision,
-						llmConfidence: workspaceConceptClusterCandidates.llmConfidence,
-						decisionStatus: workspaceConceptClusterCandidates.decisionStatus,
-						rationale: workspaceConceptClusterCandidates.rationale,
-					})
-					.from(workspaceConceptClusterCandidates)
-					.where(
-						and(
-							eq(workspaceConceptClusterCandidates.workspaceId, workspaceId),
-							eq(workspaceConceptClusterCandidates.ownerUserId, userId),
-							isNull(workspaceConceptClusterCandidates.deletedAt),
-							eq(workspaceConceptClusterCandidates.decisionStatus, "ai_confirmed"),
-							or(
-								inArray(workspaceConceptClusterCandidates.sourceClusterId, clusterIds),
-								inArray(workspaceConceptClusterCandidates.targetClusterId, clusterIds),
-							),
-						),
-					)
-					.orderBy(
-						desc(workspaceConceptClusterCandidates.llmConfidence),
-						desc(workspaceConceptClusterCandidates.similarityScore),
-					)
-	const candidateClusterIds = [
-		...new Set(
-			candidates.flatMap((candidate) =>
-				[candidate.sourceClusterId, candidate.targetClusterId].filter(isString),
-			),
-		),
-	]
-	const candidateClusters =
-		candidateClusterIds.length === 0
-			? []
-			: await db
-					.select({
-						id: workspaceConceptClusters.id,
-						kind: workspaceConceptClusters.kind,
-						displayName: workspaceConceptClusters.displayName,
-						canonicalName: workspaceConceptClusters.canonicalName,
-						memberCount: workspaceConceptClusters.memberCount,
-						paperCount: workspaceConceptClusters.paperCount,
-					})
-					.from(workspaceConceptClusters)
-					.where(
-						and(
-							inArray(workspaceConceptClusters.id, candidateClusterIds),
-							eq(workspaceConceptClusters.workspaceId, workspaceId),
-							eq(workspaceConceptClusters.ownerUserId, userId),
-							isNull(workspaceConceptClusters.deletedAt),
-						),
-					)
-	const clusterById = new Map(candidateClusters.map((cluster) => [cluster.id, cluster] as const))
-
-	return {
-		workspaceId,
-		paperId,
-		blockId,
-		concepts: publicRows.map((row) => ({
-			id: row.conceptId,
-			kind: row.kind,
-			canonicalName: row.canonicalName,
-			displayName: row.displayName,
-			status: row.status,
-			salienceScore: row.salienceScore,
-			highlightCount: row.highlightCount,
-			noteCitationCount: row.noteCitationCount,
-			sourceLevelDescription: row.sourceLevelDescription,
-			sourceLevelDescriptionStatus: row.sourceLevelDescriptionStatus,
-			readerSignalSummary: row.readerSignalSummary,
-			promptVersion: row.promptVersion,
-			evidence: {
-				blockId,
-				snippet: row.evidenceSnippet,
-				confidence: row.evidenceConfidence,
-			},
-			cluster: row.clusterId
-				? {
-						id: row.clusterId,
-						displayName: row.clusterDisplayName,
-						canonicalName: row.clusterCanonicalName,
-						kind: row.clusterKind,
-						memberCount: row.clusterMemberCount,
-						paperCount: row.clusterPaperCount,
-					}
-				: null,
-		})),
-		semanticCandidates: candidates.flatMap((candidate) => {
-			if (!candidate.sourceClusterId || !candidate.targetClusterId) return []
-			const relatedClusterId = clusterIds.includes(candidate.sourceClusterId)
-				? candidate.targetClusterId
-				: candidate.sourceClusterId
-			const relatedCluster = clusterById.get(relatedClusterId)
-			return [
-				{
-					id: candidate.id,
-					sourceClusterId: candidate.sourceClusterId,
-					targetClusterId: candidate.targetClusterId,
-					sourceLocalConceptId: candidate.sourceLocalConceptId,
-					targetLocalConceptId: candidate.targetLocalConceptId,
-					kind: candidate.kind,
-					matchMethod: candidate.matchMethod,
-					similarityScore: candidate.similarityScore,
-					llmDecision: candidate.llmDecision,
-					llmConfidence: candidate.llmConfidence,
-					decisionStatus: candidate.decisionStatus,
-					rationale: candidate.rationale,
-					relatedCluster: relatedCluster
-						? {
-								id: relatedCluster.id,
-								displayName: relatedCluster.displayName,
-								canonicalName: relatedCluster.canonicalName,
-								kind: relatedCluster.kind,
-								memberCount: relatedCluster.memberCount,
-								paperCount: relatedCluster.paperCount,
-							}
-						: null,
-				},
-			]
-		}),
-	}
-}
-
-function isString(value: string | null): value is string {
-	return typeof value === "string"
-}
-
 function toConceptGraphPayload(args: {
 	workspaceId: string
 	paperId: string
@@ -543,7 +372,7 @@ function toConceptGraphPayload(args: {
 		},
 		visibility: {
 			defaultNodeKinds: [...PUBLIC_CONCEPT_KINDS],
-			supportingNodeKinds: ["dataset", "person", "organization"],
+			supportingNodeKinds: [],
 		},
 		graph: {
 			nodeCount: nodes.length,

@@ -242,20 +242,18 @@ function WorkspaceGraphCanvas({
 
 function GraphLegend() {
 	return (
-		<div className="pointer-events-none absolute right-3 bottom-3 max-w-[16rem] rounded-md border border-border-subtle bg-bg-primary/90 px-3 py-2 text-[11px] leading-5 text-text-tertiary shadow-[var(--shadow-sm)]">
-			<div>
-				<span className="font-medium text-text-secondary">Node size</span> = connectedness + concept
-				count
+		<div className="pointer-events-none absolute right-3 bottom-3 flex items-center gap-3 rounded-full border border-border-subtle bg-bg-primary/78 px-2.5 py-1.5 text-[11px] text-text-tertiary shadow-[var(--shadow-sm)] backdrop-blur">
+			<div className="flex items-center gap-1.5">
+				<span className="h-2.5 w-2.5 rounded-full bg-[rgb(0,78,80)]" />
+				<span>paper</span>
 			</div>
-			<div>
-				<span className="font-medium text-text-secondary">Link thickness</span> = relationship
-				strength
+			<div className="flex items-center gap-1.5">
+				<span className="h-px w-5 bg-text-secondary/65" />
+				<span>link</span>
 			</div>
-			<div>
-				<span className="font-medium text-text-secondary">Drag / wheel</span> = rotate + zoom
-			</div>
-			<div>
-				<span className="font-medium text-text-secondary">Gray</span> = out-of-focus context
+			<div className="flex items-center gap-1.5">
+				<span className="h-2.5 w-2.5 rounded-full bg-border-strong/70" />
+				<span>dimmed</span>
 			</div>
 		</div>
 	)

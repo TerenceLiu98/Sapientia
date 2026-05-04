@@ -856,7 +856,10 @@ export function NotesPanel({
 				</div>
 				</div>
 				{contextPanel ? (
-					<div className="pointer-events-auto fixed bottom-4 right-[60px] z-[80] w-auto max-w-[calc(100vw-84px)]">
+					<div
+						className="pointer-events-auto absolute bottom-4 z-[80] flex w-auto max-w-[calc(100vw-84px)] justify-end"
+						style={{ right: `${railStripWidth + SIDEBAR_INSET_X}px` }}
+					>
 						{contextPanel}
 					</div>
 				) : null}

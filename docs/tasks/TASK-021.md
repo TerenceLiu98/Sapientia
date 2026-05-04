@@ -1,101 +1,75 @@
-# TASK-021: Concept graph view (Sigma.js / Graphology)
+# TASK-021: Read-only Paper Map observation point
 
 **Estimated effort**: 2-3 working days
 **Depends on**: TASK-020 umbrella, practically at least TASK-020D (local concepts + global concept clusters + cross-paper links)
-**Phase**: 3 — Zettelkasten Output (closing card; UX-heavy, architecturally simple)
-**Status**: in progress — first workspace graph slice shipped behind `/graph`
+**Phase**: 3 — Zettelkasten Output
+**Status**: complete foundation — 3D Paper Map shipped; future work is polish/hardening only
 
 ---
 
 ## Context
 
-TASK-020 produces the data — local concept nodes, global concept clusters, paper wiki/source pages, and the references between them. TASK-021 makes the **concept graph** visible.
+TASK-020 produces the substrate: paper-local concepts, evidence, semantic relations, source pages, note-born observations, and stable paper-paper edges. TASK-021 is the read-only graph projection over that substrate.
 
 Important product rule:
 
-- `020A`'s paper wiki / source page is a compiled summary artifact
-- that artifact remains primarily agent-facing
-- the user-facing Phase 3 surface should foreground **concepts + evidence**, not a standalone summary-reading page
+- source wiki/page artifacts are agent-facing substrate
+- users do not maintain wiki pages, graph edges, or ontology
+- `/graph` is an observation point, not the main reading workflow
+- Concept Lens v2 in the reader is the primary Phase 3 user surface
 
-So TASK-021 is now the first intended user-facing Phase 3 page.
+The default `/graph` view answers: "How are the papers I read connected?" Concepts remain the bridge layer and explain each paper-paper edge, but the user does not edit those concepts or edges directly.
 
-The graph isn't decorative. It's the answer to "what have I been reading about?", "which authors keep showing up across my papers?", "where does this idea connect to others I've marked?" Sapientia's product claim is that accumulated marginalia compounds into a survey of the reader's own thinking. The graph is the surface where that claim is most legible.
+Current visualization direction:
 
-Tech stack direction has changed from the first-pass **Cytoscape.js** implementation to an Atomic-inspired graph stack:
-
-- **Sigma.js** as the primary high-performance renderer for the user-facing workspace graph.
-- **Graphology** as the in-memory graph data model for nodes, edges, attributes, filtering, and derived projections.
-- **d3-force** as the initial force-layout engine when server-side/stored positions are absent.
-- **react-zoom-pan-pinch** for surrounding canvas/panel interactions where Sigma's built-in camera is not enough.
-
-Cytoscape.js remains acceptable for existing debug panels until they are migrated or removed. The user-facing `/graph` surface should move to Sigma/Graphology because the Sapientia graph is becoming a large, evolving concept substrate rather than a small debug visualization.
+- 3D Paper Map is the default and only visible `/graph` visualization.
+- The graph is backed by persisted stable Paper Map snapshots.
+- Hysteresis keeps links stable: create conservatively, retain weakened edges, stale old edges gradually.
+- Reader notes/highlights influence concepts and edges indirectly through the background pipeline.
+- Wiki debug and reader graph debug panels should not return as primary UI.
 
 ### Scope
 
-- A single `/graph` route showing the workspace's compiled concept graph.
-- Nodes: concept surfaces derived from TASK-020's compiled substrate, colored per `--graph-node-*` tokens.
-  - first-pass default visible kinds should be the core graph layer:
-    - `concept`
-    - `method`
-    - `task`
-    - `metric`
-  - supporting kinds such as `dataset`, author-level `person`, and author-affiliation `organization` may exist in the substrate but should not automatically appear as primary graph nodes in v0.1
-- Edges: derived from inner-paper and cross-paper concept relationships emitted by TASK-020D.
-- Clicking a concept node opens the best available concept/evidence surface for that concept.
-- It may optionally expose supporting summary context later, but should not require users to read a standalone AI summary page.
-- Filters: by concept kind/subtype, by recency when useful.
-- A readable force/layout strategy, without turning this into a node-editor product.
+- A single `/graph` route showing workspace papers as nodes.
+- Paper-paper edges come from confirmed concept evidence and stable Paper Map lifecycle.
+- Clicking a paper opens a compact read-only paper detail sheet.
+- Clicking an edge opens evidence: concept pairs, confidence, rationale, snippets, and reader-note provenance.
+- Search and visual focus help observation, but do not create graph editing controls.
+- Concept Lens can link out to `/graph` for neighborhood inspection, but `/graph` is not the default reading path.
 
-### Implementation status (2026-05-02)
+### Implementation status (2026-05-04)
 
-Shipped first pass:
+Shipped:
 
 - `GET /api/v1/workspaces/:workspaceId/graph` in `apps/api/src/routes/graph.ts`.
 - `useWorkspaceGraph()` in `apps/web/src/api/hooks/graph.ts`.
 - `/graph` route in `apps/web/src/routes/graph.tsx`.
-- Left nav `Graph` entry now links to `/graph`.
-- `WorkspaceGraphView` renders a Cytoscape canvas plus an evidence-first inspector.
-- Clicking a node/top concept opens paper-specific cluster members, not a standalone wiki summary page.
-- The graph now consumes `workspace_concept_clusters` from TASK-020F as primary nodes.
-
-Package baseline added:
-
-- `sigma`
-- `graphology`
-- `d3-force`
-- `react-zoom-pan-pinch`
-- `@types/d3-force`
-
-Intentional first-pass boundaries:
-
-- Nodes are workspace concept clusters from TASK-020F, filtered to core graph kinds: `concept`, `method`, `task`, `metric`.
-- Supporting kinds (`dataset`, author-level `person`, author-affiliation `organization`) remain available in the substrate but are not primary visible graph nodes yet.
-- Edges are currently persisted local inner-paper concept edges projected onto workspace concept clusters.
-- Semantic/LLM cross-paper fusion beyond deterministic canonical-name grouping is not implemented yet.
-- Filter chips and URL query state are deferred until the graph has enough real data to reveal the right filter model.
-- No graph response cache yet; add only if dogfooding shows repeated refresh cost.
+- `workspace_paper_graph_edges` and `workspace_paper_graph_snapshots` persist stable Paper Map lifecycle.
+- `WorkspaceGraphView` renders a 3D force-directed Paper Map.
+- Paper and edge selection opens compact sheets rather than a permanent inspector rail.
+- Related evidence shows retained/weaker state and reader-note provenance.
+- Legacy reader wiki debug and reader concept graph debug panels were removed.
 
 ### Explicitly NOT in scope (v0.1)
 
-- **Editing the graph.** No node drag-pin, no manual edge creation. The graph reflects state; mutations happen via marginalia + wiki ingestion.
-- **3D layouts, WebGL effects, animation budgets.** Default Sigma renderer is enough for the corpora we'll see in v0.1 (≤ ~500 nodes).
+- **Editing the graph.** No node drag-pin persistence, no manual edge creation, no review queue. The graph reflects state; mutations happen through reading signals.
 - **Time-travel.** No "show graph as of date X" — just current state.
-- **Graph algorithms beyond layout.** No community detection, no centrality scores, no PageRank. UX-style filtering only.
+- **Ontology maintenance.** No rename/retype/merge/split in the graph.
 - **Cross-workspace graphs.** Graph is workspace-scoped (matches wiki_pages scope).
 
 ---
 
 ## Acceptance Criteria
 
-1. **Route**: `/graph` renders a graph filling the main pane. ✅ first pass uses Cytoscape; next pass migrates to Sigma.
-2. **Data fetch**: a single `useWorkspaceGraph()` hook calls `GET /api/v1/workspaces/:wsId/graph` and returns nodes + edges in UI-friendly JSON. ✅
-3. **Nodes**: one per visible paper-local concept surface. Color by kind. ✅ first pass
-4. **Edges**: concept relationships produced by TASK-020D. Edge color via `--graph-edge-default`. ✅ first pass
-5. **Click node**: opens the source paper for that concept. ✅ first pass
-6. **Filter chips**: above the canvas, toggles for concept kinds/subtypes. Filter state in URL query so the view is shareable. ⏸ deferred
-7. **Empty state**: when there are <2 concepts, render a friendly forming-state message instead of an empty canvas. ✅
-8. **Performance**: graph with 500 nodes + 2000 edges renders in <500ms on a current laptop, scrolls/zooms smoothly. ⏳ not yet benchmarked
-9. **Tests**: API route returns expected shape; node-click/router behavior covered. ✅ first pass mocks Cytoscape; next pass should mock Sigma/Graphology adapter.
+1. **Route**: `/graph` renders the 3D Paper Map as the main canvas. ✅
+2. **Data fetch**: `useWorkspaceGraph(workspaceId, "papers")` calls `GET /api/v1/workspaces/:wsId/graph?view=papers`. ✅
+3. **Nodes**: papers are nodes; node size reflects connectedness/concept count. ✅
+4. **Edges**: paper links use stable persisted graph evidence and hysteresis. ✅
+5. **Click node/link**: opens read-only detail/evidence sheet. ✅
+6. **No editing**: no graph edit/review controls. ✅
+7. **Empty/loading/error**: render graph-specific states. ✅
+8. **Performance**: ongoing polish; 3D layout is intentionally not persisted yet. ⏳
+9. **Concept Lens handoff**: Lens consumes Paper Map evidence for related papers instead of recomputing links. ✅ TASK-027 checkpoint
 
 ---
 
@@ -107,38 +81,35 @@ Intentional first-pass boundaries:
 // Response shape, simplified
 {
   workspaceId: string
-  visibility: {
-    defaultNodeKinds: ["concept", "method", "task", "metric"]
-    supportingNodeKinds: ["dataset", "person", "organization"]
-  }
+  view: "papers"
   graph: {
     nodeCount: number
     edgeCount: number
-    relationCounts: Record<string, number>
     nodes: Array<{
       id: string
-      conceptId: string
       label: string
-      kind: string
-      canonicalName: string
       paperId: string
-      paperTitle: string | null
-      salienceScore: number
-      highlightCount: number
-      noteCitationCount: number
+      title: string
+      conceptCount: number
       degree: number
-      evidenceBlockIds: string[]
+      topConcepts: Array<{ id: string; displayName: string; kind: string }>
     }>
     edges: Array<{
       id: string
       source: string
       target: string
-      sourceConceptId: string
-      targetConceptId: string
-      paperId: string
-      relationType: string
-      confidence: number | null
-      evidenceBlockIds: string[]
+      edgeKind: string
+      weight: number
+      status?: "active" | "stale"
+      isRetained?: boolean
+      hasReaderNoteEvidence?: boolean
+      topEvidence: Array<{
+        sourceConceptName: string
+        targetConceptName: string
+        rationale: string | null
+        sourceEvidenceBlockIds: string[]
+        targetEvidenceBlockIds: string[]
+      }>
     }>
   }
 }
@@ -146,13 +117,12 @@ Intentional first-pass boundaries:
 
 Implementation in `apps/api/src/routes/graph.ts`. Builds:
 
-- The relevant concept-layer nodes from TASK-020.
-- Cross-paper cluster/local-node relationships if exposed.
-- Any typed concept edges persisted by TASK-020.
+- Paper nodes from workspace papers.
+- Paper-paper edges from confirmed concept and semantic evidence.
+- Stable edge lifecycle from `workspace_paper_graph_edges`.
+- Stable snapshots from `workspace_paper_graph_snapshots`.
 
-This card should not need to infer graph structure from wiki prose if the compiled concept substrate already exists.
-
-Cache the response per (workspaceId, lastWikiPageUpdatedAt) for 60s only if repeated refresh cost becomes visible in dogfooding.
+This card should not infer graph structure from wiki prose. It reads the compiled concept/evidence substrate and persisted Paper Map lifecycle.
 
 ---
 
@@ -169,70 +139,35 @@ export const Route = createFileRoute("/graph")({
 
 ### Components
 
-- `apps/web/src/components/graph/WorkspaceGraphView.tsx` — Cytoscape renderer + right inspector in one first-pass component.
-- `apps/web/src/components/graph/GraphFilters.tsx` — deferred. Reads/writes URL query.
-- `apps/web/src/components/graph/GraphLegend.tsx` — deferred. Small legend showing node-color → type mapping.
+- `apps/web/src/components/graph/WorkspaceGraphView.tsx` — 3D force Paper Map canvas plus compact paper/edge sheets.
 - `apps/web/src/api/hooks/graph.ts` — TanStack Query hook for the endpoint.
 
-### Cytoscape configuration
+### Visualization configuration
 
-Use Cytoscape's layout system with a conservative first-pass layout such as `cose` or `fcose`. Run the layout on data load, then freeze. Do not continuously re-simulate.
+Use `react-force-graph-3d` as the renderer. Map backend `PaperGraphPayload` directly to `{ nodes, links }`.
 
-```ts
-import cytoscape from "cytoscape"
+- node id: paper graph node id
+- link source/target: paper graph edge source/target
+- node size: degree + concept count
+- node color: deep blue-green, with brighter hover/selected state and gray out-of-focus state
+- link color: restrained gray/near-black, with selected/neighbor emphasis
+- link width: relationship strength, capped low enough to avoid visual clutter
 
-const cy = cytoscape({
-  container,
-  elements,
-  style: [
-    // node + edge styles from CSS-token-derived values
-  ],
-  layout: {
-    name: "cose",
-    animate: false,
-  },
-})
-
-cy.on("tap", "node", (event) => {
-  const node = event.target
-  // final destination depends on the concept/evidence surface chosen at implementation time
-})
-```
-
-Read CSS vars via `getComputedStyle(document.documentElement).getPropertyValue('--graph-node-source')` so dark-mode swaps automatically on theme toggle. Re-read on a `MutationObserver` listening for `data-theme` changes (cheap, fires only on toggle).
-
-### Theme tokens (already in design doc, ship to index.css)
-
-If not yet present in `apps/web/src/index.css` from TASK-019.1, add the §2.6 graph tokens:
-
-```css
-:root {
-  --graph-node-source:  var(--color-neutral-500);
-  --graph-node-entity:  oklch(0.55 0.110 30);
-  --graph-node-concept: oklch(0.50 0.120 195);
-  --graph-edge-default: oklch(0.5 0.005 75 / 0.4);
-  --graph-edge-active:  var(--color-accent-500);
-}
-[data-theme="dark"] {
-  /* +0.15 lightness on the node oklch values; edge alpha bumped */
-}
-```
-
-(Confirm during implementation — TASK-019.1 may have shipped these already.)
+Do not add layout persistence yet. The graph is a viewing surface, not an editing surface.
 
 ---
 
 ## Risks
 
-1. **Library bundle size.** Cytoscape.js should be lazy-imported via TanStack Router code-splitting so the rest of the app doesn't carry it. Verify in the production bundle output.
+1. **WebGL / bundle cost.** Keep the graph route code-split. Verify `/reader` does not pay for 3D graph dependencies.
 
 2. **Node count vs readability.** A workspace with 500 nodes is dense and looks like a hairball at default zoom. Provide a zoom-to-node action on click and a "fit" button that resets to graph-level view. If hairball persists, the right answer is filters and graph layering, not a different library.
 
 3. **Edge derivation accuracy.** Edges should come from TASK-020D's explicit inner-paper and cross-paper relation substrate, not from substring matching over prose.
 
-4. **Stale graph when wiki updates.** TanStack Query stale time of 60s is probably right; don't put real-time invalidation in v0.1.
+4. **Stale graph when concepts update.** Paper Map uses persisted stable snapshots; background refresh and query invalidation should update the observation point without causing link churn.
 
-5. **Mobile.** Cytoscape.js supports touch interaction, but v0.1 should still ship desktop-first; mobile graph viewing is "best-effort".
+5. **Mobile.** 3D graph viewing is best-effort. Reader Concept Lens should remain the primary mobile-friendly surface.
 
 6. **Color-blind users.** Three node colors that need to be distinguishable: the doc picks neutral / warm-30° / accent-teal-195°. They're chosen for contrast in oklch space but verify with a deuteranopia simulator before shipping.
 
@@ -240,27 +175,25 @@ If not yet present in `apps/web/src/index.css` from TASK-019.1, add the §2.6 gr
 
 ## Open questions
 
-- **Layout choice.** Start with `cose`; upgrade to `fcose` only if real graph readability demands it.
-- **Should the source-paper wiki page be a node, or should the underlying paper be the node?** The current recommendation is: neither should be the primary user-facing destination. The graph should foreground concept-layer nodes; paper/source summary artifacts remain supporting substrate.
-- **Edge directionality.** The graph is logically directed for several relation types, but many readers interpret graphs better as lightly-directed or visually softened. Recommendation: keep directed semantics in data, but render arrows subtly.
-- **Node sizing.** Currently the API returns `referenceCount` which the frontend can map to node radius. Should also factor in "how many notes cite this page's source"? Defer — sizing by single signal is simpler to read at first.
-- **Search/select-by-name.** A search box that filters nodes and zooms to matches. Useful in dense graphs. Defer to v0.2 unless dogfooding shows the bare filter chips aren't enough.
+- **Camera defaults.** Tune default camera distance and zoom-to-fit behavior once real workspaces grow past 100 papers.
+- **Layout persistence.** Do not add until users explicitly need stable spatial memory.
+- **Neighborhood entry from Lens.** Future polish can add an "Open neighborhood" affordance from reader Lens to `/graph` if it proves useful.
 
 ---
 
 ## Testing strategy
 
-- **API route test**: seed a workspace with 3 wiki pages and a few wiki_page_references; assert the graph endpoint returns the right node count + edge count.
-- **Edge derivation correctness**: feed the page-to-page parser a fixture body referencing two known canonicalNames; assert it produces 2 edges.
-- **Filter integration**: render `<GraphCanvas>` with a fixture graph; click each filter chip; assert nodes hide/unhide via Cytoscape filtering/state.
-- **Click → navigate**: click a node; assert mocked router navigates to the chosen concept/evidence destination.
+- **API route test**: seed a workspace with papers, concepts, semantic candidates, and graph snapshot rows; assert paper nodes/edges/evidence return.
+- **Edge lifecycle correctness**: verify create/keep/stale/supersede thresholds.
+- **Canvas integration**: mock `react-force-graph-3d`; assert node/link data, styling callbacks, click callbacks, and compact sheets.
+- **Click → inspect**: click a node/link; assert paper/evidence sheet content.
 - **No tests for layout convergence.** Visual layouts are inherently subjective; test data shape and interaction, not exact coordinates.
 
 ---
 
 ## References
 
-- **Cytoscape.js docs** — graph/network visualization and interaction model.
+- **react-force-graph-3d / Three.js docs** — current graph rendering stack.
 - **DESIGN_TOKENS.md §2.6** — graph color tokens.
 - **TASK-020 / TASK-020D** — produce local concept nodes, inner-paper edges, cross-paper clusters, and evidence-backed links.
 - **PRD §1** — Zettelkasten thesis; the graph is the most legible UX of that thesis.
@@ -271,7 +204,7 @@ If not yet present in `apps/web/src/index.css` from TASK-019.1, add the §2.6 gr
 
 When done, append to `docs/tasks/README.md`:
 
-| TASK-021 | Knowledge graph view | ~3 days | TASK-020 | ✅ done |
+| TASK-021 | Read-only Paper Map observation point | ~3 days | TASK-020 | ✅ done |
 
 Plus a screenshot or two — this is the most photogenic surface in the whole app and worth a record for the project README.
 

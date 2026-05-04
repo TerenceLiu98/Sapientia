@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react"
-import { usePaperBlockConceptLens } from "@/api/hooks/papers"
+import { usePaperConceptLens } from "@/api/hooks/papers"
 import type { PaperBlockConceptLensPayload, PaperWikiConcept } from "@/api/hooks/papers"
 
 interface BlockConceptLensPanelProps {
 	blockId: string | null
 	blockNumber?: number | null
+	noteId?: string | null
+	annotationId?: string | null
 	paperId: string
 	variant?: "default" | "marginalia"
 	workspaceId?: string
@@ -12,50 +14,67 @@ interface BlockConceptLensPanelProps {
 
 const CONCEPT_PREVIEW_LIMIT = 6
 const CANDIDATE_PREVIEW_LIMIT = 5
+const RELATED_PAPER_PREVIEW_LIMIT = 4
 const NOTE_CONCEPT_PROMPT_VERSION = "note-concept-extract-v1"
 
 export function BlockConceptLensPanel({
 	blockId,
 	blockNumber,
+	noteId,
+	annotationId,
 	paperId,
 	variant = "default",
 	workspaceId,
 }: BlockConceptLensPanelProps) {
-	const { data, isLoading, isError } = usePaperBlockConceptLens(workspaceId, paperId, blockId)
+	const lensInput = noteId
+		? { noteId }
+		: annotationId
+			? { annotationId }
+			: { blockId }
+	const { data, isLoading, isError } = usePaperConceptLens(workspaceId, paperId, lensInput)
 	const [isExpanded, setIsExpanded] = useState(variant !== "marginalia")
 
 	useEffect(() => {
 		setIsExpanded(variant !== "marginalia")
 	}, [variant])
 
-	if (!blockId && variant !== "marginalia") return null
+	const hasLensAnchor = Boolean(noteId || annotationId || blockId)
+	const heading = noteId
+		? "Open note"
+		: annotationId
+			? "Selected annotation"
+			: blockId
+				? blockNumber
+					? `Block ${blockNumber}`
+					: "Selected block"
+				: "No block selected"
+
+	if (!hasLensAnchor && variant !== "marginalia") return null
 
 	const concepts = data?.concepts ?? []
 	const semanticCandidates = data?.semanticCandidates ?? []
+	const relatedPapers = data?.relatedPapers ?? []
+	const hasGroundedConcepts = concepts.length > 0
 	const conceptPreviewLimit = variant === "marginalia" ? concepts.length : CONCEPT_PREVIEW_LIMIT
 	const candidatePreviewLimit =
 		variant === "marginalia" ? semanticCandidates.length : CANDIDATE_PREVIEW_LIMIT
-	const hasRelatedCandidates = semanticCandidates.length > 0
 
 	if (variant === "marginalia" && !isExpanded) {
 		return (
 			<button
 				aria-label="Open Concept Lens"
-				className="group flex w-[272px] max-w-[calc(100vw-84px)] items-center gap-2 rounded-full border border-border-subtle bg-bg-primary/95 px-2.5 py-1.5 text-left text-xs text-text-secondary shadow-md backdrop-blur transition hover:bg-surface-hover"
+				className="group inline-flex max-w-[calc(100vw-84px)] items-center gap-1.5 rounded-full border border-border-subtle bg-bg-primary/90 px-2 py-1 text-left text-[11px] text-text-secondary shadow-md backdrop-blur transition hover:bg-surface-hover"
 				onClick={() => setIsExpanded(true)}
 				type="button"
 			>
-				<span className="h-2 w-2 shrink-0 rounded-full bg-text-secondary/55 transition group-hover:bg-text-primary" />
+				<span
+					className={`h-1.5 w-1.5 shrink-0 rounded-full transition ${
+						hasGroundedConcepts
+							? "bg-[#005f61] opacity-90 shadow-[0_0_0_3px_rgba(0,95,97,0.12)] group-hover:opacity-100"
+							: "bg-text-secondary/35 opacity-70 group-hover:bg-text-secondary/55 group-hover:opacity-90"
+					}`}
+				/>
 				<span className="min-w-0 truncate font-semibold text-text-primary">Concept Lens</span>
-				<span className="shrink-0 text-text-tertiary">
-					{!blockId
-						? "select block"
-						: isLoading
-							? "loading"
-							: `${concepts.length} concept${concepts.length === 1 ? "" : "s"}${
-									hasRelatedCandidates ? ` · ${semanticCandidates.length} related` : ""
-								}`}
-				</span>
 			</button>
 		)
 	}
@@ -64,7 +83,7 @@ export function BlockConceptLensPanel({
 		<section
 			className={
 				variant === "marginalia"
-					? "max-h-[min(54vh,460px)] w-[min(460px,calc(100vw-84px))] overflow-y-auto rounded-2xl border border-border-subtle bg-bg-primary/95 p-2.5 shadow-lg backdrop-blur"
+					? "max-h-[min(48vh,400px)] w-[min(360px,calc(100vw-84px))] overflow-y-auto rounded-2xl border border-border-subtle bg-bg-primary/95 p-2.5 shadow-lg backdrop-blur"
 					: "mb-3 rounded-2xl border border-border-subtle bg-bg-primary/92 p-3 shadow-sm"
 			}
 		>
@@ -74,11 +93,7 @@ export function BlockConceptLensPanel({
 						Concept Lens
 					</div>
 					<div className="mt-1 text-sm font-semibold text-text-primary">
-						{blockId
-							? blockNumber
-								? `Block ${blockNumber}`
-								: "Selected block"
-							: "No block selected"}
+						{heading}
 					</div>
 				</div>
 				{variant === "marginalia" ? (
@@ -96,9 +111,9 @@ export function BlockConceptLensPanel({
 				)}
 			</div>
 
-			{!blockId ? (
+			{!hasLensAnchor ? (
 				<div className="mt-3 text-sm text-text-tertiary">
-					Select a paper block to inspect its grounded concepts.
+					Select a paper block or open a note to inspect grounded concepts.
 				</div>
 			) : isLoading ? (
 				<div className="mt-3 text-sm text-text-tertiary">Loading concepts for this block…</div>
@@ -119,7 +134,7 @@ export function BlockConceptLensPanel({
 					}
 				>
 					<div className="space-y-2">
-						<div className="text-xs font-semibold text-text-secondary">Concepts in this block</div>
+						<div className="text-xs font-semibold text-text-secondary">In this passage</div>
 						<div
 							className={
 								variant === "marginalia"
@@ -140,16 +155,28 @@ export function BlockConceptLensPanel({
 
 					<div className="space-y-2">
 						<div className="flex items-center justify-between gap-2">
-							<div className="text-xs font-semibold text-text-secondary">Related concept hints</div>
-							{semanticCandidates.length > 0 ? (
-								<div className="text-[11px] text-text-tertiary">
-									{semanticCandidates.length} related
-								</div>
-							) : null}
+							<div className="text-xs font-semibold text-text-secondary">Across papers</div>
+						</div>
+						{relatedPapers.length === 0 ? (
+							<div className="rounded-xl border border-dashed border-border-subtle bg-bg-secondary/70 p-3 text-sm text-text-tertiary">
+								No stable paper connections are grounded here yet.
+							</div>
+						) : (
+							<div className="space-y-2">
+								{relatedPapers.slice(0, RELATED_PAPER_PREVIEW_LIMIT).map((item) => (
+									<RelatedPaperCard item={item} key={item.id} />
+								))}
+							</div>
+						)}
+					</div>
+
+					<div className="space-y-2">
+						<div className="flex items-center justify-between gap-2">
+							<div className="text-xs font-semibold text-text-secondary">From your notes</div>
 						</div>
 						{semanticCandidates.length === 0 ? (
 							<div className="rounded-xl border border-dashed border-border-subtle bg-bg-secondary/70 p-3 text-sm text-text-tertiary">
-								No nearby cross-paper concepts are linked to this block yet.
+								No note-shaped cross-paper hints are linked to this passage yet.
 							</div>
 						) : (
 							<div className="space-y-2">
@@ -209,13 +236,9 @@ function ConceptCard({
 					{concept.readerSignalSummary}
 				</p>
 			) : null}
-			<div className="mt-2 flex flex-wrap gap-2 text-[11px] text-text-tertiary">
-				<span>{formatScore(concept.salienceScore)} salience</span>
-				{concept.evidence.confidence != null ? (
-					<span>{formatScore(concept.evidence.confidence)} evidence</span>
-				) : null}
-				{clusterLabel && variant !== "marginalia" ? <span>Cluster: {clusterLabel}</span> : null}
-			</div>
+			{clusterLabel && variant !== "marginalia" ? (
+				<div className="mt-2 text-[11px] text-text-tertiary">{clusterLabel}</div>
+			) : null}
 		</article>
 	)
 }
@@ -227,27 +250,35 @@ function CandidateCard({
 }) {
 	return (
 		<article className="rounded-xl border border-border-subtle bg-bg-secondary/70 p-3">
-			<div className="flex flex-wrap items-start justify-between gap-2">
-				<div>
-					<div className="text-sm font-semibold text-text-primary">
-						{candidate.relatedCluster?.displayName ?? "Related concept"}
-					</div>
-					<div className="mt-1 text-[11px] text-text-tertiary">
-						{formatKind(candidate.kind)} · {formatCandidateStatus(candidate.decisionStatus)}
-						{candidate.llmDecision ? ` · LLM: ${candidate.llmDecision}` : ""}
-						{candidate.llmConfidence != null
-							? ` · confidence ${formatScore(candidate.llmConfidence)}`
-							: ""}
-					</div>
-				</div>
-				<span className="rounded-full bg-bg-primary px-2 py-0.5 text-[11px] text-text-secondary">
-					{formatScore(candidate.similarityScore)}
-				</span>
+			<div className="text-sm font-semibold text-text-primary">
+				{candidate.relatedCluster?.displayName ?? "Related concept"}
 			</div>
-			{candidate.rationale ? (
-				<p className="mt-2 line-clamp-2 text-xs leading-5 text-text-secondary">
-					{candidate.rationale}
-				</p>
+		</article>
+	)
+}
+
+function RelatedPaperCard({
+	item,
+}: {
+	item: NonNullable<PaperBlockConceptLensPayload["relatedPapers"]>[number]
+}) {
+	const evidence = item.strongestEvidence
+	const blockId =
+		evidence?.otherEvidenceBlockIds?.[0] ??
+		evidence?.targetEvidenceBlockIds[0] ??
+		evidence?.sourceEvidenceBlockIds[0]
+	return (
+		<article className="rounded-xl border border-border-subtle bg-bg-secondary/70 p-2.5">
+			<div className="text-sm font-semibold leading-5 text-text-primary">
+				{item.paper?.title ?? "Related paper"}
+			</div>
+			{item.paper && blockId ? (
+				<a
+					className="mt-2 inline-flex rounded-md border border-border-subtle px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+					href={`/papers/${item.paper.paperId}?blockId=${blockId}`}
+				>
+					Open evidence
+				</a>
 			) : null}
 		</article>
 	)
@@ -255,21 +286,4 @@ function CandidateCard({
 
 function formatKind(kind: PaperWikiConcept["kind"]) {
 	return kind.replace(/_/g, " ")
-}
-
-function formatScore(score: number | null) {
-	if (score == null) return "n/a"
-	return `${Math.round(score * 100)}%`
-}
-
-function formatCandidateStatus(
-	status: PaperBlockConceptLensPayload["semanticCandidates"][number]["decisionStatus"],
-) {
-	if (status === "candidate" || status === "needs_review") return "AI linked"
-	if (status === "ai_confirmed") return "AI confirmed"
-	if (status === "ai_rejected") return "AI rejected"
-	if (status === "user_accepted") return "manually kept"
-	if (status === "user_rejected") return "manually hidden"
-	if (status === "auto_accepted") return "AI linked"
-	return status.replace(/_/g, " ")
 }

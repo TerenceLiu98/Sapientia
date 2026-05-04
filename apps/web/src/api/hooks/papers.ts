@@ -128,7 +128,44 @@ export interface PaperWikiEdge {
 export interface PaperBlockConceptLensPayload {
 	workspaceId: string
 	paperId: string
+	scope?: "block" | "note" | "annotation" | "concept"
 	blockId: string
+	context?: {
+		paper: {
+			id: string
+			title: string
+			authors: string[] | null
+			year: number | null
+			venue: string | null
+			summaryStatus: PaperSummaryStatus
+			parseStatus: PaperParseStatus
+		} | null
+		block: {
+			blockId: string
+			blockIndex: number
+			type: string
+			page: number
+			text: string
+		} | null
+		note: {
+			id: string
+			title: string
+			currentVersion: number
+			anchorKind: string | null
+			anchorBlockId: string | null
+			anchorAnnotationId: string | null
+			updatedAt: string
+		} | null
+		annotation: {
+			id: string
+			page: number
+			kind: "highlight" | "underline"
+			color: string
+			quote: string
+			updatedAt: string
+		} | null
+		conceptId: string | null
+	}
 	concepts: Array<{
 		id: string
 		kind: PaperWikiConcept["kind"]
@@ -142,6 +179,7 @@ export interface PaperBlockConceptLensPayload {
 		sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
 		readerSignalSummary: string | null
 		promptVersion: string | null
+		hasReaderNoteEvidence?: boolean
 		evidence: {
 			blockId: string
 			snippet: string | null
@@ -186,7 +224,48 @@ export interface PaperBlockConceptLensPayload {
 			paperCount: number
 		} | null
 	}>
+	relatedPapers?: Array<{
+		id: string
+		paper: {
+			id: string
+			paperId: string
+			title: string
+			label: string
+			authors: string[]
+			year: number | null
+			venue: string | null
+			conceptCount: number
+			degree: number
+		} | null
+		edgeKind: string
+		weight: number
+		status: "active" | "stale"
+		isRetained: boolean
+		hasReaderNoteEvidence: boolean
+		strongestEvidence: {
+			sourceConceptId: string
+			targetConceptId: string
+			sourceConceptName: string
+			targetConceptName: string
+			rationale: string | null
+			sourceEvidenceBlockIds: string[]
+			targetEvidenceBlockIds: string[]
+			currentEvidenceBlockIds?: string[]
+			otherEvidenceBlockIds?: string[]
+			sourceEvidenceSnippets: Array<{ blockId: string; snippet: string }>
+			targetEvidenceSnippets: Array<{ blockId: string; snippet: string }>
+		} | null
+	}>
+	freshness?: {
+		concepts: "empty" | "running" | "failed" | "done"
+		descriptions: "empty" | "running" | "failed" | "done"
+		semantic: "empty" | "done"
+		graph: "empty" | "done"
+	}
+	feedbackActions?: string[]
 }
+
+export type PaperConceptLensPayload = PaperBlockConceptLensPayload
 
 function isInFlightStatus(status: Paper["parseStatus"] | undefined) {
 	return status === "pending" || status === "parsing"
@@ -270,6 +349,37 @@ export function usePaperBlockConceptLens(
 				`/api/v1/workspaces/${workspaceId}/papers/${paperId}/blocks/${blockId}/concepts`,
 			),
 		enabled: Boolean(workspaceId) && Boolean(paperId) && Boolean(blockId),
+		retry: false,
+		refetchInterval: 15_000,
+	})
+}
+
+export function usePaperConceptLens(
+	workspaceId: string | undefined,
+	paperId: string,
+	input:
+		| { blockId: string | null | undefined }
+		| { noteId: string | null | undefined }
+		| { annotationId: string | null | undefined }
+		| { conceptId: string | null | undefined },
+) {
+	const params = new URLSearchParams()
+	const blockId = "blockId" in input ? input.blockId : undefined
+	const noteId = "noteId" in input ? input.noteId : undefined
+	const annotationId = "annotationId" in input ? input.annotationId : undefined
+	const conceptId = "conceptId" in input ? input.conceptId : undefined
+	if (blockId) params.set("blockId", blockId)
+	if (noteId) params.set("noteId", noteId)
+	if (annotationId) params.set("annotationId", annotationId)
+	if (conceptId) params.set("conceptId", conceptId)
+	const queryString = params.toString()
+	return useQuery<PaperConceptLensPayload>({
+		queryKey: ["paper-concept-lens", workspaceId ?? "", paperId, queryString],
+		queryFn: () =>
+			apiFetch<PaperConceptLensPayload>(
+				`/api/v1/workspaces/${workspaceId}/papers/${paperId}/lens?${queryString}`,
+			),
+		enabled: Boolean(workspaceId) && Boolean(paperId) && Boolean(queryString),
 		retry: false,
 		refetchInterval: 15_000,
 	})
@@ -422,6 +532,7 @@ export function useRetryPaperKnowledge(workspaceId: string) {
 				qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
 				qc.invalidateQueries({ queryKey: ["workspace-graph", workspaceId] })
 				qc.invalidateQueries({ queryKey: ["paper-block-concept-lens", workspaceId, paperId] })
+				qc.invalidateQueries({ queryKey: ["paper-concept-lens", workspaceId, paperId] })
 			}
 			qc.invalidateQueries({ queryKey: ["paper", paperId] })
 		},

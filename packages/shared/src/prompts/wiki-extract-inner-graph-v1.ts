@@ -45,7 +45,7 @@ Relation rules:
 - If a relation is weak, incidental, or unsupported, leave it out.
 - Prefer sparse, meaningful structure over dense connectivity.
 - Return zero edges when the provided concepts do not have strong block-supported relations.
-- Prefer graph-visible core concepts: concept, method, task, and metric. Do not force dataset/person/organization into the graph unless they are present in the supplied concept list and essential to a strong relation.
+- Prefer graph-visible knowledge concepts: concept, method, task, metric, and dataset. Do not introduce people, authors, institutions, affiliations, labs, companies, or organizations.
 - Avoid vague "related_to" edges when a more specific relation is available.
 
 Confidence rules:

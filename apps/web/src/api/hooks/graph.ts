@@ -216,6 +216,7 @@ export function useReviewSemanticCandidate(workspaceId: string | undefined) {
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: ["workspace-graph", workspaceId ?? ""] })
 			void queryClient.invalidateQueries({ queryKey: ["paper-block-concept-lens"] })
+			void queryClient.invalidateQueries({ queryKey: ["paper-concept-lens"] })
 		},
 	})
 }

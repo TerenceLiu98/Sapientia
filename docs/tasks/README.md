@@ -2,7 +2,7 @@
 
 This directory contains task cards for Sapientia implementation. Tasks are organized by where they sit in the **marginalia → Zettelkasten loop** — Sapientia's core product thesis (see [PHILOSOPHY.md](../PHILOSOPHY.md), [PRD_v1.md](../PRD_v1.md), and the v2 design upgrade in [PRD_v2.md](../PRD_v2.md)).
 
-**Current state**: Phase 1 全部完成（8/8）。Phase 2 核心任务全部完成。TASK-018 marginalia v2 主体（A/B/D）已发，C/E/F 推迟。**Phase 3 已进入知识编译主线：TASK-019 已发；TASK-020 已形成 paper-local concept / semantic relation / paper graph checkpoint；TASK-022 已收尾为 note-native Ask checkpoint。** 2026-05-02 新增 [PRD_v2.md](../PRD_v2.md)：Phase 3 的用户侧方向从独立 wiki/graph 页面升级为 **Concept Lens + optional Concept Map**，source page/wiki 继续以 agent-facing substrate 为主；最新 v2 决策是：**用户不维护 concept wiki 或 graph，AI 在后台自主维护，用户行为默认只是阅读信号，显式操作只作为 correction/override**。paper-local concept 是 Sapientia 的 atom-like unit，`sourceLevelMeaning` 是 cross-paper clustering 的核心输入；agent 不再作为最终独立侧栏，而应折叠进 notes/marginalia，表现为 note-native AI replies。
+**Current state**: Phase 1 全部完成（8/8）。Phase 2 核心任务全部完成。TASK-018 marginalia v2 主体（A/B/D）已发，C/E/F 推迟。**Phase 3 已进入知识编译主线：TASK-019 已发；TASK-020 已形成 paper-local concept / semantic relation / stable Paper Map checkpoint；TASK-022 已收尾为 note-native Ask checkpoint；TASK-027 Concept Lens v2 reader checkpoint 已落地。** 2026-05-02 新增 [PRD_v2.md](../PRD_v2.md)：Phase 3 的用户侧方向从独立 wiki/graph 页面升级为 **Concept Lens + read-only Paper Map**，source page/wiki 继续以 agent-facing substrate 为主；最新 v2 决策是：**用户不维护 concept wiki 或 graph，AI 在后台自主维护，用户行为默认只是阅读信号，显式操作先不作为主 UI 暴露**。paper-local concept 是 Sapientia 的 atom-like unit，`sourceLevelMeaning` 是 cross-paper clustering 的核心输入；agent 不再作为最终独立侧栏，而应折叠进 notes/marginalia，表现为 note-native AI replies。
 
 ---
 
@@ -56,10 +56,11 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 | TASK-019.1 | Color-token compliance + dark theme | ✅ 完成 (`59b4a3e`) |
 | TASK-019.2 | Spacing / motion / radius token alignment | 🚧 Phase A 已发 (`f58c448`)；B–F 待做 |
 | TASK-020 | Knowledge compilation pipeline (summary + concept extraction + wiki refinement) | 🚧 已重写并拆成子卡 ([TASK-020.md](TASK-020.md), [020A](TASK-020A.md), [020B](TASK-020B.md), [020C](TASK-020C.md), [020D](TASK-020D.md), [020F](TASK-020F.md), [020G](TASK-020G.md), [020H](TASK-020H.md), [020I](TASK-020I.md), [020J](TASK-020J.md)); `020A` 已改为 `paper-compile-v1` 单次编译并进入 hardening；`020F` 已建立 workspace concept cluster substrate；`020G` AI-maintained source-level concept descriptions 基础闭环已落地；`020H` 建立 AI-maintained semantic candidate layer；`020I` 将 `/graph` 默认面改为 paper graph，concept evidence 作为 paper-paper edge 解释层；`020J` 已 checkpoint ready：note/highlight reader signal 与 embedding/LLM judgement 解耦，`readerSignalDirtyAt` 和 `semanticDirtyAt` 分层；[020E](TASK-020E.md) 已退休 |
-| TASK-021 | Knowledge graph view (Cytoscape.js) | ✅ foundation landed: paper graph + Sigma view 已落地；剩余为 Concept Map toggle、filters、edge tuning、performance/persistence polish |
+| TASK-021 | Read-only Paper Map observation point | ✅ 3D Paper Map 已落地；后续只做只读观测 polish、性能、snapshot/hysteresis hardening |
 | TASK-022 | Agent v0.1 → note-native Ask (Layer 1 + Layer 2 context) | ✅ closed ([TASK-022.md](TASK-022.md)); Ask 已折叠进 notes/marginalia 并切到 streaming-first；legacy AgentPanel 与 `/agent/ask` 已删除 |
 | TASK-025 | Prompt reliability, taxonomy alignment, and regression evaluation | ✅ 完成 ([TASK-025.md](TASK-025.md)) — 生产 prompt 的 taxonomy、JSON-mode、block evidence、长论文 hierarchical compile 与回归守护已收口为 v1 |
 | TASK-026 | Question-framed paper compile prompt polish | ✅ 完成 ([TASK-026.md](TASK-026.md)) — 保持现有 compile pipeline，把 summary/concept extraction 约束到 Context/Method/Result/Critical/Value 五段阅读框架，并停止新抽取 person/organization |
+| TASK-027 | Concept Lens v2 — reader-first concept substrate | ✅ checkpoint shipped ([TASK-027.md](TASK-027.md)) — 统一 Lens API、reader capsule/sheet、note-born provenance、Paper Map related papers；description override editing 留作 follow-up |
 
 ⓘ TASK-019 shipped 2026-04-29. It originally added `papers.summary`, the LLM client (`apps/api/src/services/llm-client.ts`), and the `paper-summarize` BullMQ worker auto-triggered after paper-parse. As of TASK-020A, that worker has evolved into the paper compile worker: it now runs `paper-compile-v1` to produce the agent-facing summary/source page plus local concept substrate in one pass. See [TASK-019.md](TASK-019.md) and [TASK-020A.md](TASK-020A.md).
 
@@ -68,7 +69,7 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 1. **TASK-019 first**: source-summary is the cheapest demonstrable AI output. New paper uploaded → 30 seconds later wiki page appears. Immediate proof of the Zettelkasten side. ~1-2 days.
 2. **TASK-022 closed**: agent summon-mode evolved into note-native Ask. Single-paper Layer 1 + Layer 2 context remains the backend contract, but the user-facing loop now lands in marginalia notes instead of a standalone agent sidebar.
 3. **TASK-020 third**: knowledge compilation. This is now active. `020A` no longer runs a separate wiki compile pass: the existing `paper-summarize` queue now calls `paper-compile-v1`, producing the agent-facing summary/source page plus local concept/entity substrate in one LLM call. `020B v1` covers block-highlight/note-citation salience, source-page reference refresh, and agent-context consumption. `020D` has started with inner-paper concept edges; cross-paper clusters and concept-first retrieval remain. `020A`'s summary/wiki artifacts are agent-facing substrate, not a user-facing page. `TASK-025` has now closed the v1 prompt reliability layer, so later graph/lens work should lean on its regression guardrails rather than re-litigating prompt taxonomy locally.
-4. **Polish TASK-021 / Concept Lens next**: paper graph + Sigma foundation is now in place. Remaining work is product polish and hardening: Concept Map toggle, concept filters, edge tuning, performance/persistence, and keeping the default UX inside the reader with concepts/evidence foregrounded.
+4. **Next after TASK-027**: Concept Lens v2 reader checkpoint 已落地。下一步应补 paper-local concept description override editing、Lens service fixture tests、annotation/note Lens regression，以及 graph/Lens refresh 的端到端稳定性，而不是继续扩展 wiki/graph 为用户维护对象。
 
 These should be drafted **just before being implemented**, using lessons from phases 1-2. `TASK-022` is closed; future agent work should be framed as note-native AI polish or reader-signal integration, not as a standalone panel.
 
@@ -101,6 +102,7 @@ Per ADR-020 (revised), TASK-016 is a migration convenience tool, not a cold-star
 | **Inner-paper graph substrate** | 仅规划 cross-paper graph | 已新增 `compiled_local_concept_edges` / `compiled_local_concept_edge_evidence`，先做 paper-local concept relations |
 | **Prompt 可靠性主线** | 单个 prompt 出问题时局部修补 | 新增 TASK-025，把 taxonomy、JSON-mode、block evidence、回归样本统一为 prompt 系统治理 |
 | **Concept lifecycle** | note/highlight 变化可直接推动 semantic refresh | TASK-020J 已落地：reader-signal 更新只进入 paper-level refine，semantic refresh 只由 source-level semantic dirty / explicit refresh / credential change 等低频路径触发 |
+| **Phase 3 user surface** | wiki/graph 可成为主工作台 | TASK-027 将主用户面改为 reader 内 Concept Lens；wiki/source page 是 agent-facing substrate，Paper Map 是只读观测点 |
 
 ### 数据库演进
 
@@ -150,4 +152,4 @@ The numbering is non-contiguous (TASK-015 is unused). This is intentional — wh
 
 ---
 
-*Last updated: 2026-05-01. Phase 1 + Phase 2 core complete; Phase 3 knowledge-compilation substrate is active.*
+*Last updated: 2026-05-04. Phase 1 + Phase 2 core complete; Phase 3 has paper-local concepts, note-native Ask, stable 3D Paper Map, and Concept Lens v2 reader checkpoint active.*
