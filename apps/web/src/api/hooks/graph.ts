@@ -152,9 +152,12 @@ export type PaperGraphEdge = {
 		similarityScore: number
 		llmDecision: string | null
 		llmConfidence: number | null
+		decisionStatus?: string | null
 		rationale: string | null
 		sourceDescription: string | null
 		targetDescription: string | null
+		sourcePromptVersion?: string | null
+		targetPromptVersion?: string | null
 		sourceEvidenceBlockIds: string[]
 		targetEvidenceBlockIds: string[]
 		sourceEvidenceSnippets: Array<{

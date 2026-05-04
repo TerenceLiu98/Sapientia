@@ -9,6 +9,7 @@ export type PaperEnrichmentStatus =
 	| "partial"
 	| "failed"
 	| "skipped"
+export type PaperSummaryStatus = "pending" | "running" | "done" | "failed" | "no-credentials"
 
 export interface Paper {
 	id: string
@@ -24,6 +25,9 @@ export interface Paper {
 	parseError: string | null
 	parseProgressExtracted: number | null
 	parseProgressTotal: number | null
+	summary: string | null
+	summaryStatus: PaperSummaryStatus
+	summaryError: string | null
 	enrichmentStatus: PaperEnrichmentStatus
 	enrichmentSource: string | null
 	metadataEditedByUser: Partial<
@@ -54,6 +58,20 @@ export interface FetchPaperMetadataInput {
 	arxivId?: string | null
 }
 
+export interface RetryPaperParseResponse {
+	ok: true
+	status: "queued"
+	paper: Paper
+	queue: "paper-parse"
+}
+
+export interface RetryPaperKnowledgeResponse {
+	ok: true
+	status: "queued"
+	paperId: string
+	queue: "paper-summarize"
+}
+
 export interface PaperWikiPage {
 	id: string
 	type: "source" | "entity" | "concept"
@@ -71,7 +89,7 @@ export interface PaperWikiPage {
 
 export interface PaperWikiConcept {
 	id: string
-	kind: "concept" | "method" | "task" | "metric"
+	kind: "concept" | "method" | "task" | "metric" | "dataset"
 	canonicalName: string
 	displayName: string
 	status: "pending" | "running" | "done" | "failed"
@@ -123,6 +141,7 @@ export interface PaperBlockConceptLensPayload {
 		sourceLevelDescription: string | null
 		sourceLevelDescriptionStatus: "pending" | "running" | "done" | "failed"
 		readerSignalSummary: string | null
+		promptVersion: string | null
 		evidence: {
 			blockId: string
 			snippet: string | null
@@ -179,7 +198,12 @@ function isEnrichmentInFlight(status: Paper["enrichmentStatus"] | undefined) {
 
 function shouldPollPaper(paper: Paper | undefined) {
 	if (!paper) return false
-	return isInFlightStatus(paper.parseStatus) || isEnrichmentInFlight(paper.enrichmentStatus)
+	return (
+		isInFlightStatus(paper.parseStatus) ||
+		isEnrichmentInFlight(paper.enrichmentStatus) ||
+		paper.summaryStatus === "pending" ||
+		paper.summaryStatus === "running"
+	)
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -355,6 +379,49 @@ export function useFetchPaperMetadata(workspaceId: string, paperId: string) {
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper", paperId] })
+		},
+	})
+}
+
+export function useRetryPaperParse(workspaceId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (paperId: string) =>
+			apiFetch<RetryPaperParseResponse>(`/api/v1/papers/${paperId}/retry-parse`, {
+				method: "POST",
+			}),
+		onSuccess: ({ paper }) => {
+			if (workspaceId) qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+			qc.invalidateQueries({ queryKey: ["paper", paper.id] })
+			qc.invalidateQueries({ queryKey: ["paper", paper.id, "blocks"] })
+		},
+	})
+}
+
+export function useRetryPaperKnowledge(workspaceId: string) {
+	const qc = useQueryClient()
+	return useMutation({
+		mutationFn: (paperId: string) =>
+			apiFetch<RetryPaperKnowledgeResponse>(`/api/v1/papers/${paperId}/retry-knowledge`, {
+				method: "POST",
+			}),
+		onSuccess: ({ paperId }) => {
+			qc.setQueryData<Paper>(["paper", paperId], (paper) =>
+				paper ? { ...paper, summaryStatus: "pending", summaryError: null } : paper,
+			)
+			if (workspaceId) {
+				qc.setQueryData<Paper[]>(["papers", workspaceId], (list) =>
+					list?.map((paper) =>
+						paper.id === paperId
+							? { ...paper, summaryStatus: "pending", summaryError: null }
+							: paper,
+					),
+				)
+				qc.invalidateQueries({ queryKey: ["papers", workspaceId] })
+				qc.invalidateQueries({ queryKey: ["workspace-graph", workspaceId] })
+				qc.invalidateQueries({ queryKey: ["paper-block-concept-lens", workspaceId, paperId] })
+			}
 			qc.invalidateQueries({ queryKey: ["paper", paperId] })
 		},
 	})

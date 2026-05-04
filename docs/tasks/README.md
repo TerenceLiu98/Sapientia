@@ -59,6 +59,7 @@ After phase 2: complete marginalia experience. User can read papers, mark them u
 | TASK-021 | Knowledge graph view (Cytoscape.js) | ✅ foundation landed: paper graph + Sigma view 已落地；剩余为 Concept Map toggle、filters、edge tuning、performance/persistence polish |
 | TASK-022 | Agent v0.1 → note-native Ask (Layer 1 + Layer 2 context) | ✅ closed ([TASK-022.md](TASK-022.md)); Ask 已折叠进 notes/marginalia 并切到 streaming-first；legacy AgentPanel 与 `/agent/ask` 已删除 |
 | TASK-025 | Prompt reliability, taxonomy alignment, and regression evaluation | ✅ 完成 ([TASK-025.md](TASK-025.md)) — 生产 prompt 的 taxonomy、JSON-mode、block evidence、长论文 hierarchical compile 与回归守护已收口为 v1 |
+| TASK-026 | Question-framed paper compile prompt polish | ✅ 完成 ([TASK-026.md](TASK-026.md)) — 保持现有 compile pipeline，把 summary/concept extraction 约束到 Context/Method/Result/Critical/Value 五段阅读框架，并停止新抽取 person/organization |
 
 ⓘ TASK-019 shipped 2026-04-29. It originally added `papers.summary`, the LLM client (`apps/api/src/services/llm-client.ts`), and the `paper-summarize` BullMQ worker auto-triggered after paper-parse. As of TASK-020A, that worker has evolved into the paper compile worker: it now runs `paper-compile-v1` to produce the agent-facing summary/source page plus local concept substrate in one pass. See [TASK-019.md](TASK-019.md) and [TASK-020A.md](TASK-020A.md).
 

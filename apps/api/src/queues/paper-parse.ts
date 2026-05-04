@@ -6,6 +6,7 @@ export const PAPER_PARSE_QUEUE = "paper-parse"
 export interface PaperParseJobData {
 	paperId: string
 	userId: string
+	reuseExistingMineruZip?: boolean
 }
 
 export interface PaperParseJobResult {
@@ -28,9 +29,23 @@ export const paperParseQueue = new Queue<PaperParseJobData, PaperParseJobResult>
 )
 
 // Same paper enqueued twice while a job is pending will be deduped via jobId.
-// BullMQ silently discards a second add() call with an existing jobId.
-export async function enqueuePaperParse(data: PaperParseJobData) {
-	return paperParseQueue.add(`parse-${data.paperId}`, data, {
-		jobId: `paper-parse-${data.paperId}`,
-	})
+// BullMQ silently discards a second add() call with an existing jobId. Manual
+// retry is different: failed jobs are retained for inspection, so we remove the
+// stale retained job before adding a fresh one.
+export async function enqueuePaperParse(
+	data: PaperParseJobData,
+	options: { force?: boolean } = {},
+) {
+	const jobId = `paper-parse-${data.paperId}`
+	if (options.force) {
+		const existing = await paperParseQueue.getJob(jobId)
+		if (existing) {
+			const state = await existing.getState()
+			if (state !== "active") {
+				await existing.remove()
+			}
+		}
+	}
+
+	return paperParseQueue.add(`parse-${data.paperId}`, data, { jobId })
 }

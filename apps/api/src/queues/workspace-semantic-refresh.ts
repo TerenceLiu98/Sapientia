@@ -7,7 +7,12 @@ export interface WorkspaceSemanticRefreshJobData {
 	workspaceId: string
 	userId: string
 	forceEmbeddings?: boolean
-	reason?: "paper-concept-description" | "credentials-updated" | "manual" | "backfill"
+	reason?:
+		| "paper-concept-description"
+		| "credentials-updated"
+		| "manual"
+		| "backfill"
+		| "reader-note-concept"
 }
 
 export interface WorkspaceSemanticRefreshJobResult {

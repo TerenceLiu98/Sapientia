@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { PutObjectCommand } from "@aws-sdk/client-s3"
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { memberships, type NewNote, type Note, noteAnnotationRefs, noteBlockRefs, notes } from "@sapientia/db"
 import { blocknoteJsonToMarkdown, extractAnnotationCitations, extractCitations } from "@sapientia/shared"
 import { and, asc, eq, isNull, sql } from "drizzle-orm"
@@ -88,6 +88,18 @@ async function uploadVersion(args: {
 	])
 
 	return { jsonObjectKey, mdObjectKey, markdown }
+}
+
+async function readJsonObject(key: string) {
+	const response = await s3Client.send(
+		new GetObjectCommand({
+			Bucket: config.S3_BUCKET,
+			Key: key,
+		}),
+	)
+	const body = await response.Body?.transformToString()
+	if (!body) return null
+	return JSON.parse(body) as unknown
 }
 
 export type NoteAnchorKind = "page" | "block" | "highlight" | "underline"
@@ -206,6 +218,98 @@ export async function updateNote(input: UpdateNoteInput): Promise<Note> {
 		await syncNoteAnnotationRefs(updated.id, input.blocknoteJson)
 	}
 	return updated
+}
+
+export async function appendAgentQuestionsToNote(args: {
+	noteId: string
+	expectedVersion: number
+	questions: Array<{ conceptName: string; question: string }>
+}): Promise<Note | null> {
+	const [existing] = await db
+		.select()
+		.from(notes)
+		.where(and(eq(notes.id, args.noteId), isNull(notes.deletedAt)))
+		.limit(1)
+	if (!existing || existing.currentVersion !== args.expectedVersion) return null
+
+	const existingQuestionNames = new Set(
+		[...existing.agentMarkdownCache.matchAll(/Agent question ·\s*([^:\n]+):/g)].map((match) =>
+			normalizeQuestionConceptName(match[1] ?? ""),
+		),
+	)
+	const freshQuestions = args.questions.filter(
+		(question) => !existingQuestionNames.has(normalizeQuestionConceptName(question.conceptName)),
+	)
+	if (freshQuestions.length === 0) return existing
+
+	const currentDoc = await readJsonObject(existing.jsonObjectKey)
+	const nextDoc = appendQuestionTaskItems(currentDoc, freshQuestions)
+	const newVersion = existing.currentVersion + 1
+	const { jsonObjectKey, mdObjectKey, markdown } = await uploadVersion({
+		workspaceId: existing.workspaceId,
+		noteId: existing.id,
+		version: newVersion,
+		blocknoteJson: nextDoc,
+	})
+
+	const [updated] = await db
+		.update(notes)
+		.set({
+			currentVersion: newVersion,
+			jsonObjectKey,
+			mdObjectKey,
+			agentMarkdownCache: markdown.slice(0, AGENT_MD_MAX_LEN),
+			searchText: sql`to_tsvector('english', ${markdown})` as unknown as string,
+			updatedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(notes.id, existing.id),
+				eq(notes.currentVersion, args.expectedVersion),
+				isNull(notes.deletedAt),
+			),
+		)
+		.returning()
+
+	if (!updated) return null
+	await syncNoteBlockRefs(updated.id, nextDoc)
+	await syncNoteAnnotationRefs(updated.id, nextDoc)
+	return updated
+}
+
+function appendQuestionTaskItems(doc: unknown, questions: Array<{ conceptName: string; question: string }>) {
+	const base: { type: string; content: unknown[] } =
+		isRecord(doc) && doc.type === "doc" && Array.isArray(doc.content)
+			? { ...(doc as Record<string, unknown>), type: "doc", content: [...doc.content] }
+			: { type: "doc", content: [{ type: "paragraph" }] }
+
+	base.content.push({
+		type: "taskList",
+		content: questions.map((item) => ({
+			type: "taskItem",
+			attrs: { checked: false },
+			content: [
+				{
+					type: "paragraph",
+					content: [
+						{
+							type: "text",
+							text: `Agent question · ${item.conceptName}: ${item.question}`,
+						},
+					],
+				},
+			],
+		})),
+	})
+	return base
+}
+
+function normalizeQuestionConceptName(value: string) {
+	return value.trim().toLowerCase().replace(/\s+/g, " ")
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
 export async function getNote(

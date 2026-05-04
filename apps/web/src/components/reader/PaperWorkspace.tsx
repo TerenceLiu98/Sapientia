@@ -9,7 +9,12 @@ import {
 } from "@/api/hooks/citations"
 import { useClearBlockHighlight, useHighlights, useSetBlockHighlight } from "@/api/hooks/highlights"
 import { useCreateNote, useDeleteNote, useNotes, useUpdateNote } from "@/api/hooks/notes"
-import { type Paper, usePaper } from "@/api/hooks/papers"
+import {
+	type Paper,
+	usePaper,
+	useRetryPaperKnowledge,
+	useRetryPaperParse,
+} from "@/api/hooks/papers"
 import {
 	type ReaderAnnotation,
 	useCreateReaderAnnotation,
@@ -26,7 +31,7 @@ import {
 	buildAiAskPendingDocument,
 	buildAiAskStreamingDocument,
 } from "@/components/notes/ai-note-content"
-import { setNoteEditorCachedContent, type NoteEditorRef } from "@/components/notes/NoteEditor"
+import { type NoteEditorRef, setNoteEditorCachedContent } from "@/components/notes/NoteEditor"
 import { BlockConceptLensPanel } from "@/components/reader/BlockConceptLensPanel"
 import { BlocksPanel, type BlocksRailLayout } from "@/components/reader/BlocksPanel"
 import { NotesPanel } from "@/components/reader/NotesPanel"
@@ -1510,7 +1515,8 @@ function WorkspaceContent({
 		<div className="p-8 text-sm text-text-tertiary">Not found.</div>
 	) : (
 		<div className="relative flex h-full min-h-0 flex-col">
-			<ParseStatusBanner paper={paper} />
+			<ParseStatusBanner paper={paper} workspaceId={workspaceId ?? ""} />
+			<KnowledgeStatusBanner paper={paper} workspaceId={workspaceId ?? ""} />
 
 			<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-bg-secondary px-4 py-2 text-sm">
 				<ViewModeToggle current={viewMode} onChange={onChangeViewMode} />
@@ -1919,7 +1925,9 @@ function MainNotesSplit({
 	)
 }
 
-function ParseStatusBanner({ paper }: { paper: Paper }) {
+function ParseStatusBanner({ paper, workspaceId }: { paper: Paper; workspaceId: string }) {
+	const retryParse = useRetryPaperParse(workspaceId)
+
 	if (paper.parseStatus === "done") return null
 
 	if (paper.parseStatus === "pending" || paper.parseStatus === "parsing") {
@@ -1943,12 +1951,67 @@ function ParseStatusBanner({ paper }: { paper: Paper }) {
 		.includes("mineru api token not configured")
 	return (
 		<div className="shrink-0 border-[var(--color-status-error-text)] border-b bg-[var(--color-status-error-bg)] px-6 py-3 text-sm">
-			<div className="text-text-error">Parsing failed. {paper.parseError ?? "Unknown error."}</div>
-			{needsCredentials ? (
-				<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">
-					Configure MinerU →
-				</Link>
-			) : null}
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div className="min-w-0">
+					<div className="text-text-error">
+						Parsing failed. {paper.parseError ?? "Unknown error."}
+					</div>
+					{retryParse.error instanceof Error ? (
+						<div className="mt-1 text-xs text-text-error">{retryParse.error.message}</div>
+					) : null}
+					{needsCredentials ? (
+						<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">
+							Configure MinerU →
+						</Link>
+					) : null}
+				</div>
+				<button
+					className="shrink-0 rounded-md border border-border-default bg-bg-primary px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+					disabled={retryParse.isPending}
+					onClick={() => retryParse.mutate(paper.id)}
+					type="button"
+				>
+					{retryParse.isPending ? "Queueing..." : "Retry parsing"}
+				</button>
+			</div>
+		</div>
+	)
+}
+
+function KnowledgeStatusBanner({ paper, workspaceId }: { paper: Paper; workspaceId: string }) {
+	const retryKnowledge = useRetryPaperKnowledge(workspaceId)
+
+	if (paper.parseStatus !== "done") return null
+	if (paper.summaryStatus !== "failed" && paper.summaryStatus !== "no-credentials") return null
+
+	const needsCredentials = paper.summaryStatus === "no-credentials"
+	const message = needsCredentials
+		? "Concepts and links need an LLM credential before they can be generated."
+		: `Concepts and links failed to build. ${paper.summaryError ?? "Unknown error."}`
+
+	return (
+		<div className="shrink-0 border-[var(--color-status-warning-text)] border-b bg-[var(--color-status-warning-bg)] px-6 py-3 text-sm">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div className="min-w-0">
+					<div className="text-[var(--color-status-warning-text)]">{message}</div>
+					{retryKnowledge.error instanceof Error ? (
+						<div className="mt-1 text-xs text-text-error">{retryKnowledge.error.message}</div>
+					) : null}
+					{needsCredentials ? (
+						<Link className="mt-1 inline-block text-text-accent hover:underline" to="/settings">
+							Configure LLM →
+						</Link>
+					) : null}
+				</div>
+				<button
+					className="shrink-0 rounded-md border border-border-default bg-bg-primary px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+					disabled={retryKnowledge.isPending}
+					onClick={() => retryKnowledge.mutate(paper.id)}
+					type="button"
+				>
+					{retryKnowledge.isPending ? "Queueing..." : "Retry concepts & links"}
+				</button>
+			</div>
 		</div>
 	)
 }

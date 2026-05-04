@@ -13,18 +13,19 @@ import { z } from "zod"
 import { db } from "../db"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
+import { enqueuePaperParse } from "../queues/paper-parse"
 import { enqueuePaperSummarize } from "../queues/paper-summarize"
-import { paperToBibtex, papersToBibtex } from "../services/bibtex"
+import { papersToBibtex, paperToBibtex } from "../services/bibtex"
 import { buildDisplayFilename } from "../services/filename"
-import { markPaperCompilePending } from "../services/paper-compile"
-import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
-import { applyEnrichedMetadataToPaper, mergeMetadataEditedFlags } from "../services/paper-metadata"
 import {
 	InvalidPaperContentError,
 	PaperTooLargeError,
 	uploadPaper,
 	userCanAccessPaper,
 } from "../services/paper"
+import { markPaperCompilePending } from "../services/paper-compile"
+import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
+import { applyEnrichedMetadataToPaper, mergeMetadataEditedFlags } from "../services/paper-metadata"
 import { generatePresignedGetUrl } from "../services/s3-client"
 
 export const paperRoutes = new Hono<AuthContext>()
@@ -143,6 +144,99 @@ paperRoutes.get("/papers/:id/pdf-url", requireAuth, async (c) => {
 	})
 })
 
+paperRoutes.post("/papers/:id/retry-parse", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+	if (paper.ownerUserId !== user.id) {
+		return c.json({ error: "only the owner can retry parsing this paper" }, 403)
+	}
+	if (paper.parseStatus !== "failed") {
+		return c.json({ error: "paper parse is not failed" }, 409)
+	}
+
+	const now = new Date()
+	const [queuedPaper] = await db
+		.update(papers)
+		.set({
+			parseStatus: "pending",
+			parseError: null,
+			parseProgressExtracted: null,
+			parseProgressTotal: null,
+			updatedAt: now,
+		})
+		.where(eq(papers.id, id))
+		.returning()
+
+	try {
+		await enqueuePaperParse(
+			{ paperId: paper.id, userId: user.id, reuseExistingMineruZip: true },
+			{ force: true },
+		)
+	} catch (error) {
+		await db
+			.update(papers)
+			.set({
+				parseStatus: "failed",
+				parseError:
+					error instanceof Error
+						? `Failed to queue parse retry: ${error.message}`.slice(0, 500)
+						: "Failed to queue parse retry",
+				updatedAt: new Date(),
+			})
+			.where(eq(papers.id, id))
+		throw error
+	}
+
+	return c.json(
+		{
+			ok: true,
+			status: "queued",
+			paper: queuedPaper,
+			queue: "paper-parse",
+		},
+		202,
+	)
+})
+
+async function queuePaperKnowledgeRebuild(args: { paperId: string; userId: string }) {
+	await markPaperCompilePending({ paperId: args.paperId, userId: args.userId })
+	await enqueuePaperSummarize({ paperId: args.paperId, userId: args.userId, force: true })
+}
+
+function paperKnowledgeQueuedResponse(paperId: string) {
+	return {
+		ok: true,
+		status: "queued",
+		paperId,
+		queue: "paper-summarize",
+	} as const
+}
+
+paperRoutes.post("/papers/:id/retry-knowledge", requireAuth, async (c) => {
+	const id = c.req.param("id")
+	const user = c.get("user")
+
+	const [paper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!paper || paper.deletedAt) return c.json({ error: "not found" }, 404)
+	if (!(await userCanAccessPaper(user.id, paper.id, db))) {
+		return c.json({ error: "forbidden" }, 403)
+	}
+
+	if (paper.parseStatus !== "done") {
+		return c.json({ error: "paper parse not ready" }, 409)
+	}
+
+	await queuePaperKnowledgeRebuild({ paperId: paper.id, userId: user.id })
+
+	return c.json(paperKnowledgeQueuedResponse(paper.id), 202)
+})
+
 paperRoutes.patch("/papers/:id", requireAuth, async (c) => {
 	const id = c.req.param("id")
 	const user = c.get("user")
@@ -233,18 +327,9 @@ paperRoutes.post("/papers/:id/compile-wiki", requireAuth, async (c) => {
 		return c.json({ error: "paper parse not ready" }, 409)
 	}
 
-	await markPaperCompilePending({ paperId: paper.id, userId: user.id })
-	await enqueuePaperSummarize({ paperId: paper.id, userId: user.id, force: true })
+	await queuePaperKnowledgeRebuild({ paperId: paper.id, userId: user.id })
 
-	return c.json(
-		{
-			ok: true,
-			status: "queued",
-			paperId: paper.id,
-			queue: "paper-summarize",
-		},
-		202,
-	)
+	return c.json(paperKnowledgeQueuedResponse(paper.id), 202)
 })
 
 paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
@@ -270,9 +355,7 @@ paperRoutes.get("/papers/:id/blocks", requireAuth, async (c) => {
 	// browser refreshes the JSON and gets fresh presigned URLs before MinIO
 	// starts returning 403 on stale signatures.
 	const hasPresignedImages = rows.some((row) => Boolean(row.imageObjectKey))
-	const freshnessBucket = hasPresignedImages
-		? Math.floor(Date.now() / (imageTtl * 1000))
-		: "static"
+	const freshnessBucket = hasPresignedImages ? Math.floor(Date.now() / (imageTtl * 1000)) : "static"
 	const etag = `"${paper.updatedAt.getTime()}:${freshnessBucket}"`
 	if (c.req.header("if-none-match") === etag) {
 		return new Response(null, { status: 304 })

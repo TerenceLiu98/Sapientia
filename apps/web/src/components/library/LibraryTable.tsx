@@ -13,6 +13,8 @@ import {
 	useDownloadPaperPdf,
 	useExportPaperBibtex,
 	useFetchPaperMetadata,
+	useRetryPaperKnowledge,
+	useRetryPaperParse,
 	useUpdatePaper,
 } from "@/api/hooks/papers"
 import {
@@ -64,6 +66,28 @@ function StatusBadge({ paper }: { paper: Paper }) {
 	)
 }
 
+function KnowledgeBadge({ paper }: { paper: Paper }) {
+	if (paper.parseStatus !== "done") return null
+	if (paper.summaryStatus === "failed") {
+		return (
+			<span className="inline-block whitespace-nowrap rounded-md bg-[var(--color-status-warning-bg)] px-2 py-0.5 text-xs text-[var(--color-status-warning-text)]">
+				concepts failed
+			</span>
+		)
+	}
+	if (paper.summaryStatus === "no-credentials") {
+		return (
+			<span className="inline-block whitespace-nowrap rounded-md bg-[var(--color-status-warning-bg)] px-2 py-0.5 text-xs text-[var(--color-status-warning-text)]">
+				needs LLM
+			</span>
+		)
+	}
+	if (paper.summaryStatus === "pending" || paper.summaryStatus === "running") {
+		return <span className="text-xs text-text-tertiary">building concepts...</span>
+	}
+	return null
+}
+
 function formatAuthors(authors: string[] | null) {
 	if (!authors || authors.length === 0) return ""
 	if (authors.length === 1) return authors[0]
@@ -85,6 +109,8 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 	const exportBibtex = useExportPaperBibtex(paper)
 	const downloadPdf = useDownloadPaperPdf(paper.id)
 	const deletePaper = useDeletePaper(workspaceId)
+	const retryParse = useRetryPaperParse(workspaceId)
+	const retryKnowledge = useRetryPaperKnowledge(workspaceId)
 	const [editing, setEditing] = useState(false)
 	const [actionError, setActionError] = useState<string | null>(null)
 
@@ -93,7 +119,13 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 		fetchMetadata.isPending ||
 		exportBibtex.isPending ||
 		downloadPdf.isPending ||
+		retryParse.isPending ||
+		retryKnowledge.isPending ||
 		deletePaper.isPending
+	const knowledgeRetryLabel =
+		paper.summaryStatus === "failed" || paper.summaryStatus === "no-credentials"
+			? "Retry concepts & links"
+			: "Rebuild concepts & links"
 
 	return (
 		<div className="min-w-0">
@@ -138,6 +170,32 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 					>
 						Download PDF
 					</DropdownMenuItem>
+					{paper.parseStatus === "failed" ? (
+						<DropdownMenuItem
+							onSelect={() => {
+								setActionError(null)
+								retryParse.mutate(paper.id, {
+									onError: (error) =>
+										setActionError(error instanceof Error ? error.message : "Retry failed"),
+								})
+							}}
+						>
+							Retry parsing
+						</DropdownMenuItem>
+					) : null}
+					{paper.parseStatus === "done" ? (
+						<DropdownMenuItem
+							onSelect={() => {
+								setActionError(null)
+								retryKnowledge.mutate(paper.id, {
+									onError: (error) =>
+										setActionError(error instanceof Error ? error.message : "Retry failed"),
+								})
+							}}
+						>
+							{knowledgeRetryLabel}
+						</DropdownMenuItem>
+					) : null}
 					<DropdownMenuSeparator />
 					<DropdownMenuItem
 						className="text-text-error"
@@ -226,7 +284,12 @@ function makeColumns(workspaceId: string) {
 		}),
 		columnHelper.accessor("parseStatus", {
 			header: "Status",
-			cell: (info) => <StatusBadge paper={info.row.original} />,
+			cell: (info) => (
+				<div className="flex flex-col items-start gap-1">
+					<StatusBadge paper={info.row.original} />
+					<KnowledgeBadge paper={info.row.original} />
+				</div>
+			),
 		}),
 		columnHelper.accessor("fileSizeBytes", {
 			header: "Size",

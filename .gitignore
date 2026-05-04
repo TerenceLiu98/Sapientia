@@ -34,6 +34,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+test/output/
 
 # Local Claude Code state
 .claude/

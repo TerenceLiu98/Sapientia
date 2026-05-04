@@ -300,6 +300,7 @@ async function loadBlockConceptLensPayload(args: {
 			sourceLevelDescription: compiledLocalConcepts.sourceLevelDescription,
 			sourceLevelDescriptionStatus: compiledLocalConcepts.sourceLevelDescriptionStatus,
 			readerSignalSummary: compiledLocalConcepts.readerSignalSummary,
+			promptVersion: compiledLocalConcepts.promptVersion,
 			evidenceSnippet: compiledLocalConceptEvidence.snippet,
 			evidenceConfidence: compiledLocalConceptEvidence.confidence,
 			clusterId: workspaceConceptClusters.id,
@@ -422,6 +423,7 @@ async function loadBlockConceptLensPayload(args: {
 			sourceLevelDescription: row.sourceLevelDescription,
 			sourceLevelDescriptionStatus: row.sourceLevelDescriptionStatus,
 			readerSignalSummary: row.readerSignalSummary,
+			promptVersion: row.promptVersion,
 			evidence: {
 				blockId,
 				snippet: row.evidenceSnippet,

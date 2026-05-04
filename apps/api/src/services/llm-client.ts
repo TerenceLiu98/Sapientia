@@ -296,37 +296,71 @@ async function completeObjectWithJsonMode<T>(args: {
 	startedAt: number
 }): Promise<CompleteObjectResult<T>> {
 	const { params, model, provider, startedAt } = args
-	const result = await generateText({
-		model,
-		system: buildJsonObjectSystem(params.system, params.schema),
-		messages: params.messages,
-		maxOutputTokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
-		temperature: params.temperature ?? DEFAULT_TEMPERATURE,
-		maxRetries: 0,
-		abortSignal: params.abortSignal,
-		providerOptions: {
-			[OPENAI_COMPATIBLE_PROVIDER_NAME]: {
-				response_format: { type: "json_object" },
-			},
-		},
-	})
-	const parsed = parseObjectFromText(params.schema, result.text, params.promptId)
-	const latencyMs = Date.now() - startedAt
-	logSuccess({
-		params,
-		provider,
-		model: result.response.modelId,
-		usage: result.totalUsage,
-		latencyMs,
-	})
+	const maxParseAttempts = 2
+	let lastParseError: ObjectTextParseError | null = null
 
-	return {
-		object: parsed,
-		inputTokens: result.totalUsage.inputTokens ?? 0,
-		outputTokens: result.totalUsage.outputTokens ?? 0,
-		latencyMs,
-		model: result.response.modelId,
+	for (let attempt = 0; attempt < maxParseAttempts; attempt += 1) {
+		const result = await generateText({
+			model,
+			system: buildJsonObjectSystem(params.system, params.schema, {
+				repairAttempt: attempt > 0,
+			}),
+			messages: params.messages,
+			maxOutputTokens:
+				attempt > 0
+					? Math.ceil((params.maxTokens ?? DEFAULT_MAX_TOKENS) * 1.25)
+					: (params.maxTokens ?? DEFAULT_MAX_TOKENS),
+			temperature: attempt > 0 ? 0 : (params.temperature ?? DEFAULT_TEMPERATURE),
+			maxRetries: 0,
+			abortSignal: params.abortSignal,
+			providerOptions: {
+				[OPENAI_COMPATIBLE_PROVIDER_NAME]: {
+					response_format: { type: "json_object" },
+				},
+			},
+		})
+
+		try {
+			const parsed = parseObjectFromText(params.schema, result.text, params.promptId)
+			const latencyMs = Date.now() - startedAt
+			logSuccess({
+				params,
+				provider,
+				model: result.response.modelId,
+				usage: result.totalUsage,
+				latencyMs,
+			})
+
+			return {
+				object: parsed,
+				inputTokens: result.totalUsage.inputTokens ?? 0,
+				outputTokens: result.totalUsage.outputTokens ?? 0,
+				latencyMs,
+				model: result.response.modelId,
+			}
+		} catch (error) {
+			if (error instanceof ObjectTextParseError && attempt + 1 < maxParseAttempts) {
+				lastParseError = error
+				logger.warn(
+					{
+						userId: params.userId,
+						workspaceId: params.workspaceId,
+						promptId: params.promptId,
+						model: params.model,
+						provider,
+						attempt: attempt + 1,
+						kind: error.kind,
+						candidateChars: error.candidate.length,
+					},
+					"llm_object_parse_retry",
+				)
+				continue
+			}
+			throw error
+		}
 	}
+
+	throw lastParseError ?? new Error(`${params.promptId} did not produce a parseable object`)
 }
 
 function resolveLanguageModel(args: {
@@ -449,14 +483,24 @@ function isPermanentHttpStatus(status: number): boolean {
 	return status >= 400 && status < 500
 }
 
-function buildJsonObjectSystem<T>(system: string | undefined, schema: z.ZodType<T>) {
+function buildJsonObjectSystem<T>(
+	system: string | undefined,
+	schema: z.ZodType<T>,
+	options: { repairAttempt?: boolean } = {},
+) {
 	const schemaJson = JSON.stringify(z.toJSONSchema(schema), null, 2)
 	const instructions = [
 		"Return only a valid JSON object.",
 		"Do not wrap the JSON in markdown fences.",
 		"Do not add commentary before or after the JSON.",
+		"The JSON must be complete and parseable; never stop in the middle of an array, string, or object.",
+		options.repairAttempt
+			? "Your previous response for this request was invalid or truncated. Return a smaller complete JSON object now."
+			: null,
 		`The JSON must satisfy this schema:\n${schemaJson}`,
-	].join("\n\n")
+	]
+		.filter(Boolean)
+		.join("\n\n")
 	return system ? `${system}\n\n${instructions}` : instructions
 }
 

@@ -10,6 +10,9 @@ import { createPaperInnerGraphCompileWorker } from "./workers/paper-inner-graph-
 import { createPaperParseWorker } from "./workers/paper-parse.worker"
 import { createPaperSummarizeWorker } from "./workers/paper-summarize.worker"
 import { createWorkspaceSemanticRefreshWorker } from "./workers/workspace-semantic-refresh.worker"
+import { scheduleNoteConceptHeartbeat } from "./queues/note-concept-heartbeat"
+import { createNoteConceptExtractWorker } from "./workers/note-concept-extract.worker"
+import { createNoteConceptHeartbeatWorker } from "./workers/note-concept-heartbeat.worker"
 
 logger.info({ env: config.NODE_ENV }, "worker_starting")
 
@@ -20,6 +23,9 @@ const paperConceptDescriptionWorker = createPaperConceptDescriptionWorker()
 const paperInnerGraphCompileWorker = createPaperInnerGraphCompileWorker()
 const paperSummarizeWorker = createPaperSummarizeWorker()
 const workspaceSemanticRefreshWorker = createWorkspaceSemanticRefreshWorker()
+const noteConceptExtractWorker = createNoteConceptExtractWorker()
+const noteConceptHeartbeatWorker = createNoteConceptHeartbeatWorker()
+await scheduleNoteConceptHeartbeat()
 
 // Tiny worker for /health/queue-roundtrip diagnostic pings.
 const healthcheckWorker = new Worker(
@@ -41,6 +47,8 @@ const shutdown = async (signal: string) => {
 	await paperInnerGraphCompileWorker.close()
 	await paperSummarizeWorker.close()
 	await workspaceSemanticRefreshWorker.close()
+	await noteConceptExtractWorker.close()
+	await noteConceptHeartbeatWorker.close()
 	await healthcheckWorker.close()
 	await queueConnection.quit()
 	await closeDb()

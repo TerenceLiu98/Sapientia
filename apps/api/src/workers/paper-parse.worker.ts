@@ -35,6 +35,7 @@ const POLL_TIMEOUT_MS = process.env.MINERU_POLL_TIMEOUT_MS
 const NETWORK_STAGE_TIMEOUT_MS = process.env.PAPER_PARSE_NETWORK_STAGE_TIMEOUT_MS
 	? Number(process.env.PAPER_PARSE_NETWORK_STAGE_TIMEOUT_MS)
 	: 2 * 60 * 1000
+const BLOCK_INSERT_CHUNK_SIZE = 500
 
 export class MissingCredentialError extends Error {
 	constructor() {
@@ -46,7 +47,7 @@ export class MissingCredentialError extends Error {
 async function processPaperParseJob(
 	job: Job<PaperParseJobData, PaperParseJobResult>,
 ): Promise<PaperParseJobResult> {
-	const { paperId, userId } = job.data
+	const { paperId, reuseExistingMineruZip, userId } = job.data
 	const log = logger.child({ jobId: job.id, paperId })
 
 	log.info("paper_parse_job_started")
@@ -79,39 +80,57 @@ async function processPaperParseJob(
 		downloadFromS3(paper.pdfObjectKey),
 	)
 
-	const fileName = `${paper.title.replace(/[/\\?%*:|"<>]/g, "_") || paperId}.pdf`
-	const { batchId, fileUrls } = await withStageTimeout(
-		"submit MinerU batch",
-		submitFileBatch({
-			token,
-			files: [{ name: fileName, dataId: paperId }],
-			modelVersion: "vlm",
-		}),
-	)
-	if (fileUrls.length === 0) {
-		throw new Error("MinerU returned an empty file_urls array for batch upload")
+	const zipKey = `papers/${userId}/${paperId}/mineru-result.zip`
+	let zipBuffer: Buffer | null = null
+	if (reuseExistingMineruZip) {
+		zipBuffer = await downloadExistingMineruZip(zipKey, log)
 	}
-	log.info({ mineruBatchId: batchId, fileName }, "mineru_batch_submitted")
+	if (!zipBuffer) {
+		const fileName = `${paper.title.replace(/[/\\?%*:|"<>]/g, "_") || paperId}.pdf`
+		const { batchId, fileUrls } = await withStageTimeout(
+			"submit MinerU batch",
+			submitFileBatch({
+				token,
+				files: [{ name: fileName, dataId: paperId }],
+				modelVersion: "vlm",
+			}),
+		)
+		if (fileUrls.length === 0) {
+			throw new Error("MinerU returned an empty file_urls array for batch upload")
+		}
+		log.info({ mineruBatchId: batchId, fileName }, "mineru_batch_submitted")
 
-	await withStageTimeout("upload source PDF to MinerU", uploadFileToMineru(fileUrls[0], pdfBytes))
-	log.info({ mineruBatchId: batchId }, "mineru_file_uploaded")
+		await withStageTimeout("upload source PDF to MinerU", uploadFileToMineru(fileUrls[0], pdfBytes))
+		log.info({ mineruBatchId: batchId }, "mineru_file_uploaded")
 
-	// Poll the batch result endpoint, mirroring extract_progress to the DB
-	// each tick so the UI can render a live "parsing N/M pages" counter.
-	const result = await pollBatchUntilDone({ token, batchId, paperId, log })
+		// Poll the batch result endpoint, mirroring extract_progress to the DB
+		// each tick so the UI can render a live "parsing N/M pages" counter.
+		const result = await pollBatchUntilDone({ token, batchId, paperId, log })
 
-	if (result.state === "failed") {
-		throw new Error(`MinerU parse failed: ${result.errorMessage ?? "unknown error"}`)
+		if (result.state === "failed") {
+			throw new Error(`MinerU parse failed: ${result.errorMessage ?? "unknown error"}`)
+		}
+		if (!result.zipUrl) {
+			throw new Error("MinerU returned 'done' state without a zip URL")
+		}
+
+		const zipRes = await withStageTimeout("download MinerU result zip", fetch(result.zipUrl))
+		if (!zipRes.ok) {
+			throw new Error(`failed to download MinerU result zip: HTTP ${zipRes.status}`)
+		}
+		zipBuffer = Buffer.from(await zipRes.arrayBuffer())
+
+		// Stash the raw zip for future re-extraction (alt formats live alongside).
+		await s3Client.send(
+			new PutObjectCommand({
+				Bucket: config.S3_BUCKET,
+				Key: zipKey,
+				Body: zipBuffer,
+				ContentType: "application/zip",
+				ContentLength: zipBuffer.byteLength,
+			}),
+		)
 	}
-	if (!result.zipUrl) {
-		throw new Error("MinerU returned 'done' state without a zip URL")
-	}
-
-	const zipRes = await withStageTimeout("download MinerU result zip", fetch(result.zipUrl))
-	if (!zipRes.ok) {
-		throw new Error(`failed to download MinerU result zip: HTTP ${zipRes.status}`)
-	}
-	const zipBuffer = Buffer.from(await zipRes.arrayBuffer())
 
 	const { contentList: blocksJson, middle, layout, images } = await extractMineruZip(zipBuffer)
 
@@ -123,18 +142,6 @@ async function processPaperParseJob(
 			Body: blocksJson,
 			ContentType: "application/json",
 			ContentLength: blocksJson.byteLength,
-		}),
-	)
-
-	// Stash the raw zip for future re-extraction (alt formats live alongside).
-	const zipKey = `papers/${userId}/${paperId}/mineru-result.zip`
-	await s3Client.send(
-		new PutObjectCommand({
-			Bucket: config.S3_BUCKET,
-			Key: zipKey,
-			Body: zipBuffer,
-			ContentType: "application/zip",
-			ContentLength: zipBuffer.byteLength,
 		}),
 	)
 
@@ -185,8 +192,9 @@ async function processPaperParseJob(
 		imageKeys,
 	})
 	await db.delete(blocksTable).where(eq(blocksTable.paperId, paperId))
-	if (parsedBlocks.length > 0) {
-		await db.insert(blocksTable).values(parsedBlocks.map((b) => ({ ...b, paperId })))
+	for (let offset = 0; offset < parsedBlocks.length; offset += BLOCK_INSERT_CHUNK_SIZE) {
+		const chunk = parsedBlocks.slice(offset, offset + BLOCK_INSERT_CHUNK_SIZE)
+		await db.insert(blocksTable).values(chunk.map((b) => ({ ...b, paperId })))
 	}
 
 	await db
@@ -278,6 +286,26 @@ async function pollBatchUntilDone(args: {
 	throw new Error(`MinerU batch ${batchId} did not complete within ${POLL_TIMEOUT_MS}ms`)
 }
 
+async function downloadExistingMineruZip(
+	zipKey: string,
+	log: typeof logger,
+): Promise<Buffer | null> {
+	try {
+		const zipBytes = await withStageTimeout(
+			"download existing MinerU result zip from S3",
+			downloadFromS3(zipKey),
+		)
+		log.info({ zipKey }, "paper_parse_reusing_existing_mineru_zip")
+		return Buffer.from(zipBytes)
+	} catch (error) {
+		log.info(
+			{ zipKey, err: error instanceof Error ? error.message : String(error) },
+			"paper_parse_existing_mineru_zip_unavailable",
+		)
+		return null
+	}
+}
+
 // Treat these as "do not retry" — they will not get better with another shot.
 function isPermanent(err: Error): boolean {
 	if (err instanceof MissingCredentialError) return true
@@ -336,7 +364,7 @@ export function createPaperParseWorker() {
 				.update(papers)
 				.set({
 					parseStatus: "failed",
-					parseError: err.message.slice(0, 500),
+					parseError: parseFailureMessage(err).slice(0, 500),
 					updatedAt: new Date(),
 				})
 				.where(eq(papers.id, job.data.paperId))
@@ -353,6 +381,12 @@ export function createPaperParseWorker() {
 	})
 
 	return worker
+}
+
+function parseFailureMessage(err: Error) {
+	const cause = err.cause
+	if (cause instanceof Error && cause.message) return cause.message
+	return err.message
 }
 
 function withStageTimeout<T>(stage: string, promise: Promise<T>): Promise<T> {

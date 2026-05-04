@@ -4,6 +4,7 @@ import { z } from "zod"
 import { type AuthContext, requireAuth } from "../middleware/auth"
 import { requireMembership } from "../middleware/workspace"
 import { enqueuePaperConceptRefine } from "../queues/paper-concept-refine"
+import { cleanupNoteBornConceptsForNote } from "../services/note-concept-extract"
 import {
 	createNote,
 	getNoteRow,
@@ -187,6 +188,7 @@ noteRoutes.delete("/notes/:id", requireAuth, async (c) => {
 	}
 	const existing = await getNoteRow(id)
 	await softDeleteNote(id)
+	await cleanupNoteBornConceptsForNote({ noteId: id })
 	if (existing?.paperId) {
 		await enqueuePaperConceptRefine({
 			paperId: existing.paperId,

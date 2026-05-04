@@ -12,6 +12,7 @@ interface BlockConceptLensPanelProps {
 
 const CONCEPT_PREVIEW_LIMIT = 6
 const CANDIDATE_PREVIEW_LIMIT = 5
+const NOTE_CONCEPT_PROMPT_VERSION = "note-concept-extract-v1"
 
 export function BlockConceptLensPanel({
 	blockId,
@@ -184,6 +185,11 @@ function ConceptCard({
 				<span className="rounded-full bg-bg-primary px-2 py-0.5 text-[11px] font-medium text-text-secondary">
 					{formatKind(concept.kind)}
 				</span>
+				{concept.promptVersion === NOTE_CONCEPT_PROMPT_VERSION ? (
+					<span className="rounded-full border border-border-subtle bg-bg-primary px-2 py-0.5 text-[11px] text-text-tertiary">
+						reader note
+					</span>
+				) : null}
 				<span className="text-sm font-semibold leading-5 text-text-primary">
 					{concept.displayName}
 				</span>

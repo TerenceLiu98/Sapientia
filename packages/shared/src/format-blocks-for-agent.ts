@@ -49,13 +49,39 @@ function formatOne(
 
 		for (const [color, items] of byColor) {
 			const phrases = [...new Set(items.map((item) => item.selectedText.trim()).filter(Boolean))]
-				.map((phrase) => `"${phrase}"`)
+				.map((phrase) => `"${sanitizePromptText(phrase)}"`)
 				.join(", ")
 			if (phrases) lines.push(`USER MARKED AS ${color.toUpperCase()}: ${phrases}`)
 		}
 	}
 
-	lines.push(block.text)
+	lines.push(formatBlockBody(block.text))
 	const body = lines.join("\n")
 	return isFocus ? `<focus>\n${body}\n</focus>` : body
+}
+
+function formatBlockBody(text: string) {
+	const sanitized = sanitizePromptText(text)
+	const fence = "`".repeat(Math.max(3, longestBacktickRun(sanitized) + 1))
+	return [fence, sanitized, fence].join("\n")
+}
+
+function sanitizePromptText(text: string) {
+	return text.replace(/<\/?(think|short|system|user|assistant|tool_call|tool|function)>/gi, (token) =>
+		token.replace("<", "〈").replace(">", "〉"),
+	)
+}
+
+function longestBacktickRun(text: string) {
+	let longest = 0
+	let current = 0
+	for (const char of text) {
+		if (char === "`") {
+			current += 1
+			longest = Math.max(longest, current)
+			continue
+		}
+		current = 0
+	}
+	return longest
 }

@@ -145,6 +145,40 @@ describe("parseContentList", () => {
 		expect((blocks[0].metadata as { originalType: string }).originalType).toBe("newfangled_thing")
 	})
 
+	it("strips NUL characters before values are written to Postgres", () => {
+		const nul = JSON.stringify([
+			{ type: "text", text: "\u0000Agent of Regulatory Authority Alerts", page_idx: 0 },
+			{
+				type: "table",
+				table_body: "<table>\u0000</table>",
+				table_caption: ["Table \u00001"],
+				table_footnote: ["note\u0000"],
+				page_idx: 0,
+			},
+			{
+				type: "list",
+				text: "\u0000List",
+				list_items: ["a\u0000", { nested: "\u0000b" }],
+				page_idx: 0,
+			},
+		])
+		const blocks = parseContentList(nul)
+
+		expect(blocks[0].text).toBe("Agent of Regulatory Authority Alerts")
+		expect(blocks[1].caption).toBe("Table 1")
+		expect((blocks[1].metadata as { tableBody: string; tableFootnote: string[] }).tableBody).toBe(
+			"<table></table>",
+		)
+		expect(
+			(blocks[1].metadata as { tableBody: string; tableFootnote: string[] }).tableFootnote,
+		).toEqual(["note"])
+		expect(blocks[2].text).toBe("List")
+		expect((blocks[2].metadata as { listItems: unknown[] }).listItems).toEqual([
+			"a",
+			{ nested: "b" },
+		])
+	})
+
 	it("returns [] for an empty list", () => {
 		expect(parseContentList("[]")).toEqual([])
 	})

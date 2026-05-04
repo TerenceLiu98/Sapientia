@@ -246,6 +246,149 @@ describe("graph route", () => {
 		)
 	})
 
+	it("surfaces high-signal unreviewed semantic candidates as suggested paper links", async () => {
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						where: () => ({
+							orderBy: async () => [
+								{
+									id: "paper-attention",
+									title: "Attention Is All You Need",
+									authors: ["Vaswani"],
+									year: 2017,
+									venue: "NeurIPS",
+									summaryStatus: "done",
+									createdAt: new Date("2026-05-02T10:00:00.000Z"),
+								},
+								{
+									id: "paper-survey",
+									title: "LLMs in Politics and Democracy",
+									authors: ["Ada"],
+									year: 2026,
+									venue: "arXiv",
+									summaryStatus: "done",
+									createdAt: new Date("2026-05-02T10:01:00.000Z"),
+								},
+							],
+						}),
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					innerJoin: () => ({
+						where: async () => [
+							{
+								id: "concept-transformer",
+								paperId: "paper-attention",
+								clusterId: "cluster-transformer-attention",
+								kind: "method",
+								displayName: "Transformer",
+								canonicalName: "transformer",
+								salienceScore: 0,
+								sourceLevelDescription: "The Transformer architecture proposed by the paper.",
+							},
+							{
+								id: "concept-transformer-architecture",
+								paperId: "paper-survey",
+								clusterId: "cluster-transformer-survey",
+								kind: "method",
+								displayName: "Transformer architecture",
+								canonicalName: "transformer architecture",
+								salienceScore: 0,
+								sourceLevelDescription: "A family of Transformer-based LLM architectures.",
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [
+						{
+							conceptId: "concept-transformer",
+							blockId: "blk-transformer",
+							snippet: "The Transformer relies entirely on attention.",
+						},
+						{
+							conceptId: "concept-transformer-architecture",
+							blockId: "blk-survey",
+							snippet: "Modern LLMs use Transformer architectures.",
+						},
+					],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								id: "candidate-transformer",
+								sourceLocalConceptId: "concept-transformer-architecture",
+								targetLocalConceptId: "concept-transformer",
+								kind: "method",
+								matchMethod: "embedding",
+								similarityScore: 0.717,
+								llmDecision: null,
+								llmConfidence: null,
+								decisionStatus: "candidate",
+								rationale: "embedding=0.717",
+							},
+						],
+					}),
+				}),
+			})
+
+		const { graphRoutes } = await import("./graph")
+		const app = new Hono()
+		app.route("/", graphRoutes)
+
+		const response = await app.request("/workspaces/ws-1/graph")
+		const payload = (await response.json()) as {
+			graph: {
+				edgeCount: number
+				nodes: Array<{ id: string; degree: number }>
+				edges: Array<{
+					edgeKind: string
+					weight: number
+					strongEvidenceCount: number
+					topEvidence: Array<{
+						sourceConceptName: string
+						targetConceptName: string
+						decisionStatus: string
+						llmDecision: string | null
+					}>
+				}>
+			}
+		}
+
+		expect(response.status).toBe(200)
+		expect(payload.graph.edgeCount).toBe(1)
+		expect(payload.graph.nodes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "paper-attention", degree: 1 }),
+				expect.objectContaining({ id: "paper-survey", degree: 1 }),
+			]),
+		)
+		expect(payload.graph.edges[0]).toEqual(
+			expect.objectContaining({
+				edgeKind: "similar_methods",
+				weight: 0.807,
+				strongEvidenceCount: 0,
+			}),
+		)
+		expect(payload.graph.edges[0].topEvidence).toEqual([
+			expect.objectContaining({
+				sourceConceptName: "Transformer architecture",
+				targetConceptName: "Transformer",
+				decisionStatus: "candidate",
+				llmDecision: null,
+			}),
+		])
+	})
+
 	it("returns a workspace concept graph from clusters and projected local edges", async () => {
 		selectMock
 			.mockReturnValueOnce({

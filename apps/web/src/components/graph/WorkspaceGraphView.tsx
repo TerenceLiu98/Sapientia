@@ -15,6 +15,7 @@ import { ExternalLink, LocateFixed, Search, X } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import Sigma from "sigma"
 import { type PaperGraphPayload, useWorkspaceGraph } from "@/api/hooks/graph"
+import { useRetryPaperKnowledge } from "@/api/hooks/papers"
 import type { Workspace } from "@/api/hooks/workspaces"
 
 type Selection = { kind: "node"; id: string } | { kind: "edge"; id: string } | null
@@ -55,6 +56,7 @@ const PAPER_EDGE_KIND_OPTIONS: Array<{ kind: PaperEdgeKind; label: string }> = [
 	{ kind: "semantic_neighbor", label: "semantic neighbor" },
 	{ kind: "mixed", label: "mixed evidence" },
 ]
+const NOTE_CONCEPT_PROMPT_VERSION = "note-concept-extract-v1"
 
 export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undefined }) {
 	const [selection, setSelection] = useState<Selection>(null)
@@ -150,6 +152,7 @@ export function WorkspaceGraphView({ workspace }: { workspace: Workspace | undef
 						onSelect={setSelection}
 						searchQuery={searchQuery}
 						selection={selection}
+						workspaceId={workspace.id}
 					/>
 					<GraphLegend />
 				</section>
@@ -470,10 +473,12 @@ function GraphCanvasPanels({
 	onSelect,
 	selection,
 	searchQuery,
+	workspaceId,
 }: {
 	data: PaperGraphPayload
 	selection: Selection
 	searchQuery: string
+	workspaceId: string
 	onSelect: (selection: Selection) => void
 	onClearSelection: () => void
 }) {
@@ -532,6 +537,7 @@ function GraphCanvasPanels({
 						onSelect={onSelect}
 						paper={selectedNode}
 						papersById={papersById}
+						workspaceId={workspaceId}
 					/>
 				</GraphDetailSheet>
 			) : null}
@@ -633,12 +639,16 @@ function PaperNodeCard({
 	onSelect,
 	paper,
 	papersById,
+	workspaceId,
 }: {
 	edges: PaperEdge[]
 	onSelect: (selection: Selection) => void
 	paper: PaperNode
 	papersById: Map<string, PaperNode>
+	workspaceId: string
 }) {
+	const showRebuildAction = paper.conceptCount === 0 || paper.degree === 0
+
 	return (
 		<div className="mt-3 rounded-lg border border-border-subtle bg-bg-primary p-3">
 			<div className="text-sm font-medium text-text-primary">{paper.title}</div>
@@ -652,15 +662,20 @@ function PaperNodeCard({
 					{paper.authors.join(", ")}
 				</div>
 			) : null}
-			<Link
-				className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-border-subtle bg-bg-secondary px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-				params={{ paperId: paper.paperId }}
-				search={{ blockId: undefined }}
-				to="/papers/$paperId"
-			>
-				<ExternalLink className="h-3.5 w-3.5" />
-				Open paper
-			</Link>
+			<div className="mt-3 flex flex-wrap gap-2">
+				<Link
+					className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-subtle bg-bg-secondary px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+					params={{ paperId: paper.paperId }}
+					search={{ blockId: undefined }}
+					to="/papers/$paperId"
+				>
+					<ExternalLink className="h-3.5 w-3.5" />
+					Open paper
+				</Link>
+				{showRebuildAction ? (
+					<PaperRebuildAction paperId={paper.paperId} workspaceId={workspaceId} />
+				) : null}
+			</div>
 			{paper.topConcepts.length > 0 ? (
 				<div className="mt-3 flex flex-wrap gap-1.5">
 					{paper.topConcepts.map((concept) => (
@@ -689,6 +704,26 @@ function PaperNodeCard({
 					<EmptyInspectorLine>No visible paper links.</EmptyInspectorLine>
 				)}
 			</InspectorSection>
+		</div>
+	)
+}
+
+function PaperRebuildAction({ paperId, workspaceId }: { paperId: string; workspaceId: string }) {
+	const retryKnowledge = useRetryPaperKnowledge(workspaceId)
+
+	return (
+		<div className="min-w-0">
+			<button
+				className="inline-flex h-8 items-center rounded-md border border-border-subtle bg-bg-secondary px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+				disabled={retryKnowledge.isPending}
+				onClick={() => retryKnowledge.mutate(paperId)}
+				type="button"
+			>
+				{retryKnowledge.isPending ? "Queueing..." : "Rebuild links"}
+			</button>
+			{retryKnowledge.error instanceof Error ? (
+				<div className="mt-2 text-xs text-text-error">{retryKnowledge.error.message}</div>
+			) : null}
 		</div>
 	)
 }
@@ -826,6 +861,13 @@ function PaperEdgeCard({
 							{evidence.llmDecision ? ` · LLM: ${evidence.llmDecision}` : ""}
 							{evidence.llmConfidence != null
 								? ` · confidence ${formatPercent(evidence.llmConfidence)}`
+								: ""}
+							{evidence.decisionStatus === "candidate" || evidence.decisionStatus === "needs_review"
+								? " · suggested"
+								: ""}
+							{evidence.sourcePromptVersion === NOTE_CONCEPT_PROMPT_VERSION ||
+							evidence.targetPromptVersion === NOTE_CONCEPT_PROMPT_VERSION
+								? " · reader note"
 								: ""}
 						</div>
 						<div className="mt-2 grid gap-2">

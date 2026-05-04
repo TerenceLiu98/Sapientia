@@ -1,6 +1,7 @@
 import { AGENT_SUMMON_V1 } from "./agent-summon-v1"
 import { AGENT_SUMMON_V2 } from "./agent-summon-v2"
 import { CONCEPT_SOURCE_DESCRIPTION_V1 } from "./concept-source-description-v1"
+import { NOTE_CONCEPT_EXTRACT_V1 } from "./note-concept-extract-v1"
 import { PAPER_COMPILE_V1 } from "./paper-compile-v1"
 import { PAPER_COMPILE_REDUCE_V1 } from "./paper-compile-reduce-v1"
 import { PAPER_COMPILE_WINDOW_V1 } from "./paper-compile-window-v1"
@@ -24,6 +25,7 @@ const PROMPTS = {
 	"agent-summon-v1": AGENT_SUMMON_V1,
 	"agent-summon-v2": AGENT_SUMMON_V2,
 	"concept-source-description-v1": CONCEPT_SOURCE_DESCRIPTION_V1,
+	"note-concept-extract-v1": NOTE_CONCEPT_EXTRACT_V1,
 	"paper-compile-reduce-v1": PAPER_COMPILE_REDUCE_V1,
 	"paper-compile-v1": PAPER_COMPILE_V1,
 	"paper-compile-window-v1": PAPER_COMPILE_WINDOW_V1,

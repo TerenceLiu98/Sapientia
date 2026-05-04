@@ -19,6 +19,8 @@ import { requireMembership } from "../middleware/workspace"
 const GRAPH_CONCEPT_KINDS = new Set(["concept", "method", "task", "metric"])
 const PAPER_GRAPH_DISPLAY_THRESHOLD = 0.7
 const LLM_CONFIRMED_LINK_THRESHOLD = 0.8
+const UNREVIEWED_SEMANTIC_LINK_THRESHOLD = 0.7
+const HIGH_SIMILARITY_SEMANTIC_LINK_THRESHOLD = 0.78
 const ReviewSemanticCandidateBodySchema = z.object({
 	decisionStatus: z.enum(["user_accepted", "user_rejected"]),
 })
@@ -460,6 +462,7 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 						canonicalName: compiledLocalConcepts.canonicalName,
 						salienceScore: compiledLocalConcepts.salienceScore,
 						sourceLevelDescription: compiledLocalConcepts.sourceLevelDescription,
+						promptVersion: compiledLocalConcepts.promptVersion,
 					})
 					.from(compiledLocalConcepts)
 					.innerJoin(
@@ -519,7 +522,13 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 							eq(workspaceConceptClusterCandidates.workspaceId, args.workspaceId),
 							eq(workspaceConceptClusterCandidates.ownerUserId, args.userId),
 							isNull(workspaceConceptClusterCandidates.deletedAt),
-							eq(workspaceConceptClusterCandidates.decisionStatus, "ai_confirmed"),
+							or(
+								eq(workspaceConceptClusterCandidates.decisionStatus, "ai_confirmed"),
+								eq(workspaceConceptClusterCandidates.decisionStatus, "user_accepted"),
+								eq(workspaceConceptClusterCandidates.decisionStatus, "auto_accepted"),
+								eq(workspaceConceptClusterCandidates.decisionStatus, "candidate"),
+								eq(workspaceConceptClusterCandidates.decisionStatus, "needs_review"),
+							),
 						),
 					)
 					.orderBy(
@@ -551,9 +560,12 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 				matchMethod: "exact_cluster",
 				llmDecision: null,
 				llmConfidence: null,
+				decisionStatus: "auto_accepted",
 				rationale: `Shared ${sourceConcept.kind}: ${sourceConcept.displayName}`,
 				sourceDescription: sourceConcept.sourceLevelDescription,
 				targetDescription: targetConcept.sourceLevelDescription,
+				sourcePromptVersion: sourceConcept.promptVersion,
+				targetPromptVersion: targetConcept.promptVersion,
 				sourceEvidence: evidenceByConceptId.get(sourceConcept.id) ?? [],
 				targetEvidence: evidenceByConceptId.get(targetConcept.id) ?? [],
 			})
@@ -567,21 +579,22 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 		if (sourceConcept.paperId === targetConcept.paperId) continue
 		const similarityScore = candidate.similarityScore ?? 0
 		const llmConfidence = candidate.llmConfidence ?? 0
-		if (
-			(candidate.llmDecision !== "same" && candidate.llmDecision !== "related") ||
-			llmConfidence < LLM_CONFIRMED_LINK_THRESHOLD
-		) {
-			continue
-		}
+		const score = scorePaperCandidateEvidence({
+			kind: candidate.kind,
+			llmDecision: candidate.llmDecision,
+			llmConfidence,
+			decisionStatus: candidate.decisionStatus,
+			matchMethod: candidate.matchMethod,
+			similarityScore,
+			sourceConceptName: sourceConcept.displayName,
+			targetConceptName: targetConcept.displayName,
+		})
+		if (score < PAPER_GRAPH_DISPLAY_THRESHOLD) continue
 		addPaperGraphEvidence(edgeDrafts, {
 			sourcePaperId: sourceConcept.paperId,
 			targetPaperId: targetConcept.paperId,
 			kind: candidate.kind,
-			score: scorePaperCandidateEvidence({
-				kind: candidate.kind,
-				llmDecision: candidate.llmDecision,
-				llmConfidence,
-			}),
+			score,
 			similarityScore,
 			sourceConceptId: sourceConcept.id,
 			targetConceptId: targetConcept.id,
@@ -590,9 +603,12 @@ async function loadPaperGraphPayload(args: { workspaceId: string; userId: string
 			matchMethod: candidate.matchMethod,
 			llmDecision: candidate.llmDecision,
 			llmConfidence,
+			decisionStatus: candidate.decisionStatus,
 			rationale: candidate.rationale,
 			sourceDescription: sourceConcept.sourceLevelDescription,
 			targetDescription: targetConcept.sourceLevelDescription,
+			sourcePromptVersion: sourceConcept.promptVersion,
+			targetPromptVersion: targetConcept.promptVersion,
 			sourceEvidence: evidenceByConceptId.get(sourceConcept.id) ?? [],
 			targetEvidence: evidenceByConceptId.get(targetConcept.id) ?? [],
 		})
@@ -658,9 +674,12 @@ type PaperGraphEvidence = {
 	matchMethod: string
 	llmDecision: string | null
 	llmConfidence: number | null
+	decisionStatus: string | null
 	rationale: string | null
 	sourceDescription: string | null
 	targetDescription: string | null
+	sourcePromptVersion: string | null
+	targetPromptVersion: string | null
 	sourceEvidence: Array<{ blockId: string; snippet: string | null }>
 	targetEvidence: Array<{ blockId: string; snippet: string | null }>
 }
@@ -727,9 +746,12 @@ function finalizePaperGraphEdge(draft: PaperGraphEdgeDraft) {
 			similarityScore: item.similarityScore,
 			llmDecision: item.llmDecision,
 			llmConfidence: item.llmConfidence,
+			decisionStatus: item.decisionStatus,
 			rationale: item.rationale,
 			sourceDescription: item.sourceDescription,
 			targetDescription: item.targetDescription,
+			sourcePromptVersion: item.sourcePromptVersion,
+			targetPromptVersion: item.targetPromptVersion,
 			sourceEvidenceBlockIds: item.sourceEvidence.map((evidence) => evidence.blockId),
 			targetEvidenceBlockIds: item.targetEvidence.map((evidence) => evidence.blockId),
 			sourceEvidenceSnippets: item.sourceEvidence
@@ -754,7 +776,23 @@ function scorePaperCandidateEvidence(args: {
 	kind: string
 	llmDecision: string | null
 	llmConfidence: number | null
+	decisionStatus: string
+	matchMethod: string
+	similarityScore: number
+	sourceConceptName: string
+	targetConceptName: string
 }) {
+	if (args.decisionStatus === "user_accepted") return 0.92
+	if (args.decisionStatus === "auto_accepted") return 0.86
+	if (
+		(args.decisionStatus === "candidate" || args.decisionStatus === "needs_review") &&
+		isHighSignalUnreviewedPaperCandidate(args)
+	) {
+		let score = Math.max(PAPER_GRAPH_DISPLAY_THRESHOLD, args.similarityScore)
+		if (hasNameContainment(args.sourceConceptName, args.targetConceptName)) score += 0.06
+		if (args.kind === "method" || args.kind === "task") score += 0.03
+		return Math.min(0.82, Math.round(score * 1000) / 1000)
+	}
 	if (args.llmDecision !== "same" && args.llmDecision !== "related") return 0
 	const confidence = args.llmConfidence ?? 0
 	if (confidence < LLM_CONFIRMED_LINK_THRESHOLD) return 0
@@ -765,6 +803,43 @@ function scorePaperCandidateEvidence(args: {
 	if (args.kind === "metric") score += 0.02
 
 	return Math.min(1, Math.round(score * 1000) / 1000)
+}
+
+function isHighSignalUnreviewedPaperCandidate(args: {
+	matchMethod: string
+	similarityScore: number
+	sourceConceptName: string
+	targetConceptName: string
+}) {
+	if (args.matchMethod !== "embedding" && args.matchMethod !== "lexical_source_description") {
+		return false
+	}
+	if (args.similarityScore < UNREVIEWED_SEMANTIC_LINK_THRESHOLD) return false
+	if (hasNameContainment(args.sourceConceptName, args.targetConceptName)) return true
+	if (args.similarityScore >= HIGH_SIMILARITY_SEMANTIC_LINK_THRESHOLD) return true
+	return false
+}
+
+function hasNameContainment(sourceName: string, targetName: string) {
+	const sourceTokens = meaningfulConceptNameTokens(sourceName)
+	const targetTokens = meaningfulConceptNameTokens(targetName)
+	if (sourceTokens.length === 0 || targetTokens.length === 0) return false
+	const [shorter, longer] =
+		sourceTokens.length <= targetTokens.length
+			? [sourceTokens, targetTokens]
+			: [targetTokens, sourceTokens]
+	const longerSet = new Set(longer)
+	const contained = shorter.filter((token) => longerSet.has(token)).length
+	return contained / shorter.length >= 0.75
+}
+
+function meaningfulConceptNameTokens(value: string) {
+	const stopwords = new Set(["and", "for", "in", "of", "on", "the", "to", "with"])
+	return value
+		.toLowerCase()
+		.split(/[^a-z0-9]+/g)
+		.map((token) => token.trim())
+		.filter((token) => token.length >= 3 && !stopwords.has(token))
 }
 
 function edgeKindForEvidence(evidence: PaperGraphEvidence[]) {

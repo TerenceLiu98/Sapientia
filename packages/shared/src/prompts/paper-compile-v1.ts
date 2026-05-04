@@ -11,7 +11,7 @@ Output requirements:
     "referenceBlockIds": string[],
     "concepts": [
       {
-        "kind": "concept" | "method" | "task" | "metric" | "dataset" | "person" | "organization",
+        "kind": "concept" | "method" | "task" | "metric" | "dataset",
         "canonicalName": string,
         "displayName": string,
         "evidenceBlockIds": string[]
@@ -21,26 +21,38 @@ Output requirements:
 
 Summary requirements:
 
-- summary must be markdown.
+- summary must be markdown with exactly these section headings:
+  - "## Context"
+  - "## Method"
+  - "## Result"
+  - "## Critical"
+  - "## Value"
 - Write for a downstream research agent, not for an end user.
 - Cover:
-  - the paper's central claim or thesis
-  - the problem it addresses
-  - the key methods, tasks, metrics, datasets, and concepts that actually matter
-  - the most important findings
-  - limitations or caveats worth remembering
+  - Context: what specific academic or practical problem the paper addresses, and what gap or prior limitation motivates it.
+  - Method: what concrete techniques, models, data, experiments, evaluation setup, or argument structure the authors use.
+  - Result: the core findings or experimental results, and whether the presented evidence supports the paper's conclusions.
+  - Critical: overclaims, weak evidence, assumptions, confounds, limitations, missing experiments, or unresolved questions.
+  - Value: what a researcher could reuse or cite: claims, methods, datasets, metrics, inspirations, comparisons, or follow-up ideas.
 - Keep the summary compact but substantive: roughly 500-1000 words.
+- Distinguish what the paper demonstrates from what it merely claims or gestures toward.
 - Avoid rhetorical framing, filler, and title restatement.
 - Do not invent facts not supported by the parsed blocks.
 
 Concept extraction rules:
 
 - Extract only paper-local concepts/entities that are genuinely load-bearing for understanding this paper.
-- A concept is load-bearing only if removing it would make the paper's contribution, method, evaluation, main finding, caveat, or limitation harder to understand.
+- Taxonomy and reading-frame are separate:
+  - kind answers what type of object this is: "concept", "method", "task", "metric", or "dataset".
+  - reading-frame relevance answers why this object is worth extracting: Context, Method, Result, Critical, or Value.
+- A concept is load-bearing only if removing it would make at least one of the five summary sections materially worse.
+- Output a candidate only when both are true:
+  - it has one valid taxonomy kind
+  - it helps answer Context, Method, Result, Critical, or Value for this paper
 - Sapientia wants reading atoms, not a broad scientific keyphrase list.
 - Internally classify candidates by importance:
-  - core: required to understand the paper's central claim, contribution, method, task, evaluation, or main result.
-  - supporting: necessary context for understanding evidence, baselines, datasets, metrics, assumptions, ablations, or limitations.
+  - core: required to answer Context, Method, Result, Critical, or Value.
+  - supporting: necessary context for evidence, baselines, datasets, metrics, assumptions, ablations, limitations, or reusable value.
   - incidental: related-work-only mentions, generic tools/phrases, one-off noun phrases, section labels, or terms whose removal would not affect understanding.
 - Output only core and supporting candidates. Never output incidental candidates.
 - Section-aware importance rules:
@@ -53,17 +65,13 @@ Concept extraction rules:
 - Do not try to fuse concepts across papers.
 - Prefer method names, task formulations, evaluation metrics, datasets, and recurring technical terms only when they matter for this paper's argument.
 - Do not include generic academic filler such as "results", "experiment", "model", "paper", "authors" unless they refer to a specific named thing.
-- "person" is allowed only for paper authors or clearly author-level named people.
-- "organization" is allowed only for author affiliations / institutions.
-- Do not extract arbitrary people or organizations mentioned in body prose.
+- Do not extract people, authors, institutions, affiliations, labs, companies, or organizations as concepts. Authors and affiliations belong to paper metadata, not the concept graph.
 - Use exactly these kind values:
   - "concept": a theoretical/technical idea, mechanism, phenomenon, assumption, or recurring term that is not itself a method/task/metric/dataset.
   - "method": a named model, algorithm, architecture, training technique, inference procedure, intervention, or concrete system proposed/used by the paper.
   - "task": a problem formulation or objective, such as classification, inference, detection, ranking, generation, prediction, retrieval, evaluation target, or benchmark objective.
   - "metric": a named measurement, score, rate, accuracy, loss, cost, benchmark score, or evaluation criterion.
   - "dataset": a named corpus, benchmark dataset, evaluation set, data source, or constructed dataset.
-  - "person": paper authors or clearly author-level named people only.
-  - "organization": author affiliations/institutions only.
 - Taxonomy boundary rules:
   - Zero-shot classification, few-shot classification, natural language inference, detection, ranking, retrieval, prediction, and generation are usually "task" when they name what the paper is trying to solve.
   - A model, algorithm, architecture, prompting strategy, fine-tuning method, adapter method, or training recipe is usually "method".
@@ -80,7 +88,7 @@ Concept extraction rules:
   - A broad technique family or theoretical idea -> "concept" unless the paper uses a specific instance as a concrete method.
 - Negative examples:
   - Do not label "classification" as "method" when it is the objective being evaluated.
-  - Do not label an institution mentioned only in related work as "organization".
+  - Do not extract an institution, company, lab, author, or affiliation as a concept.
   - Do not include "experiment" or "results" as concepts.
 - canonicalName should be normalized and stable:
   - lowercase
@@ -117,6 +125,6 @@ Final output reminder:
 - For a normal parsed research paper, "referenceBlockIds" must not be empty.
 - For a normal parsed research paper, "concepts" must not be empty; extract roughly 12-35 load-bearing concepts/entities when evidence exists, and include more when the paper genuinely needs them.
 - Every concept must include at least one valid evidenceBlockIds entry copied as the bare id after "#" in a parsed content header.
-- Every concept kind must be exactly one of: "concept", "method", "task", "metric", "dataset", "person", "organization".
+- Every concept kind must be exactly one of: "concept", "method", "task", "metric", "dataset".
 - If you omit "referenceBlockIds" or "concepts", the compile result is invalid.
 `

@@ -18,7 +18,7 @@ Output requirements:
     "referenceBlockIds": string[],
     "concepts": [
       {
-        "kind": "concept" | "method" | "task" | "metric" | "dataset" | "person" | "organization",
+        "kind": "concept" | "method" | "task" | "metric" | "dataset",
         "canonicalName": string,
         "displayName": string,
         "evidenceBlockIds": string[]
@@ -37,9 +37,18 @@ Reduce rules:
 - Remove local noise such as generic section labels, "experiment", "results", "paper", or incidental noun phrases.
 - Reduce is the final paper-level importance filter. A candidate that was useful within one window can still be too local for the final paper concept set.
 - Sapientia wants reading atoms, not a broad scientific keyphrase list.
+- Taxonomy and reading-frame are separate:
+  - kind answers what type of object this is: "concept", "method", "task", "metric", or "dataset".
+  - reading-frame relevance answers why this object is worth extracting: Context, Method, Result, Critical, or Value.
+- Keep a candidate only when it helps answer at least one of:
+  - Context: problem, gap, motivation, prior limitation, or setup.
+  - Method: concrete technique, model, data, experiment, evaluation setup, or argument structure.
+  - Result: measured outcome, finding, metric, benchmark, comparison, or evidence-bearing claim.
+  - Critical: limitation, assumption, failure mode, confound, unsupported leap, missing experiment, or unresolved question.
+  - Value: reusable method/data/claim, citation-worthy idea, comparison point, inspiration, or extension.
 - Keep only candidates that are core or supporting at the whole-paper level:
-  - core: required to understand the paper's central claim, contribution, method, task, evaluation, or main result.
-  - supporting: necessary context for understanding evidence, baselines, datasets, metrics, assumptions, ablations, or limitations.
+  - core: required to answer Context, Method, Result, Critical, or Value.
+  - supporting: necessary context for evidence, baselines, datasets, metrics, assumptions, ablations, limitations, or reusable value.
 - Drop incidental candidates:
   - related-work-only mentions unless the paper directly uses, extends, or compares against them
   - generic tools/phrases and one-off noun phrases
@@ -55,14 +64,11 @@ Taxonomy rules:
   - "task"
   - "metric"
   - "dataset"
-  - "person"
-  - "organization"
 - A problem, objective, capability, or evaluation target is usually "task" unless the paper names it as a concrete algorithm/procedure.
 - A score, measurement, rate, loss, or criterion is "metric", not "task".
 - A model, algorithm, architecture, prompting strategy, fine-tuning method, adapter method, or training recipe is usually "method".
 - A benchmark collection or corpus is "dataset"; the score computed on it is "metric"; the problem it measures is usually "task".
-- "person" is allowed only for paper authors or clearly author-level named people.
-- "organization" is allowed only for author affiliations / institutions.
+- Do not extract people, authors, institutions, affiliations, labs, companies, or organizations as concepts. Authors and affiliations belong to paper metadata, not the concept graph.
 
 Evidence rules:
 
@@ -76,12 +82,22 @@ Evidence rules:
 
 Summary rules:
 
-- summary must be markdown.
+- summary must be markdown with exactly these section headings:
+  - "## Context"
+  - "## Method"
+  - "## Result"
+  - "## Critical"
+  - "## Value"
 - Write for a downstream research agent, not for an end user.
 - Synthesize across all windows.
-- Cover the paper's central claim, problem, methods, tasks, metrics, datasets, important findings, and caveats.
+- Context: identify the specific academic or practical problem, gap in prior work, and why this paper is needed.
+- Method: describe the concrete model, technique, data, experimental design, evaluation setup, or argument structure used.
+- Result: state the core findings and whether the reported evidence supports the conclusion.
+- Critical: identify limitations, unsupported leaps, weak evidence, confounds, missing experiments, or unresolved questions. Be fair but skeptical.
+- Value: identify why this paper may matter to a researcher: reusable claims, methods, datasets, evaluation setups, citations, inspirations, or follow-up ideas.
 - Include concise block citations such as "[blk 081f769b]" for important paper-specific claims when available from window summaries.
 - Keep the summary compact but substantive: roughly 500-1000 words.
+- Distinguish what the paper demonstrates from what it merely claims or gestures toward.
 - Do not present the summary as user-facing reading replacement.
 
 Paper metadata:

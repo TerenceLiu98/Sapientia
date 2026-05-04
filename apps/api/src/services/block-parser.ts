@@ -166,8 +166,25 @@ function mapType(rawType: string | undefined, hasTextLevel: boolean): BlockType 
 
 function captionFromArray(arr: string[] | undefined): string | null {
 	if (!arr || arr.length === 0) return null
-	const joined = arr.join(" ").trim()
+	const joined = sanitizeTextForPostgres(arr.join(" ")).trim()
 	return joined.length > 0 ? joined : null
+}
+
+function sanitizeTextForPostgres(value: string): string {
+	return value.split(String.fromCharCode(0)).join("")
+}
+
+function sanitizeMetadataValue(value: unknown): unknown {
+	if (typeof value === "string") return sanitizeTextForPostgres(value)
+	if (Array.isArray(value)) return value.map(sanitizeMetadataValue)
+	if (value && typeof value === "object") {
+		const sanitized: Record<string, unknown> = {}
+		for (const [key, nested] of Object.entries(value)) {
+			sanitized[key] = sanitizeMetadataValue(nested)
+		}
+		return sanitized
+	}
+	return value
 }
 
 export interface ParseContentListOptions {
@@ -207,25 +224,25 @@ export function parseContentList(
 		const metadata: Record<string, unknown> = {}
 
 		if (type === "heading" || type === "text" || type === "code" || type === "equation") {
-			textContent = item.text ?? ""
+			textContent = sanitizeTextForPostgres(item.text ?? "")
 		} else if (type === "list") {
-			textContent = item.text ?? ""
-			if (item.list_items) metadata.listItems = item.list_items
-			if (item.sub_type) metadata.listSubType = item.sub_type
+			textContent = sanitizeTextForPostgres(item.text ?? "")
+			if (item.list_items) metadata.listItems = sanitizeMetadataValue(item.list_items)
+			if (item.sub_type) metadata.listSubType = sanitizeTextForPostgres(item.sub_type)
 		} else if (type === "figure") {
 			caption = captionFromImage
 			textContent = caption ?? ""
-			if (item.img_path) metadata.imgPath = item.img_path
-			if (item.image_footnote) metadata.imageFootnote = item.image_footnote
+			if (item.img_path) metadata.imgPath = sanitizeTextForPostgres(item.img_path)
+			if (item.image_footnote) metadata.imageFootnote = sanitizeMetadataValue(item.image_footnote)
 		} else if (type === "table") {
 			caption = captionFromTable
 			textContent = caption ?? ""
-			if (item.table_body) metadata.tableBody = item.table_body
-			if (item.table_footnote) metadata.tableFootnote = item.table_footnote
+			if (item.table_body) metadata.tableBody = sanitizeTextForPostgres(item.table_body)
+			if (item.table_footnote) metadata.tableFootnote = sanitizeMetadataValue(item.table_footnote)
 		} else {
 			// "other" — preserve text if any (page footnotes etc.)
-			textContent = item.text ?? ""
-			if (item.type) metadata.originalType = item.type
+			textContent = sanitizeTextForPostgres(item.text ?? "")
+			if (item.type) metadata.originalType = sanitizeTextForPostgres(item.type)
 		}
 
 		const contentForHash = JSON.stringify({
@@ -239,7 +256,8 @@ export function parseContentList(
 		const blockId = blockIdFromContent(contentForHash)
 
 		const pageIdx = item.page_idx ?? 0
-		const imgPath = typeof item.img_path === "string" ? item.img_path : null
+		const imgPath =
+			typeof item.img_path === "string" ? sanitizeTextForPostgres(item.img_path) : null
 		out.push({
 			blockId,
 			blockIndex: i,

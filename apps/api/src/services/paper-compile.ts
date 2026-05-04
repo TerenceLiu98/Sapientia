@@ -1,16 +1,16 @@
 import {
 	type Block,
-	type Paper,
 	blocks as blocksTable,
 	compiledLocalConceptEvidence as compiledLocalConceptEvidenceTable,
 	compiledLocalConcepts as compiledLocalConceptsTable,
+	type Paper,
 	papers,
-	workspacePapers,
 	wikiPageReferences as wikiPageReferencesTable,
 	wikiPages as wikiPagesTable,
+	workspacePapers,
 } from "@sapientia/db"
 import { fillPrompt, formatBlocksForAgent, loadPrompt } from "@sapientia/shared"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, isNull, ne, or } from "drizzle-orm"
 import { z } from "zod"
 import { db } from "../db"
 import { getLlmCredential } from "./credentials"
@@ -21,20 +21,14 @@ export const PAPER_COMPILE_PROMPT_VERSION = "paper-compile-hierarchical-v1"
 const SINGLE_PASS_PROMPT_ID = "paper-compile-v1"
 const WINDOW_PROMPT_ID = "paper-compile-window-v1"
 const REDUCE_PROMPT_ID = "paper-compile-reduce-v1"
+const NOTE_CONCEPT_EXTRACT_PROMPT_VERSION = "note-concept-extract-v1"
 const MAX_BLOCK_CONTENT_CHARS = 120_000
 const HIERARCHICAL_WINDOW_CONCURRENCY = 4
 const MAX_CONCEPT_EVIDENCE_BLOCK_IDS = 200
 const MAX_PAGE_REFERENCE_BLOCK_IDS = 500
+const MAX_WINDOW_REFERENCE_BLOCK_IDS = 24
 
-const conceptKindSchema = z.enum([
-	"concept",
-	"method",
-	"task",
-	"metric",
-	"dataset",
-	"person",
-	"organization",
-])
+const conceptKindSchema = z.enum(["concept", "method", "task", "metric", "dataset"])
 
 type ConceptKind = z.infer<typeof conceptKindSchema>
 
@@ -86,21 +80,64 @@ const conceptKindAliasMap: Record<string, ConceptKind> = {
 	systems: "method",
 	technique: "method",
 	techniques: "method",
-	author: "person",
 	tasks: "task",
 	metrics: "metric",
 	datasets: "dataset",
-	people: "person",
-	persons: "person",
-	authors: "person",
-	affiliation: "organization",
-	institutions: "organization",
-	institution: "organization",
-	organizations: "organization",
-	organisations: "organization",
-	affiliations: "organization",
 }
 const allowedConceptKinds = new Set<ConceptKind>(conceptKindSchema.options)
+const disallowedConceptKindAliases = new Set([
+	"affiliation",
+	"affiliations",
+	"author",
+	"authors",
+	"company",
+	"companies",
+	"institution",
+	"institutions",
+	"lab",
+	"labs",
+	"organisation",
+	"organisations",
+	"organization",
+	"organizations",
+	"people",
+	"person",
+	"persons",
+])
+const genericConceptNames = new Set([
+	"accuracy",
+	"analysis",
+	"approach",
+	"approaches",
+	"author",
+	"authors",
+	"benchmark",
+	"benchmarks",
+	"dataset",
+	"datasets",
+	"evaluation",
+	"evaluations",
+	"experiment",
+	"experiments",
+	"framework",
+	"frameworks",
+	"method",
+	"methods",
+	"metric",
+	"metrics",
+	"model",
+	"models",
+	"paper",
+	"papers",
+	"performance",
+	"result",
+	"results",
+	"study",
+	"system",
+	"systems",
+	"task",
+	"tasks",
+])
 
 const extractedConceptSchema = z.object({
 	kind: z.preprocess(normalizeConceptKind, conceptKindSchema),
@@ -109,17 +146,23 @@ const extractedConceptSchema = z.object({
 	evidenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
 })
 
-export const paperCompileResultSchema = z.preprocess(normalizePaperCompileResult, z.object({
-	summary: z.string().min(1),
-	referenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
-	concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
-}))
+export const paperCompileResultSchema = z.preprocess(
+	normalizePaperCompileResult,
+	z.object({
+		summary: z.string().min(1),
+		referenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
+		concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
+	}),
+)
 
-const paperCompileWindowResultSchema = z.preprocess(normalizePaperCompileWindowResult, z.object({
-	windowSummary: z.string().min(1),
-	referenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
-	concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
-}))
+const paperCompileWindowResultSchema = z.preprocess(
+	normalizePaperCompileWindowResult,
+	z.object({
+		windowSummary: z.string().min(1),
+		referenceBlockIds: z.preprocess(coerceBlockIdArray, z.array(z.string().min(1)).default([])),
+		concepts: z.preprocess(normalizeConceptArray, z.array(extractedConceptSchema).default([])),
+	}),
+)
 
 type ExtractedConcept = z.infer<typeof extractedConceptSchema>
 type PaperCompileResultObject = z.infer<typeof paperCompileResultSchema>
@@ -229,6 +272,9 @@ function normalizeConceptKind(value: unknown) {
 	if (typeof value !== "string") return value
 	const normalized = value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ")
 	const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized
+	if (disallowedConceptKindAliases.has(normalized) || disallowedConceptKindAliases.has(singular)) {
+		return "concept"
+	}
 	const aliased = conceptKindAliasMap[normalized] ?? conceptKindAliasMap[singular] ?? normalized
 	return allowedConceptKinds.has(aliased as ConceptKind) ? aliased : "concept"
 }
@@ -357,13 +403,15 @@ export async function compilePaper(args: {
 
 	const compiled = compileResult.object
 	const summaryText = compiled.summary.trim()
-	const sanitizedConcepts = sanitizeExtractedConcepts(compiled.concepts, blockIds, blockTextById)
+	const sanitizedConcepts = sanitizeExtractedConcepts(
+		compiled.concepts,
+		blockIds,
+		blockTextById,
+		paper,
+	)
 	const summaryReferenceBlockIds = extractBlockIdsFromSummary(summaryText)
 	const pageReferenceBlockIds = uniqueValidBlockIds(
-		[
-			...compiled.referenceBlockIds,
-			...summaryReferenceBlockIds,
-		],
+		[...compiled.referenceBlockIds, ...summaryReferenceBlockIds],
 		blockIds,
 		MAX_PAGE_REFERENCE_BLOCK_IDS,
 	)
@@ -419,6 +467,10 @@ export async function compilePaper(args: {
 						eq(compiledLocalConceptsTable.workspaceId, workspaceId),
 						eq(compiledLocalConceptsTable.ownerUserId, userId),
 						eq(compiledLocalConceptsTable.paperId, paperId),
+						or(
+							isNull(compiledLocalConceptsTable.promptVersion),
+							ne(compiledLocalConceptsTable.promptVersion, NOTE_CONCEPT_EXTRACT_PROMPT_VERSION),
+						),
 					),
 				)
 
@@ -577,7 +629,7 @@ async function runHierarchicalCompile(args: {
 	const windowResults = await mapWithConcurrency(
 		windows,
 		HIERARCHICAL_WINDOW_CONCURRENCY,
-		(window) => runWindowCompile({ ...args, window }),
+		(window) => runWindowCompileWithFallback({ ...args, window }),
 	)
 
 	const windowArtifacts = windowResults.map(({ window, object }) => ({
@@ -594,7 +646,7 @@ async function runHierarchicalCompile(args: {
 	const reducePrompt = fillPrompt(loadPrompt(REDUCE_PROMPT_ID), {
 		title: args.paper.title || "(untitled paper)",
 		authors: formatPaperAuthors(args.paper),
-		windowArtifacts: JSON.stringify(windowArtifacts, null, 2),
+		windowArtifacts: JSON.stringify(windowArtifacts),
 	})
 
 	const reduceResult = await completeObject({
@@ -626,7 +678,8 @@ async function runWindowCompile(args: {
 		authors: formatPaperAuthors(args.paper),
 		windowId: args.window.windowId,
 		pageRange: `${args.window.pageRange[0]}-${args.window.pageRange[1]}`,
-		headingPath: args.window.headingPath.length > 0 ? args.window.headingPath.join(" > ") : "(none)",
+		headingPath:
+			args.window.headingPath.length > 0 ? args.window.headingPath.join(" > ") : "(none)",
 		primaryBlockIds: JSON.stringify(args.window.primaryBlockIds),
 		contextBlockIds: JSON.stringify(args.window.contextBlockIds),
 		blocks: formatBlocksForCompile(args.window.blocks),
@@ -649,13 +702,137 @@ async function runWindowCompile(args: {
 	}
 }
 
+async function runWindowCompileWithFallback(args: {
+	userId: string
+	model: string
+	paper: Paper
+	window: PaperCompileWindow
+}): Promise<{ window: PaperCompileWindow; object: PaperCompileWindowResultObject; model: string }> {
+	try {
+		return await runWindowCompile(args)
+	} catch (error) {
+		if (!isStructuredOutputFailure(error)) {
+			throw error
+		}
+
+		const fallbackWindows = buildFallbackWindows(args.window)
+		if (fallbackWindows.length <= 1) {
+			return {
+				window: args.window,
+				object: buildDeterministicWindowCompileObject(args.window),
+				model: args.model,
+			}
+		}
+
+		const fallbackResults = await mapWithConcurrency(fallbackWindows, 1, (window) =>
+			runWindowCompileWithFallback({ ...args, window }),
+		)
+
+		return {
+			window: args.window,
+			object: mergeWindowCompileObjects(fallbackResults.map((result) => result.object)),
+			model: fallbackResults.at(-1)?.model ?? args.model,
+		}
+	}
+}
+
+function buildDeterministicWindowCompileObject(
+	window: PaperCompileWindow,
+): PaperCompileWindowResultObject {
+	const referenceBlockIds = uniqueStrings(
+		(window.primaryBlockIds.length > 0 ? window.primaryBlockIds : window.blockIds).slice(
+			0,
+			MAX_WINDOW_REFERENCE_BLOCK_IDS,
+		),
+	)
+	const referenceIdSet = new Set(referenceBlockIds)
+	const snippets = window.blocks
+		.filter((block) => referenceIdSet.has(block.blockId))
+		.map((block) => buildSnippet(block.text) ?? "")
+		.filter(Boolean)
+		.slice(0, 3)
+	const heading = window.headingPath.length > 0 ? window.headingPath.join(" > ") : null
+	const citationText = referenceBlockIds
+		.slice(0, 4)
+		.map((blockId) => `[blk ${blockId}]`)
+		.join(" ")
+
+	return {
+		windowSummary: [
+			heading ? `Heading: ${heading}.` : null,
+			snippets.length > 0
+				? `Fallback window summary from parsed blocks: ${snippets.join(" ")}`
+				: "Fallback window summary from parsed blocks.",
+			"Concept extraction for this window was skipped because structured LLM output was invalid.",
+			citationText || null,
+		]
+			.filter(Boolean)
+			.join(" ")
+			.slice(0, 900),
+		referenceBlockIds,
+		concepts: [],
+	}
+}
+
+function buildFallbackWindows(window: PaperCompileWindow) {
+	const primaryIdSet = new Set(window.primaryBlockIds)
+	const primaryBlocks = window.blocks.filter((block) => primaryIdSet.has(block.blockId))
+	return buildPaperCompileWindows(primaryBlocks, {
+		pagesPerWindow: 1,
+		contextBlocksPerSide: 1,
+	})
+}
+
+function mergeWindowCompileObjects(
+	objects: PaperCompileWindowResultObject[],
+): PaperCompileWindowResultObject {
+	const conceptByKey = new Map<string, ExtractedConcept>()
+	for (const object of objects) {
+		for (const concept of object.concepts) {
+			const key = `${concept.kind}::${concept.canonicalName.toLowerCase()}`
+			const existing = conceptByKey.get(key)
+			if (!existing) {
+				conceptByKey.set(key, {
+					...concept,
+					evidenceBlockIds: uniqueStrings(concept.evidenceBlockIds),
+				})
+				continue
+			}
+			existing.evidenceBlockIds = uniqueStrings([
+				...existing.evidenceBlockIds,
+				...concept.evidenceBlockIds,
+			])
+		}
+	}
+
+	return {
+		windowSummary: objects.map((object) => object.windowSummary.trim()).filter(Boolean).join("\n\n"),
+		referenceBlockIds: uniqueStrings(objects.flatMap((object) => object.referenceBlockIds)).slice(
+			0,
+			MAX_WINDOW_REFERENCE_BLOCK_IDS,
+		),
+		concepts: [...conceptByKey.values()],
+	}
+}
+
+function isStructuredOutputFailure(error: unknown) {
+	return (
+		error instanceof Error &&
+		/did not return valid JSON|returned JSON that did not satisfy schema|parseable object/i.test(
+			error.message,
+		)
+	)
+}
+
 function formatPaperAuthors(paper: Paper) {
 	return Array.isArray(paper.authors) && paper.authors.length > 0
 		? paper.authors.join(", ")
 		: "(unknown)"
 }
 
-function formatBlocksForCompile(blocks: Pick<Block, "blockId" | "type" | "text" | "headingLevel">[]) {
+function formatBlocksForCompile(
+	blocks: Pick<Block, "blockId" | "type" | "text" | "headingLevel">[],
+) {
 	return formatBlocksForAgent({
 		blocks: blocks.map((block) => ({
 			blockId: block.blockId,
@@ -693,13 +870,18 @@ function sanitizeExtractedConcepts(
 	concepts: ExtractedConcept[],
 	validBlockIds: Set<string>,
 	blockTextById: Map<string, string | null>,
+	paper: Paper,
 ) {
 	const deduped = new Map<string, SanitizedConcept>()
+	const paperAuthorNames = new Set(
+		(paper.authors ?? []).map((author) => normalizeCanonicalName(author)),
+	)
 
 	for (const concept of concepts) {
 		const displayName = concept.displayName.trim()
 		const canonicalName = chooseCanonicalName(concept.canonicalName, displayName)
 		if (!canonicalName || !displayName) continue
+		if (shouldDropConceptName(canonicalName, displayName, paperAuthorNames)) continue
 
 		const evidence = uniqueByBlockId(
 			concept.evidenceBlockIds
@@ -739,6 +921,40 @@ function sanitizeExtractedConcepts(
 	return [...deduped.values()]
 }
 
+function shouldDropConceptName(
+	canonicalName: string,
+	displayName: string,
+	paperAuthorNames: Set<string>,
+) {
+	const normalizedCanonical = normalizeCanonicalName(canonicalName)
+	const normalizedDisplay = normalizeCanonicalName(displayName)
+	if (genericConceptNames.has(normalizedCanonical) || genericConceptNames.has(normalizedDisplay)) {
+		return true
+	}
+	if (paperAuthorNames.has(normalizedCanonical) || paperAuthorNames.has(normalizedDisplay)) {
+		return true
+	}
+	if (looksLikeOrganization(displayName) || looksLikeOrganization(canonicalName)) {
+		return true
+	}
+	return false
+}
+
+function looksLikeOrganization(value: string) {
+	const normalized = value.trim().replace(/\s+/g, " ")
+	if (!normalized) return false
+	const lower = normalized.toLowerCase()
+	if (
+		/\b(university|institute|institution|college|school|department|laboratory|lab|labs|company|corporation|inc\.?|llc|ltd\.?|gmbh|center|centre|association|foundation|agency|ministry)\b/i.test(
+			normalized,
+		)
+	) {
+		return true
+	}
+	if (lower.endsWith(" university") || lower.endsWith(" institute")) return true
+	return false
+}
+
 function uniqueByBlockId<T extends { blockId: string }>(items: T[]) {
 	const seen = new Set<string>()
 	const result: T[] = []
@@ -746,6 +962,18 @@ function uniqueByBlockId<T extends { blockId: string }>(items: T[]) {
 		if (seen.has(item.blockId)) continue
 		seen.add(item.blockId)
 		result.push(item)
+	}
+	return result
+}
+
+function uniqueStrings(values: string[]) {
+	const seen = new Set<string>()
+	const result: string[] = []
+	for (const value of values) {
+		const trimmed = value.trim()
+		if (!trimmed || seen.has(trimmed)) continue
+		seen.add(trimmed)
+		result.push(trimmed)
 	}
 	return result
 }
@@ -849,11 +1077,7 @@ function levenshteinDistance(a: string, b: string) {
 		current[0] = i
 		for (let j = 1; j <= b.length; j += 1) {
 			const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1
-			current[j] = Math.min(
-				current[j - 1] + 1,
-				previous[j] + 1,
-				previous[j - 1] + substitutionCost,
-			)
+			current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + substitutionCost)
 		}
 		previous.splice(0, previous.length, ...current)
 	}

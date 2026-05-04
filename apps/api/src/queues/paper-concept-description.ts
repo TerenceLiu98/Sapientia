@@ -8,7 +8,7 @@ export interface PaperConceptDescriptionJobData {
 	userId: string
 	workspaceId: string
 	force?: boolean
-	reason?: "paper-compile" | "evidence-changed" | "semantic-dirty" | "manual"
+	reason?: "paper-compile" | "evidence-changed" | "semantic-dirty" | "manual" | "reader-note-concept"
 }
 
 export interface PaperConceptDescriptionJobResult {

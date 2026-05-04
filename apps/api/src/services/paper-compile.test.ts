@@ -122,12 +122,7 @@ describe("paper compile", () => {
 
 		const parsed = paperCompileResultSchema.parse({
 			summary: "A compact source page.",
-			references: [
-				"[Block #blk-1: paragraph]",
-				"[blk blk-2]",
-				"#blk-3",
-				"[blk-4]",
-			],
+			references: ["[Block #blk-1: paragraph]", "[blk blk-2]", "#blk-3", "[blk-4]"],
 			nodes: [
 				{
 					type: "technique",
@@ -179,8 +174,8 @@ describe("paper compile", () => {
 			"metric",
 			"dataset",
 			"concept",
-			"person",
-			"organization",
+			"concept",
+			"concept",
 			"task",
 		])
 		expect(parsed.concepts.map((concept) => concept.evidenceBlockIds[0])).toEqual([
@@ -195,8 +190,176 @@ describe("paper compile", () => {
 		])
 	})
 
+	it("drops generic, person-like, and organization-like concepts before persistence", async () => {
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
+
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [
+							{
+								id: "paper-1",
+								title: "A Paper",
+								authors: ["Ada Lovelace"],
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ workspaceId: "ws-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								paperId: "paper-1",
+								blockId: "blk-1",
+								blockIndex: 0,
+								type: "text",
+								text: "LateFusion improves long-context retrieval.",
+								headingLevel: null,
+							},
+							{
+								paperId: "paper-1",
+								blockId: "blk-2",
+								blockIndex: 1,
+								type: "text",
+								text: "Ada Lovelace and Analytical Engine Institute are metadata-like mentions.",
+								headingLevel: null,
+							},
+						],
+					}),
+				}),
+			})
+
+		getLlmCredentialMock.mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-test",
+			model: "claude-sonnet-4-6",
+			baseURL: null,
+		})
+		completeObjectMock.mockResolvedValueOnce({
+			object: {
+				summary:
+					"## Context\n\nThe paper targets long-context retrieval. [blk blk-1]\n\n## Method\n\nLateFusion is used. [blk blk-1]\n\n## Result\n\nThe result is grounded. [blk blk-1]\n\n## Critical\n\nNo critique. [blk blk-1]\n\n## Value\n\nReusable method. [blk blk-1]",
+				referenceBlockIds: ["blk-1"],
+				concepts: [
+					{
+						kind: "method",
+						canonicalName: "latefusion",
+						displayName: "LateFusion",
+						evidenceBlockIds: ["blk-1"],
+					},
+					{
+						kind: "method",
+						canonicalName: "model",
+						displayName: "Model",
+						evidenceBlockIds: ["blk-1"],
+					},
+					{
+						kind: "concept",
+						canonicalName: "ada lovelace",
+						displayName: "Ada Lovelace",
+						evidenceBlockIds: ["blk-2"],
+					},
+					{
+						kind: "concept",
+						canonicalName: "analytical engine institute",
+						displayName: "Analytical Engine Institute",
+						evidenceBlockIds: ["blk-2"],
+					},
+				],
+			},
+			model: "claude-sonnet-4-6",
+		})
+
+		transactionMock.mockImplementation(async (callback: (tx: any) => Promise<void>) =>
+			callback({
+				update: (table: unknown) => {
+					if (table === papers) {
+						return {
+							set: (_values: Record<string, unknown>) => ({
+								where: async () => undefined,
+							}),
+						}
+					}
+					throw new Error("unexpected table update in concept filtering test")
+				},
+				delete: txDeleteMock,
+				insert: (table: unknown) => {
+					if (table === wikiPages) {
+						return {
+							values: (values: Array<Record<string, unknown>> | Record<string, unknown>) => {
+								insertedRows.push({ table: "pages", values })
+								return { returning: async () => [{ id: "page-1" }] }
+							},
+						}
+					}
+					if (table === compiledLocalConcepts) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "concepts", values })
+								return {
+									returning: async () =>
+										values.map((value, index) => ({
+											id: `concept-${index + 1}`,
+											canonicalName: value.canonicalName,
+											kind: value.kind,
+										})),
+								}
+							},
+						}
+					}
+					if (table === compiledLocalConceptEvidence) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "evidence", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					if (table === wikiPageReferences) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "references", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					return {
+						values: async () => {
+							throw new Error("unexpected table insert in concept filtering test")
+						},
+					}
+				},
+			}),
+		)
+
+		const { compilePaper } = await import("./paper-compile")
+		const result = await compilePaper({ paperId: "paper-1", userId: "user-1" })
+
+		expect(result.conceptCount).toBe(1)
+		expect(insertedRows.find((row) => row.table === "concepts")?.values).toEqual([
+			expect.objectContaining({
+				kind: "method",
+				canonicalName: "latefusion",
+			}),
+		])
+	})
+
 	it("compiles summary, source page, and local concepts with grounded references", async () => {
-		const insertedRows: Array<{ table: "concepts" | "evidence" | "pages" | "references"; values: unknown }> = []
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
 
 		selectMock
 			.mockReturnValueOnce({
@@ -459,7 +622,10 @@ describe("paper compile", () => {
 	})
 
 	it("uses page-aware hierarchical compile for multi-page papers", async () => {
-		const insertedRows: Array<{ table: "concepts" | "evidence" | "pages" | "references"; values: unknown }> = []
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
 
 		selectMock
 			.mockReturnValueOnce({
@@ -560,7 +726,8 @@ describe("paper compile", () => {
 				expect(String(args.messages[0]?.content ?? "")).toContain("LateFusion")
 				return {
 					object: {
-						summary: "## Overview\n\nThe paper motivates long-context retrieval and later introduces LateFusion. [blk blk-p1] [blk blk-p3]",
+						summary:
+							"## Overview\n\nThe paper motivates long-context retrieval and later introduces LateFusion. [blk blk-p1] [blk blk-p3]",
 						referenceBlockIds: ["blk-p1", "blk-p3"],
 						concepts: [
 							{
@@ -666,6 +833,378 @@ describe("paper compile", () => {
 			expect.objectContaining({
 				kind: "method",
 				canonicalName: "latefusion",
+			}),
+		])
+	})
+
+	it("escapes reasoning control tokens in parsed blocks before prompting compatible LLMs", async () => {
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
+
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [
+							{
+								id: "paper-1",
+								title: "A Paper",
+								authors: ["Ada Lovelace"],
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ workspaceId: "ws-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								paperId: "paper-1",
+								blockId: "blk-1",
+								blockIndex: 0,
+								type: "text",
+								page: 1,
+								text: "The model chooses <think> or <short> as control tokens.",
+								headingLevel: null,
+							},
+						],
+					}),
+				}),
+			})
+
+		getLlmCredentialMock.mockResolvedValue({
+			provider: "openai",
+			apiKey: "sk-test",
+			model: "mimo-v2.5-pro",
+			baseURL: "https://example.test/v1",
+		})
+
+		completeObjectMock.mockImplementation(async (args: any) => {
+			const prompt = String(args.messages[0]?.content ?? "")
+			expect(prompt).not.toContain("<think>")
+			expect(prompt).not.toContain("<short>")
+			expect(prompt).toContain("〈think〉")
+			expect(prompt).toContain("〈short〉")
+			return {
+				object: {
+					summary:
+						"## Context\n\nThe paper studies reasoning mode selection. [blk blk-1]\n\n## Method\n\nIt uses control tokens. [blk blk-1]\n\n## Result\n\nThe result is grounded. [blk blk-1]\n\n## Critical\n\nNo critique. [blk blk-1]\n\n## Value\n\nUseful control-token setup. [blk blk-1]",
+					referenceBlockIds: ["blk-1"],
+					concepts: [
+						{
+							kind: "concept",
+							canonicalName: "reasoning mode selection",
+							displayName: "Reasoning Mode Selection",
+							evidenceBlockIds: ["blk-1"],
+						},
+					],
+				},
+				model: "mimo-v2.5-pro",
+			}
+		})
+
+		transactionMock.mockImplementation(async (callback: (tx: any) => Promise<void>) =>
+			callback({
+				update: (table: unknown) => {
+					if (table === papers) {
+						return {
+							set: (_values: Record<string, unknown>) => ({
+								where: async () => undefined,
+							}),
+						}
+					}
+					throw new Error("unexpected table update in control token escape test")
+				},
+				delete: txDeleteMock,
+				insert: (table: unknown) => {
+					if (table === wikiPages) {
+						return {
+							values: (values: Array<Record<string, unknown>> | Record<string, unknown>) => {
+								insertedRows.push({ table: "pages", values })
+								return { returning: async () => [{ id: "page-1" }] }
+							},
+						}
+					}
+					if (table === compiledLocalConcepts) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "concepts", values })
+								return {
+									returning: async () =>
+										values.map((value, index) => ({
+											id: `concept-${index + 1}`,
+											canonicalName: value.canonicalName,
+											kind: value.kind,
+										})),
+								}
+							},
+						}
+					}
+					if (table === compiledLocalConceptEvidence) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "evidence", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					if (table === wikiPageReferences) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "references", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					return {
+						values: async () => {
+							throw new Error("unexpected table insert in control token escape test")
+						},
+					}
+				},
+			}),
+		)
+
+		const { compilePaper } = await import("./paper-compile")
+		const result = await compilePaper({ paperId: "paper-1", userId: "user-1" })
+
+		expect(result.conceptCount).toBe(1)
+		expect(insertedRows.find((row) => row.table === "concepts")?.values).toEqual([
+			expect.objectContaining({
+				kind: "concept",
+				canonicalName: "reasoning mode selection",
+			}),
+		])
+	})
+
+	it("falls back to parsed block summaries when a single compile window returns invalid JSON", async () => {
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
+
+		selectMock
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						limit: async () => [
+							{
+								id: "paper-1",
+								title: "A Fragile Paper",
+								authors: ["Ada Lovelace"],
+							},
+						],
+					}),
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: async () => [{ workspaceId: "ws-1" }],
+				}),
+			})
+			.mockReturnValueOnce({
+				from: () => ({
+					where: () => ({
+						orderBy: async () => [
+							{
+								paperId: "paper-1",
+								blockId: "blk-p1",
+								blockIndex: 0,
+								type: "text",
+								page: 1,
+								text: "The motivation page describes a retrieval bottleneck.",
+								headingLevel: null,
+							},
+							{
+								paperId: "paper-1",
+								blockId: "blk-p2",
+								blockIndex: 1,
+								type: "text",
+								page: 2,
+								text: "The method page introduces WindowFusion for retrieval.",
+								headingLevel: null,
+							},
+							{
+								paperId: "paper-1",
+								blockId: "blk-p3",
+								blockIndex: 2,
+								type: "text",
+								page: 3,
+								text: "The result page reports Exact Match improvements.",
+								headingLevel: null,
+							},
+						],
+					}),
+				}),
+			})
+
+		getLlmCredentialMock.mockResolvedValue({
+			provider: "anthropic",
+			apiKey: "sk-test",
+			model: "claude-sonnet-4-6",
+			baseURL: null,
+		})
+
+		completeObjectMock.mockImplementation(async (args: any) => {
+			if (args.promptId === "paper-compile-window-v1") {
+				const prompt = String(args.messages[0]?.content ?? "")
+				if (prompt.includes('primaryBlockIds: ["blk-p1","blk-p2"]')) {
+					throw new Error(
+						"paper-compile-window-v1 did not return valid JSON: JSON Parse error: Unexpected EOF",
+					)
+				}
+				if (prompt.includes('primaryBlockIds: ["blk-p1"]')) {
+					throw new Error(
+						"paper-compile-window-v1 did not return valid JSON: JSON Parse error: Unexpected EOF",
+					)
+				}
+
+				const blockId = prompt.includes('primaryBlockIds: ["blk-p2"]') ? "blk-p2" : "blk-p3"
+				const concept =
+					blockId === "blk-p2"
+						? {
+								kind: "method",
+								canonicalName: "windowfusion",
+								displayName: "WindowFusion",
+								evidenceBlockIds: ["blk-p2"],
+							}
+						: {
+								kind: "metric",
+								canonicalName: "exact match",
+								displayName: "Exact Match",
+								evidenceBlockIds: ["blk-p3"],
+							}
+				return {
+					object: {
+						windowSummary: `Recovered structured window for ${blockId}. [blk ${blockId}]`,
+						referenceBlockIds: [blockId],
+						concepts: [concept],
+					},
+					model: "claude-sonnet-4-6",
+				}
+			}
+
+			if (args.promptId === "paper-compile-reduce-v1") {
+				const prompt = String(args.messages[0]?.content ?? "")
+				expect(prompt).toContain("Fallback window summary from parsed blocks")
+				expect(prompt).toContain("WindowFusion")
+				return {
+					object: {
+						summary:
+							"## Context\n\nThe paper targets a retrieval bottleneck. [blk blk-p1]\n\n## Method\n\nWindowFusion is used. [blk blk-p2]\n\n## Result\n\nExact Match improves. [blk blk-p3]",
+						referenceBlockIds: ["blk-p1", "blk-p2", "blk-p3"],
+						concepts: [
+							{
+								kind: "method",
+								canonicalName: "windowfusion",
+								displayName: "WindowFusion",
+								evidenceBlockIds: ["blk-p2"],
+							},
+							{
+								kind: "metric",
+								canonicalName: "exact match",
+								displayName: "Exact Match",
+								evidenceBlockIds: ["blk-p3"],
+							},
+						],
+					},
+					model: "claude-sonnet-4-6",
+				}
+			}
+
+			throw new Error(`unexpected prompt ${args.promptId}`)
+		})
+
+		transactionMock.mockImplementation(async (callback: (tx: any) => Promise<void>) =>
+			callback({
+				update: (table: unknown) => {
+					if (table === papers) {
+						return {
+							set: (_values: Record<string, unknown>) => ({
+								where: async () => undefined,
+							}),
+						}
+					}
+					throw new Error("unexpected table update in window fallback test")
+				},
+				delete: txDeleteMock,
+				insert: (table: unknown) => {
+					if (table === wikiPages) {
+						return {
+							values: (values: Array<Record<string, unknown>> | Record<string, unknown>) => {
+								insertedRows.push({ table: "pages", values })
+								return { returning: async () => [{ id: "page-1" }] }
+							},
+						}
+					}
+					if (table === compiledLocalConcepts) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "concepts", values })
+								return {
+									returning: async () =>
+										values.map((value, index) => ({
+											id: `concept-${index + 1}`,
+											canonicalName: value.canonicalName,
+											kind: value.kind,
+										})),
+								}
+							},
+						}
+					}
+					if (table === compiledLocalConceptEvidence) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "evidence", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					if (table === wikiPageReferences) {
+						return {
+							values: (values: Array<Record<string, unknown>>) => {
+								insertedRows.push({ table: "references", values })
+								return Promise.resolve()
+							},
+						}
+					}
+					return {
+						values: async () => {
+							throw new Error("unexpected table insert in window fallback test")
+						},
+					}
+				},
+			}),
+		)
+
+		const { compilePaper } = await import("./paper-compile")
+		const result = await compilePaper({ paperId: "paper-1", userId: "user-1" })
+
+		expect(result.conceptCount).toBe(2)
+		expect(result.compileStrategy).toBe("hierarchical")
+		expect(completeObjectMock.mock.calls.map(([args]) => (args as any).promptId)).toEqual([
+			"paper-compile-window-v1",
+			"paper-compile-window-v1",
+			"paper-compile-window-v1",
+			"paper-compile-window-v1",
+			"paper-compile-reduce-v1",
+		])
+		expect(insertedRows.find((row) => row.table === "concepts")?.values).toEqual([
+			expect.objectContaining({
+				kind: "method",
+				canonicalName: "windowfusion",
+			}),
+			expect.objectContaining({
+				kind: "metric",
+				canonicalName: "exact match",
 			}),
 		])
 	})
@@ -826,7 +1365,10 @@ describe("paper compile", () => {
 	})
 
 	it("applies hard caps to concept evidence and page references without capping concepts", async () => {
-		const insertedRows: Array<{ table: "concepts" | "evidence" | "pages" | "references"; values: unknown }> = []
+		const insertedRows: Array<{
+			table: "concepts" | "evidence" | "pages" | "references"
+			values: unknown
+		}> = []
 
 		const manyBlocks = Array.from({ length: 620 }, (_, index) => ({
 			paperId: "paper-1",

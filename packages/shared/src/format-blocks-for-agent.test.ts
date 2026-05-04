@@ -8,7 +8,7 @@ describe("formatBlocksForAgent", () => {
 				blocks: [{ blockId: "b1", type: "text", text: "Alpha paragraph." }],
 				highlights: [],
 			}),
-		).toBe("[Block #b1: text]\nAlpha paragraph.")
+		).toBe(["[Block #b1: text]", "```", "Alpha paragraph.", "```"].join("\n"))
 	})
 
 	it("annotates a single highlight with one USER MARKED line", () => {
@@ -21,7 +21,9 @@ describe("formatBlocksForAgent", () => {
 			[
 				"[Block #b1: text]",
 				'USER MARKED AS QUESTIONING: "Solid theory"',
+				"```",
 				"Solid theory of LLMs.",
+				"```",
 			].join("\n"),
 		)
 	})
@@ -54,7 +56,40 @@ describe("formatBlocksForAgent", () => {
 					{ blockId: "b1", color: "important", selectedText: "   " },
 				],
 			}),
-		).toBe(["[Block #b1: text]", 'USER MARKED AS IMPORTANT: "body"', "Some body"].join("\n"))
+		).toBe(
+			["[Block #b1: text]", 'USER MARKED AS IMPORTANT: "body"', "```", "Some body", "```"].join(
+				"\n",
+			),
+		)
+	})
+
+	it("wraps block text in a safe markdown fence and escapes control-token-like tags", () => {
+		expect(
+			formatBlocksForAgent({
+				blocks: [
+					{
+						blockId: "b1",
+						type: "text",
+						text: "Choose <think> or <short>.\n\n```json\n{\"x\": true}\n```",
+					},
+				],
+				highlights: [
+					{ blockId: "b1", color: "important", selectedText: "<assistant> cue" },
+				],
+			}),
+		).toBe(
+			[
+				"[Block #b1: text]",
+				'USER MARKED AS IMPORTANT: "〈assistant〉 cue"',
+				"````",
+				"Choose 〈think〉 or 〈short〉.",
+				"",
+				"```json",
+				'{"x": true}',
+				"```",
+				"````",
+			].join("\n"),
+		)
 	})
 
 	it("matches a stable snapshot for a real-world-ish fixture", () => {
@@ -88,21 +123,29 @@ describe("formatBlocksForAgent", () => {
 		expect(out).toMatchInlineSnapshot(`
 			"[Block #h1: H1 heading]
 			USER MARKED AS IMPORTANT: "Sapientia"
+			\`\`\`
 			Sapientia: A reading tool
+			\`\`\`
 
 			[Block #p1: text]
+			\`\`\`
 			Researchers want to read papers without an AI doing it for them.
+			\`\`\`
 
 			<focus>
 			[Block #p2: text]
 			USER MARKED AS QUESTIONING: "semantic intent"
 			USER MARKED AS ORIGINAL: "not just visual marks"
+			\`\`\`
 			Highlights record semantic intent, not just visual marks.
+			\`\`\`
 			</focus>
 
 			[Block #fig1: figure]
 			USER MARKED AS PENDING: "Figure 1: System overview"
-			Figure 1: System overview"
+			\`\`\`
+			Figure 1: System overview
+			\`\`\`"
 		`)
 	})
 
@@ -126,11 +169,15 @@ describe("formatBlocksForAgent", () => {
 				"[Block #b1: H2 heading]",
 				'USER MARKED AS IMPORTANT: "Heading"',
 				'USER MARKED AS QUESTIONING: "text"',
+				"```",
 				"Heading text",
+				"```",
 				"</focus>",
 				"",
 				"[Block #b2: text]",
+				"```",
 				"Body text",
+				"```",
 			].join("\n"),
 		)
 	})
