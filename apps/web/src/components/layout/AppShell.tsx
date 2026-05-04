@@ -66,7 +66,13 @@ export function useAppShellLayout() {
 // pages keep `overflow-hidden` and let an inner viewer scroll. Without
 // this, nested overflow-auto containers (PDF viewer, blocks panel) end
 // up scrolling the whole document instead of themselves.
-export function AppShell(props: { title: string; children: ReactNode }) {
+export function AppShell(props: {
+	title: string
+	children: ReactNode
+	chrome?: "workspace" | "minimal"
+}) {
+	const chrome = props.chrome ?? "workspace"
+	const isMinimalChrome = chrome === "minimal"
 	const [isLeftNavOpen, setIsLeftNavOpen] = useState(() => loadLeftNavVisible())
 	const [leftNavWidth, setLeftNavWidth] = useState(() => loadLeftNavWidth())
 	const [isResizingLeftNav, setIsResizingLeftNav] = useState(false)
@@ -177,6 +183,18 @@ export function AppShell(props: { title: string; children: ReactNode }) {
 		"--app-left-nav-width": `${Math.round(leftNavWidth)}px`,
 	} as CSSProperties
 
+	if (isMinimalChrome) {
+		return (
+			<AppShellLayoutContext.Provider value={layoutValue}>
+				<div className="fixed inset-0 overflow-hidden bg-bg-primary" style={shellStyle}>
+					<main className="h-dvh min-h-dvh min-w-0 overflow-hidden bg-bg-primary">
+						{props.children}
+					</main>
+				</div>
+			</AppShellLayoutContext.Provider>
+		)
+	}
+
 	return (
 		<AppShellLayoutContext.Provider value={layoutValue}>
 			<div
@@ -218,7 +236,7 @@ export function AppShell(props: { title: string; children: ReactNode }) {
 				) : null}
 
 				<main
-					className={`min-h-0 min-w-0 overflow-hidden bg-bg-primary lg:row-start-2 ${
+					className={`h-full min-h-0 min-w-0 overflow-hidden bg-bg-primary lg:row-start-2 ${
 						isLeftNavOpen ? "lg:col-start-2" : "lg:col-start-1"
 					}`}
 				>

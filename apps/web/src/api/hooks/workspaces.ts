@@ -9,14 +9,15 @@ export interface Workspace {
 	createdAt: string
 }
 
-export function useWorkspaces() {
+export function useWorkspaces(options?: { enabled?: boolean }) {
 	return useQuery<Workspace[]>({
 		queryKey: ["workspaces"],
 		queryFn: () => apiFetch<Workspace[]>("/api/v1/workspaces"),
+		enabled: options?.enabled ?? true,
 	})
 }
 
-export function useCurrentWorkspace() {
-	const { data, ...rest } = useWorkspaces()
+export function useCurrentWorkspace(options?: { enabled?: boolean }) {
+	const { data, ...rest } = useWorkspaces(options)
 	return { ...rest, data: data?.[0] }
 }
