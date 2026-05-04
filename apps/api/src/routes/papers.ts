@@ -38,6 +38,16 @@ const PatchPaperSchema = z.object({
 	doi: z.string().trim().max(200).nullable().optional(),
 	arxivId: z.string().trim().max(50).nullable().optional(),
 	venue: z.string().trim().max(200).nullable().optional(),
+	abstract: z.string().trim().max(10_000).nullable().optional(),
+	pages: z.string().trim().max(100).nullable().optional(),
+	volume: z.string().trim().max(100).nullable().optional(),
+	issue: z.string().trim().max(100).nullable().optional(),
+	publisher: z.string().trim().max(300).nullable().optional(),
+	publicationType: z
+		.enum(["journal", "conference", "preprint", "book", "chapter", "other"])
+		.nullable()
+		.optional(),
+	url: z.string().trim().max(1_000).nullable().optional(),
 })
 
 const RefetchMetadataSchema = z.object({

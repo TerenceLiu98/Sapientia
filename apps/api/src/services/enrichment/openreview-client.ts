@@ -68,6 +68,15 @@ export async function searchByTitle(title: string): Promise<EnrichedMetadata | n
 		venue,
 		abstract: best.note.content.abstract?.value ?? null,
 		citationCount: null,
+		pages: null,
+		volume: null,
+		issue: null,
+		publisher: null,
+		publicationType: venue && !/openreview|corr|arxiv/i.test(venue) ? "conference" : "preprint",
+		url: `https://openreview.net/forum?id=${best.note.id}`,
+		matchConfidence: best.score,
+		matchKind: "fuzzy",
+		queryKind: "title",
 		source: "openreview",
 	}
 }

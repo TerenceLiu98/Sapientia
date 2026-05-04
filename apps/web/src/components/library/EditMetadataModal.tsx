@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react"
-import type { FetchPaperMetadataInput, Paper, UpdatePaperInput } from "@/api/hooks/papers"
+import type {
+	FetchPaperMetadataInput,
+	Paper,
+	PaperMetadataCandidate,
+	PaperPublicationType,
+	UpdatePaperInput,
+} from "@/api/hooks/papers"
 
 function parseAuthors(value: string) {
 	return value
@@ -40,6 +46,13 @@ export function EditMetadataModal({
 	const [doi, setDoi] = useState("")
 	const [arxivId, setArxivId] = useState("")
 	const [venue, setVenue] = useState("")
+	const [publicationType, setPublicationType] = useState<PaperPublicationType | "">("")
+	const [pages, setPages] = useState("")
+	const [volume, setVolume] = useState("")
+	const [issue, setIssue] = useState("")
+	const [publisher, setPublisher] = useState("")
+	const [url, setUrl] = useState("")
+	const [abstractText, setAbstractText] = useState("")
 	const paperId = paper?.id ?? null
 
 	useEffect(() => {
@@ -50,6 +63,13 @@ export function EditMetadataModal({
 		setDoi(paper.doi ?? "")
 		setArxivId(paper.arxivId ?? "")
 		setVenue(paper.venue ?? "")
+		setPublicationType(paper.publicationType ?? "")
+		setPages(paper.pages ?? "")
+		setVolume(paper.volume ?? "")
+		setIssue(paper.issue ?? "")
+		setPublisher(paper.publisher ?? "")
+		setUrl(paper.url ?? "")
+		setAbstractText(paper.abstract ?? "")
 	}, [open, paperId])
 
 	if (!open || !paper) return null
@@ -92,6 +112,41 @@ export function EditMetadataModal({
 			patch.venue = normalizedVenue.length > 0 ? normalizedVenue : null
 		}
 
+		const currentPublicationType = paper.publicationType ?? ""
+		if (publicationType !== currentPublicationType) {
+			patch.publicationType = publicationType || null
+		}
+
+		const normalizedPages = pages.trim()
+		if (normalizedPages !== (paper.pages ?? "")) {
+			patch.pages = normalizedPages.length > 0 ? normalizedPages : null
+		}
+
+		const normalizedVolume = volume.trim()
+		if (normalizedVolume !== (paper.volume ?? "")) {
+			patch.volume = normalizedVolume.length > 0 ? normalizedVolume : null
+		}
+
+		const normalizedIssue = issue.trim()
+		if (normalizedIssue !== (paper.issue ?? "")) {
+			patch.issue = normalizedIssue.length > 0 ? normalizedIssue : null
+		}
+
+		const normalizedPublisher = publisher.trim()
+		if (normalizedPublisher !== (paper.publisher ?? "")) {
+			patch.publisher = normalizedPublisher.length > 0 ? normalizedPublisher : null
+		}
+
+		const normalizedUrl = url.trim()
+		if (normalizedUrl !== (paper.url ?? "")) {
+			patch.url = normalizedUrl.length > 0 ? normalizedUrl : null
+		}
+
+		const normalizedAbstract = abstractText.trim()
+		if (normalizedAbstract !== (paper.abstract ?? "")) {
+			patch.abstract = normalizedAbstract.length > 0 ? normalizedAbstract : null
+		}
+
 		if (Object.keys(patch).length === 0) {
 			onClose()
 			return
@@ -108,13 +163,33 @@ export function EditMetadataModal({
 		})
 	}
 
+	const applyCandidate = (candidate: PaperMetadataCandidate) => {
+		const metadata = candidate.metadata
+		const protectedFields = paper.metadataEditedByUser ?? {}
+		if (!protectedFields.title && metadata.title) setTitle(metadata.title)
+		if (!protectedFields.authors && metadata.authors?.length) setAuthors(metadata.authors.join("\n"))
+		if (!protectedFields.year && metadata.year) setYear(String(metadata.year))
+		if (!protectedFields.doi && metadata.doi) setDoi(metadata.doi)
+		if (!protectedFields.arxivId && metadata.arxivId) setArxivId(metadata.arxivId)
+		if (!protectedFields.venue && metadata.venue) setVenue(metadata.venue)
+		if (!protectedFields.publicationType && metadata.publicationType) {
+			setPublicationType(metadata.publicationType)
+		}
+		if (!protectedFields.pages && metadata.pages) setPages(metadata.pages)
+		if (!protectedFields.volume && metadata.volume) setVolume(metadata.volume)
+		if (!protectedFields.issue && metadata.issue) setIssue(metadata.issue)
+		if (!protectedFields.publisher && metadata.publisher) setPublisher(metadata.publisher)
+		if (!protectedFields.url && metadata.url) setUrl(metadata.url)
+		if (!protectedFields.abstract && metadata.abstract) setAbstractText(metadata.abstract)
+	}
+
 	return (
 		<div
 			aria-modal="true"
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-8"
 			role="dialog"
 		>
-			<div className="w-full max-w-2xl rounded-2xl border border-border-default bg-bg-primary shadow-[var(--shadow-popover)]">
+			<div className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-border-default bg-bg-primary shadow-[var(--shadow-popover)]">
 				<div className="border-b border-border-subtle px-6 py-4">
 					<h2 className="font-serif text-2xl text-text-primary">Edit metadata</h2>
 					<p className="mt-1 text-sm text-text-secondary">
@@ -122,7 +197,8 @@ export function EditMetadataModal({
 					</p>
 				</div>
 
-				<div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+				<div className="max-h-[66vh] overflow-y-auto px-6 py-5">
+				<div className="grid gap-4 sm:grid-cols-2">
 					<label className="sm:col-span-2">
 						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
 							Title
@@ -192,6 +268,137 @@ export function EditMetadataModal({
 							value={arxivId}
 						/>
 					</label>
+
+					<label>
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Type
+						</span>
+						<select
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) =>
+								setPublicationType(event.target.value as PaperPublicationType | "")
+							}
+							value={publicationType}
+						>
+							<option value="">Unknown</option>
+							<option value="conference">Conference</option>
+							<option value="journal">Journal</option>
+							<option value="preprint">Preprint</option>
+							<option value="book">Book</option>
+							<option value="chapter">Chapter</option>
+							<option value="other">Other</option>
+						</select>
+					</label>
+
+					<label>
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Pages
+						</span>
+						<input
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setPages(event.target.value)}
+							value={pages}
+						/>
+					</label>
+
+					<label>
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Volume
+						</span>
+						<input
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setVolume(event.target.value)}
+							value={volume}
+						/>
+					</label>
+
+					<label>
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Issue
+						</span>
+						<input
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setIssue(event.target.value)}
+							value={issue}
+						/>
+					</label>
+
+					<label className="sm:col-span-2">
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Publisher
+						</span>
+						<input
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setPublisher(event.target.value)}
+							value={publisher}
+						/>
+					</label>
+
+					<label className="sm:col-span-2">
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							URL
+						</span>
+						<input
+							className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setUrl(event.target.value)}
+							value={url}
+						/>
+					</label>
+
+					<label className="sm:col-span-2">
+						<span className="mb-1 block text-xs uppercase tracking-[0.18em] text-text-secondary">
+							Abstract
+						</span>
+						<textarea
+							className="min-h-32 w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-500"
+							onChange={(event) => setAbstractText(event.target.value)}
+							value={abstractText}
+						/>
+					</label>
+				</div>
+
+				{(paper.metadataCandidates ?? []).length > 0 ? (
+					<section className="mt-6 border-t border-border-subtle pt-5">
+						<div className="mb-3 flex items-center justify-between gap-3">
+							<h3 className="text-sm font-semibold text-text-primary">Review metadata</h3>
+							<span className="text-xs text-text-secondary">
+								Title matches need your confirmation before they replace fields.
+							</span>
+						</div>
+						<div className="grid gap-3">
+							{(paper.metadataCandidates ?? []).map((candidate) => (
+								<div
+									className="rounded-lg border border-border-subtle bg-surface-subtle px-4 py-3"
+									key={candidate.id}
+								>
+									<div className="flex flex-wrap items-start justify-between gap-3">
+										<div>
+											<p className="text-sm font-medium text-text-primary">
+												{candidate.metadata.title ?? "Untitled candidate"}
+											</p>
+											<p className="mt-1 text-xs text-text-secondary">
+												{candidate.metadata.authors?.slice(0, 4).join(", ") || "Unknown authors"}
+												{candidate.metadata.year ? ` · ${candidate.metadata.year}` : ""}
+												{candidate.metadata.venue ? ` · ${candidate.metadata.venue}` : ""}
+											</p>
+											<p className="mt-1 text-xs text-text-secondary">
+												{candidate.source.replace("_", " ")} ·{" "}
+												{Math.round(candidate.confidence * 100)}% confidence
+											</p>
+										</div>
+										<button
+											className="rounded-lg border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover"
+											onClick={() => applyCandidate(candidate)}
+											type="button"
+										>
+											Apply candidate
+										</button>
+									</div>
+								</div>
+							))}
+						</div>
+					</section>
+				) : null}
 				</div>
 
 				<div className="border-t border-border-subtle px-6 py-4">
@@ -207,21 +414,21 @@ export function EditMetadataModal({
 							{isFetchingMetadata ? "Fetching..." : "Fetch metadata"}
 						</button>
 						<div className="flex flex-wrap justify-end gap-3">
-						<button
-							className="rounded-lg border border-border-default px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
-							onClick={onClose}
-							type="button"
-						>
-							Cancel
-						</button>
-						<button
-							className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
-							disabled={isSaving || isFetchingMetadata}
-							onClick={handleSave}
-							type="button"
-						>
-							{isSaving ? "Saving..." : "Save metadata"}
-						</button>
+							<button
+								className="rounded-lg border border-border-default px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover"
+								onClick={onClose}
+								type="button"
+							>
+								Cancel
+							</button>
+							<button
+								className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
+								disabled={isSaving || isFetchingMetadata}
+								onClick={handleSave}
+								type="button"
+							>
+								{isSaving ? "Saving..." : "Save metadata"}
+							</button>
 						</div>
 					</div>
 				</div>

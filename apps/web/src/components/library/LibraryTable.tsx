@@ -8,7 +8,6 @@ import {
 import { useMemo, useState } from "react"
 import {
 	type Paper,
-	type PaperEnrichmentStatus,
 	useDeletePaper,
 	useDownloadPaperPdf,
 	useExportPaperBibtex,
@@ -35,9 +34,16 @@ const STATUS_STYLES: Record<Paper["parseStatus"], string> = {
 	failed: "bg-[var(--color-status-error-bg)] text-[var(--color-status-error-text)]",
 }
 
-function EnrichmentBadge({ status }: { status: PaperEnrichmentStatus }) {
+function EnrichmentBadge({ paper }: { paper: Paper }) {
+	const { status, candidates } = {
+		status: paper.enrichmentStatus,
+		candidates: paper.metadataCandidates ?? [],
+	}
+	if (candidates.length > 0) {
+		return <span className="text-xs text-text-secondary">review metadata</span>
+	}
 	if (status === "pending" || status === "enriching") {
-		return <span className="text-xs text-text-tertiary">enriching...</span>
+		return <span className="text-xs text-text-tertiary">fetching metadata...</span>
 	}
 	if (status === "partial") {
 		return <span className="text-xs text-text-secondary">partial metadata</span>
@@ -272,7 +278,7 @@ function makeColumns(workspaceId: string, onEditMetadata: (paperId: string) => v
 							>
 								{paperTitleLabel(paper)}
 							</Link>
-							<EnrichmentBadge status={paper.enrichmentStatus} />
+							<EnrichmentBadge paper={paper} />
 						</div>
 						<div className="mt-1 flex flex-wrap gap-x-2 text-xs text-text-tertiary">
 							{paper.venue ? <span>{paper.venue}</span> : null}

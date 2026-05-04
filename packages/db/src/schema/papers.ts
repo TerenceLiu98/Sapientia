@@ -29,6 +29,14 @@ export const papers = pgTable(
 		authors: jsonb("authors").$type<string[]>(),
 		year: integer("year"),
 		venue: text("venue"),
+		abstract: text("abstract"),
+		citationCount: integer("citation_count"),
+		pages: text("pages"),
+		volume: text("volume"),
+		issue: text("issue"),
+		publisher: text("publisher"),
+		publicationType: text("publication_type"),
+		url: text("url"),
 		displayFilename: text("display_filename").notNull().default(""),
 		fileSizeBytes: bigint("file_size_bytes", { mode: "number" }).notNull(),
 		pdfObjectKey: text("pdf_object_key").notNull(),
@@ -62,7 +70,43 @@ export const papers = pgTable(
 				doi?: boolean
 				arxivId?: boolean
 				venue?: boolean
+				abstract?: boolean
+				pages?: boolean
+				volume?: boolean
+				issue?: boolean
+				publisher?: boolean
+				publicationType?: boolean
+				url?: boolean
 			}>()
+			.notNull()
+			.default({}),
+		metadataCandidates: jsonb("metadata_candidates")
+			.$type<
+				Array<{
+					id: string
+					source: string
+					queryKind: string
+					matchKind: string
+					confidence: number
+					metadata: unknown
+					createdAt: string
+				}>
+			>()
+			.notNull()
+			.default([]),
+		metadataProvenance: jsonb("metadata_provenance")
+			.$type<
+				Record<
+					string,
+					{
+						source: string
+						queryKind: string
+						matchKind: string
+						confidence: number
+						updatedAt: string
+					}
+				>
+			>()
 			.notNull()
 			.default({}),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

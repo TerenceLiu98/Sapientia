@@ -17,6 +17,8 @@ const DblpInfoSchema = z.object({
 	year: z.union([z.string(), z.number()]).optional(),
 	doi: z.string().optional(),
 	ee: z.string().optional(),
+	pages: z.string().optional(),
+	type: z.string().optional(),
 	authors: z
 		.object({
 			author: z.union([DblpAuthorSchema, z.array(DblpAuthorSchema)]).optional(),
@@ -80,6 +82,15 @@ export async function searchByTitle(title: string): Promise<EnrichedMetadata | n
 		venue: info.venue ?? null,
 		abstract: null,
 		citationCount: null,
+		pages: info.pages ?? null,
+		volume: null,
+		issue: null,
+		publisher: null,
+		publicationType: inferPublicationType(info.type, info.venue),
+		url: info.ee ?? null,
+		matchConfidence: best.score,
+		matchKind: "fuzzy",
+		queryKind: "title",
 		source: "dblp",
 	}
 }
@@ -109,4 +120,15 @@ function normalizeDoi(doi: string | undefined, ee: string | undefined): string |
 	if (!ee) return null
 	const match = ee.match(/^https?:\/\/(?:dx\.)?doi\.org\/(.+)$/i)
 	return match?.[1] ? decodeURIComponent(match[1]) : null
+}
+
+function inferPublicationType(
+	type: string | undefined,
+	venue: string | undefined,
+): EnrichedMetadata["publicationType"] {
+	if (/journal/i.test(type ?? "")) return "journal"
+	if (/conf|conference|proceedings|workshop|symposium/i.test(`${type ?? ""} ${venue ?? ""}`)) {
+		return "conference"
+	}
+	return venue ? "conference" : null
 }

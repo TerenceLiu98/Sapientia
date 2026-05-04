@@ -10,6 +10,37 @@ export type PaperEnrichmentStatus =
 	| "failed"
 	| "skipped"
 export type PaperSummaryStatus = "pending" | "running" | "done" | "failed" | "no-credentials"
+export type PaperPublicationType =
+	| "journal"
+	| "conference"
+	| "preprint"
+	| "book"
+	| "chapter"
+	| "other"
+
+export interface PaperMetadataCandidate {
+	id: string
+	source: string
+	queryKind: string
+	matchKind: string
+	confidence: number
+	metadata: Partial<{
+		title: string | null
+		authors: string[]
+		year: number | null
+		doi: string | null
+		arxivId: string | null
+		venue: string | null
+		abstract: string | null
+		pages: string | null
+		volume: string | null
+		issue: string | null
+		publisher: string | null
+		publicationType: PaperPublicationType | null
+		url: string | null
+	}>
+	createdAt: string
+}
 
 export interface Paper {
 	id: string
@@ -19,6 +50,14 @@ export interface Paper {
 	doi: string | null
 	arxivId: string | null
 	venue: string | null
+	abstract: string | null
+	citationCount: number | null
+	pages: string | null
+	volume: string | null
+	issue: string | null
+	publisher: string | null
+	publicationType: PaperPublicationType | null
+	url: string | null
 	displayFilename: string
 	fileSizeBytes: number
 	parseStatus: PaperParseStatus
@@ -30,8 +69,25 @@ export interface Paper {
 	summaryError: string | null
 	enrichmentStatus: PaperEnrichmentStatus
 	enrichmentSource: string | null
+	metadataCandidates: PaperMetadataCandidate[]
+	metadataProvenance: Record<string, unknown>
 	metadataEditedByUser: Partial<
-		Record<"title" | "authors" | "year" | "doi" | "arxivId" | "venue", true>
+		Record<
+			| "title"
+			| "authors"
+			| "year"
+			| "doi"
+			| "arxivId"
+			| "venue"
+			| "abstract"
+			| "pages"
+			| "volume"
+			| "issue"
+			| "publisher"
+			| "publicationType"
+			| "url",
+			true
+		>
 	>
 	createdAt: string
 	updatedAt: string
@@ -50,6 +106,13 @@ export interface UpdatePaperInput {
 	doi?: string | null
 	arxivId?: string | null
 	venue?: string | null
+	abstract?: string | null
+	pages?: string | null
+	volume?: string | null
+	issue?: string | null
+	publisher?: string | null
+	publicationType?: PaperPublicationType | null
+	url?: string | null
 }
 
 export interface FetchPaperMetadataInput {

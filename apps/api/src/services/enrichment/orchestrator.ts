@@ -6,13 +6,38 @@ import type {
 	EnrichmentOptions,
 	EnrichmentQuery,
 	EnrichmentSource,
+	MetadataCandidate,
+	MetadataField,
+	MetadataProvenance,
 } from "./types"
 
 export interface EnrichmentResult {
 	metadata: Partial<EnrichedMetadata> | null
+	candidates: MetadataCandidate[]
+	provenance: MetadataProvenance
 	sources: string[]
 	status: "enriched" | "partial" | "failed" | "skipped"
 }
+
+const AUTO_FUZZY_THRESHOLD = 0.86
+const CANDIDATE_FUZZY_THRESHOLD = 0.72
+
+const metadataFields = [
+	"title",
+	"authors",
+	"year",
+	"doi",
+	"arxivId",
+	"venue",
+	"abstract",
+	"citationCount",
+	"pages",
+	"volume",
+	"issue",
+	"publisher",
+	"publicationType",
+	"url",
+] as const satisfies readonly MetadataField[]
 
 export async function enrich(
 	ids: ExtractedIdentifiers,
@@ -51,33 +76,169 @@ export async function enrich(
 	}
 
 	if (results.length === 0) {
-		return { metadata: null, sources: [], status: "failed" }
+		return { metadata: null, candidates: [], provenance: {}, sources: [], status: "failed" }
 	}
 
-	const merged = mergeResults(results)
+	const followUpResults = await fetchDoiFollowUp(ids, results, options)
+	results.push(...followUpResults)
+
+	const candidates = buildCandidates(results)
+	const mergeableResults = results.filter(isAutoMergeable)
+	const { metadata: merged, provenance } = mergeResults(mergeableResults)
 	const isFull = Boolean(merged.title && merged.authors?.length && merged.year)
+	const hasAnyMetadata = metadataFields.some((field) => hasValue(merged[field]))
 	return {
-		metadata: merged,
+		metadata: hasAnyMetadata ? merged : null,
+		candidates,
+		provenance,
 		sources: uniqueSources(results),
-		status: isFull ? "enriched" : "partial",
+		status: isFull ? "enriched" : hasAnyMetadata || candidates.length > 0 ? "partial" : "failed",
 	}
 }
 
-function mergeResults(results: EnrichedMetadata[]): Partial<EnrichedMetadata> {
+async function fetchDoiFollowUp(
+	ids: ExtractedIdentifiers,
+	results: EnrichedMetadata[],
+	options: EnrichmentOptions,
+): Promise<EnrichedMetadata[]> {
+	if (ids.doi || results.some((result) => result.source === "crossref")) return []
+	const doi = results.find((result) => result.doi)?.doi
+	if (!doi) return []
+
+	const crossref = metadataScrapers.find((scraper) => scraper.source === "crossref")
+	if (!crossref) return []
+
+	try {
+		const result = await crossref.fetch({ kind: "doi", value: doi }, options)
+		return result ? [result] : []
+	} catch (error) {
+		logger.warn(
+			{ source: "crossref", queryKind: "doi", err: error instanceof Error ? error.message : String(error) },
+			"scraper_follow_up_error",
+		)
+		return []
+	}
+}
+
+function mergeResults(results: EnrichedMetadata[]): {
+	metadata: Partial<EnrichedMetadata>
+	provenance: MetadataProvenance
+} {
 	const merged: Partial<EnrichedMetadata> = {}
+	const provenance: MetadataProvenance = {}
+	const bestScores = new Map<MetadataField, number>()
+
 	for (const result of results) {
-		if (!merged.title && result.title) merged.title = result.title
-		if (!merged.authors?.length && result.authors.length > 0) merged.authors = result.authors
-		if (!merged.year && result.year) merged.year = result.year
-		if (!merged.doi && result.doi) merged.doi = result.doi
-		if (!merged.arxivId && result.arxivId) merged.arxivId = result.arxivId
-		if (!merged.venue && result.venue) merged.venue = result.venue
-		if (!merged.abstract && result.abstract) merged.abstract = result.abstract
-		if (merged.citationCount == null && result.citationCount != null) {
-			merged.citationCount = result.citationCount
+		for (const field of metadataFields) {
+			const value = result[field]
+			if (!hasValue(value)) continue
+			const score = fieldPriority(field, result) + result.matchConfidence
+			if (score <= (bestScores.get(field) ?? Number.NEGATIVE_INFINITY)) continue
+			bestScores.set(field, score)
+			;(merged as Record<MetadataField, unknown>)[field] = value
+			provenance[field] = {
+				source: result.source,
+				queryKind: result.queryKind,
+				matchKind: result.matchKind,
+				confidence: result.matchConfidence,
+				updatedAt: new Date().toISOString(),
+			}
 		}
 	}
-	return merged
+
+	return { metadata: merged, provenance }
+}
+
+function isAutoMergeable(result: EnrichedMetadata): boolean {
+	if (result.matchKind === "precise") return true
+	return result.matchConfidence >= AUTO_FUZZY_THRESHOLD
+}
+
+function buildCandidates(results: EnrichedMetadata[]): MetadataCandidate[] {
+	return results
+		.filter((result) => result.matchKind === "fuzzy")
+		.filter((result) => result.matchConfidence >= CANDIDATE_FUZZY_THRESHOLD)
+		.filter((result) => result.matchConfidence < AUTO_FUZZY_THRESHOLD)
+		.map((result) => ({
+			id: candidateId(result),
+			source: result.source,
+			queryKind: result.queryKind,
+			matchKind: result.matchKind,
+			confidence: result.matchConfidence,
+			metadata: result,
+			createdAt: new Date().toISOString(),
+		}))
+}
+
+function fieldPriority(field: MetadataField, result: EnrichedMetadata): number {
+	const preciseBonus = result.matchKind === "precise" ? 10 : 0
+	if (["title", "authors", "year", "doi", "arxivId"].includes(field)) {
+		return sourcePriority(result.source, {
+			semantic_scholar: 100,
+			crossref: 95,
+			arxiv: 80,
+			dblp: 75,
+			openreview: 65,
+		}) + preciseBonus
+	}
+
+	if (["venue", "pages", "volume", "issue", "publisher", "publicationType"].includes(field)) {
+		return sourcePriority(result.source, {
+			crossref: 100,
+			dblp: 90,
+			semantic_scholar: 70,
+			openreview: 60,
+			arxiv: 50,
+		}) + preciseBonus
+	}
+
+	if (["abstract", "citationCount"].includes(field)) {
+		return sourcePriority(result.source, {
+			semantic_scholar: 100,
+			arxiv: 80,
+			openreview: 70,
+			crossref: 60,
+			dblp: 10,
+		}) + preciseBonus
+	}
+
+	return sourcePriority(result.source, {
+		semantic_scholar: 90,
+		crossref: 80,
+		arxiv: 70,
+		dblp: 60,
+		openreview: 50,
+	}) + preciseBonus
+}
+
+function sourcePriority(
+	source: EnrichmentSource,
+	priorities: Partial<Record<EnrichmentSource, number>>,
+): number {
+	return priorities[source] ?? 0
+}
+
+function hasValue(value: unknown): boolean {
+	if (value == null) return false
+	if (Array.isArray(value)) return value.length > 0
+	if (typeof value === "string") return value.trim().length > 0
+	return true
+}
+
+function candidateId(result: EnrichedMetadata): string {
+	const seed = [
+		result.source,
+		result.queryKind,
+		result.matchConfidence.toFixed(3),
+		result.doi ?? "",
+		result.arxivId ?? "",
+		result.title ?? "",
+	].join(":")
+	let hash = 0
+	for (let index = 0; index < seed.length; index += 1) {
+		hash = (hash * 31 + seed.charCodeAt(index)) >>> 0
+	}
+	return `${result.source}-${hash.toString(36)}`
 }
 
 function uniqueSources(results: EnrichedMetadata[]): EnrichmentSource[] {

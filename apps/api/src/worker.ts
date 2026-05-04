@@ -7,17 +7,20 @@ import { createPaperConceptDescriptionWorker } from "./workers/paper-concept-des
 import { createPaperConceptRefineWorker } from "./workers/paper-concept-refine.worker"
 import { createPaperEnrichWorker } from "./workers/paper-enrich.worker"
 import { createPaperInnerGraphCompileWorker } from "./workers/paper-inner-graph-compile.worker"
+import { createPaperMetadataRetryWorker } from "./workers/paper-metadata-retry.worker"
 import { createPaperParseWorker } from "./workers/paper-parse.worker"
 import { createPaperSummarizeWorker } from "./workers/paper-summarize.worker"
 import { createWorkspaceSemanticRefreshWorker } from "./workers/workspace-semantic-refresh.worker"
 import { scheduleNoteConceptHeartbeat } from "./queues/note-concept-heartbeat"
 import { createNoteConceptExtractWorker } from "./workers/note-concept-extract.worker"
 import { createNoteConceptHeartbeatWorker } from "./workers/note-concept-heartbeat.worker"
+import { schedulePaperMetadataRetry } from "./queues/paper-metadata-retry"
 
 logger.info({ env: config.NODE_ENV }, "worker_starting")
 
 const paperParseWorker = createPaperParseWorker()
 const paperEnrichWorker = createPaperEnrichWorker()
+const paperMetadataRetryWorker = createPaperMetadataRetryWorker()
 const paperConceptRefineWorker = createPaperConceptRefineWorker()
 const paperConceptDescriptionWorker = createPaperConceptDescriptionWorker()
 const paperInnerGraphCompileWorker = createPaperInnerGraphCompileWorker()
@@ -26,6 +29,7 @@ const workspaceSemanticRefreshWorker = createWorkspaceSemanticRefreshWorker()
 const noteConceptExtractWorker = createNoteConceptExtractWorker()
 const noteConceptHeartbeatWorker = createNoteConceptHeartbeatWorker()
 await scheduleNoteConceptHeartbeat()
+await schedulePaperMetadataRetry()
 
 // Tiny worker for /health/queue-roundtrip diagnostic pings.
 const healthcheckWorker = new Worker(
@@ -42,6 +46,7 @@ const shutdown = async (signal: string) => {
 	logger.info({ signal }, "worker_shutdown_initiated")
 	await paperParseWorker.close()
 	await paperEnrichWorker.close()
+	await paperMetadataRetryWorker.close()
 	await paperConceptRefineWorker.close()
 	await paperConceptDescriptionWorker.close()
 	await paperInnerGraphCompileWorker.close()

@@ -25,6 +25,11 @@ const CrossrefMessageSchema = z.object({
 	"container-title": z.array(z.string()).optional(),
 	publisher: z.string().optional(),
 	abstract: z.string().optional(),
+	page: z.string().optional(),
+	volume: z.string().optional(),
+	issue: z.string().optional(),
+	type: z.string().optional(),
+	URL: z.string().optional(),
 })
 
 const CrossrefResponseSchema = z.object({
@@ -71,6 +76,25 @@ export async function lookupByDoi(doi: string): Promise<EnrichedMetadata> {
 		venue: message["container-title"]?.[0] ?? message.publisher ?? null,
 		abstract: message.abstract ?? null,
 		citationCount: null,
+		pages: message.page ?? null,
+		volume: message.volume ?? null,
+		issue: message.issue ?? null,
+		publisher: message.publisher ?? null,
+		publicationType: crossrefPublicationType(message.type),
+		url: message.URL ?? null,
+		matchConfidence: 1,
+		matchKind: "precise",
+		queryKind: "doi",
 		source: "crossref",
 	}
+}
+
+function crossrefPublicationType(type: string | undefined): EnrichedMetadata["publicationType"] {
+	if (!type) return null
+	if (/journal/i.test(type)) return "journal"
+	if (/proceedings|conference/i.test(type)) return "conference"
+	if (/book-chapter|chapter/i.test(type)) return "chapter"
+	if (/book/i.test(type)) return "book"
+	if (/posted-content|preprint/i.test(type)) return "preprint"
+	return "other"
 }

@@ -48,6 +48,15 @@ export async function lookupByArxivId(arxivId: string): Promise<EnrichedMetadata
 		venue: journalRef || "arXiv",
 		abstract: summary || null,
 		citationCount: null,
+		pages: null,
+		volume: null,
+		issue: null,
+		publisher: null,
+		publicationType: journalRef ? "journal" : "preprint",
+		url: `https://arxiv.org/abs/${arxivId}`,
+		matchConfidence: 1,
+		matchKind: "precise",
+		queryKind: "arxiv_id",
 		source: "arxiv",
 	}
 }

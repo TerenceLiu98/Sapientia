@@ -20,6 +20,16 @@ describe("paper-metadata", () => {
 				doi: null,
 				arxivId: null,
 				venue: null,
+				abstract: null,
+				citationCount: null,
+				pages: null,
+				volume: null,
+				issue: null,
+				publisher: null,
+				publicationType: null,
+				url: null,
+				metadataCandidates: [],
+				metadataProvenance: {},
 				metadataEditedByUser: { title: true, authors: true },
 			},
 			{
@@ -30,9 +40,27 @@ describe("paper-metadata", () => {
 					doi: "10.1/x",
 					arxivId: "2401.00001",
 					venue: "ICLR",
+					abstract: "API abstract",
+					citationCount: 12,
+					pages: "1-10",
+					volume: "1",
+					issue: "2",
+					publisher: "Publisher",
+					publicationType: "conference",
+					url: "https://example.com",
 				},
 				status: "enriched",
 				sources: ["crossref"],
+				candidates: [],
+				provenance: {
+					pages: {
+						source: "crossref",
+						queryKind: "doi",
+						matchKind: "precise",
+						confidence: 1,
+						updatedAt: "2026-05-04T00:00:00.000Z",
+					},
+				},
 			},
 		)
 
@@ -41,5 +69,7 @@ describe("paper-metadata", () => {
 		expect(update.year).toBe(2024)
 		expect(update.doi).toBe("10.1/x")
 		expect(update.venue).toBe("ICLR")
+		expect(update.pages).toBe("1-10")
+		expect(update.metadataProvenance).toHaveProperty("pages")
 	})
 })

@@ -225,6 +225,13 @@
       "when": 1777890000000,
       "tag": "0032_semantic_scholar_api_key",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1777890600000,
+      "tag": "0033_rich_paper_metadata",
+      "breakpoints": true
     }
   ]
 }

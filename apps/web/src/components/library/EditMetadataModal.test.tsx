@@ -13,6 +13,14 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
 		doi: null,
 		arxivId: null,
 		venue: "ICLR",
+		abstract: null,
+		citationCount: null,
+		pages: null,
+		volume: null,
+		issue: null,
+		publisher: null,
+		publicationType: null,
+		url: null,
 		displayFilename: "Smith-2024-Original-Title.pdf",
 		fileSizeBytes: 10,
 		parseStatus: "done",
@@ -24,6 +32,8 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
 		summaryError: null,
 		enrichmentStatus: "enriched",
 		enrichmentSource: "crossref",
+		metadataCandidates: [],
+		metadataProvenance: {},
 		metadataEditedByUser: {},
 		createdAt: "2026-04-28T00:00:00Z",
 		updatedAt: "2026-04-28T00:00:00Z",
@@ -63,6 +73,56 @@ describe("EditMetadataModal", () => {
 			authors: ["Ada Lovelace", "Grace Hopper"],
 			year: 2025,
 		})
+	})
+
+	it("applies a fuzzy candidate into the editable form", async () => {
+		const user = userEvent.setup()
+		const onSubmit = vi.fn()
+
+		render(
+			<EditMetadataModal
+				errorMessage={null}
+				fetchErrorMessage={null}
+				isFetchingMetadata={false}
+				isSaving={false}
+				onClose={vi.fn()}
+				onFetchMetadata={vi.fn()}
+				onSubmit={onSubmit}
+				open
+				paper={makePaper({
+					metadataCandidates: [
+						{
+							id: "candidate-1",
+							source: "semantic_scholar",
+							queryKind: "title",
+							matchKind: "fuzzy",
+							confidence: 0.81,
+							createdAt: "2026-04-28T00:00:00Z",
+							metadata: {
+								title: "Candidate Title",
+								authors: ["Candidate Author"],
+								year: 2025,
+								venue: "NeurIPS",
+								publicationType: "conference",
+							},
+						},
+					],
+				})}
+			/>,
+		)
+
+		await user.click(screen.getByRole("button", { name: "Apply candidate" }))
+		await user.click(screen.getByRole("button", { name: "Save metadata" }))
+
+		expect(onSubmit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				title: "Candidate Title",
+				authors: ["Candidate Author"],
+				year: 2025,
+				venue: "NeurIPS",
+				publicationType: "conference",
+			}),
+		)
 	})
 
 	it("does not reset form edits when parsing progress refreshes the same paper", async () => {

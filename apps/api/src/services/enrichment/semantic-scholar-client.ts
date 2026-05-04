@@ -4,7 +4,17 @@ import { EnrichmentApiError, type EnrichedMetadata } from "./types"
 import { fetchWithTimeout, normalizeTitle, titleSimilarity } from "./utils"
 
 const SEMANTIC_SCHOLAR_BASE = "https://api.semanticscholar.org/graph/v1"
-const fields = ["title", "authors", "year", "venue", "abstract", "citationCount", "externalIds"].join(",")
+const fields = [
+	"title",
+	"authors",
+	"year",
+	"venue",
+	"abstract",
+	"citationCount",
+	"externalIds",
+	"publicationTypes",
+	"url",
+].join(",")
 
 const SemanticScholarAuthorSchema = z.object({
 	name: z.string(),
@@ -17,6 +27,8 @@ const SemanticScholarPaperSchema = z.object({
 	venue: z.string().nullable().optional(),
 	abstract: z.string().nullable().optional(),
 	citationCount: z.number().nullable().optional(),
+	publicationTypes: z.array(z.string()).nullable().optional(),
+	url: z.string().nullable().optional(),
 	externalIds: z
 		.object({
 			DOI: z.string().nullable().optional(),
@@ -70,7 +82,7 @@ export async function lookupById(args: {
 	}
 
 	const paper = SemanticScholarPaperSchema.parse(await res.json())
-	return normalizePaper(paper)
+	return normalizePaper(paper, { matchConfidence: 1, matchKind: "precise", queryKind: args.doi ? "doi" : "arxiv_id" })
 }
 
 export async function searchByTitle(
@@ -105,10 +117,13 @@ export async function searchByTitle(
 		if (!best || score > best.score) best = { paper, score }
 	}
 	if (!best || best.score < 0.7) return null
-	return normalizePaper(best.paper)
+	return normalizePaper(best.paper, { matchConfidence: best.score, matchKind: "fuzzy", queryKind: "title" })
 }
 
-function normalizePaper(paper: z.infer<typeof SemanticScholarPaperSchema>): EnrichedMetadata {
+function normalizePaper(
+	paper: z.infer<typeof SemanticScholarPaperSchema>,
+	match: Pick<EnrichedMetadata, "matchConfidence" | "matchKind" | "queryKind">,
+): EnrichedMetadata {
 	return {
 		title: paper.title ?? null,
 		authors: paper.authors?.map((author) => author.name) ?? [],
@@ -118,6 +133,25 @@ function normalizePaper(paper: z.infer<typeof SemanticScholarPaperSchema>): Enri
 		venue: paper.venue ?? null,
 		abstract: paper.abstract ?? null,
 		citationCount: paper.citationCount ?? null,
+		pages: null,
+		volume: null,
+		issue: null,
+		publisher: null,
+		publicationType: semanticScholarPublicationType(paper.publicationTypes),
+		url: paper.url ?? null,
+		...match,
 		source: "semantic_scholar",
 	}
+}
+
+function semanticScholarPublicationType(
+	types: string[] | null | undefined,
+): EnrichedMetadata["publicationType"] {
+	const joined = (types ?? []).join(" ")
+	if (/journal/i.test(joined)) return "journal"
+	if (/conference|proceedings/i.test(joined)) return "conference"
+	if (/book.*chapter|chapter/i.test(joined)) return "chapter"
+	if (/book/i.test(joined)) return "book"
+	if (/preprint/i.test(joined)) return "preprint"
+	return null
 }

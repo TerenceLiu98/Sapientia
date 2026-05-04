@@ -39,7 +39,7 @@ export async function enrichPaperFromIdentifiers(args: {
 	}
 
 	if (!primaryIdentifiers.doi && !primaryIdentifiers.arxivId && !primaryIdentifiers.candidateTitle) {
-		return { metadata: null, sources: [], status: "skipped" }
+		return { metadata: null, candidates: [], provenance: {}, sources: [], status: "skipped" }
 	}
 
 	const primaryResult = await enrich(primaryIdentifiers, { semanticScholarApiKey })
