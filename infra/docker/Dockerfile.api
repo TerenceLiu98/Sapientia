@@ -1,0 +1,31 @@
+FROM node:24-bookworm-slim AS base
+
+ENV BUN_INSTALL=/root/.bun
+ENV PNPM_HOME=/pnpm
+ENV PATH="${BUN_INSTALL}/bin:${PNPM_HOME}:${PATH}"
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates curl unzip \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& curl -fsSL https://bun.sh/install | bash -s "bun-v1.2.23" \
+	&& corepack enable \
+	&& corepack prepare pnpm@10.33.2 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/api apps/api
+COPY packages packages
+
+RUN pnpm --filter @sapientia/api build
+
+EXPOSE 3000
+
+CMD ["pnpm", "--filter", "@sapientia/api", "start"]

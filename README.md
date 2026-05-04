@@ -27,7 +27,7 @@ Most "AI for papers" tools answer for you. Sapientia is built for the opposite h
 - **Highlights with semantics.** A built-in five-color palette (Questioning / Important / Original / Pending / Conclusion) plus user-defined palettes. Highlights persist per-block, render in both views, and tag the citation chip with the same color.
 - **Reader markup.** Highlight, underline, and freehand ink on the PDF itself — overlay-only, your original PDF is never modified.
 - **Restraint-first AI.** v0.1 ships a single-turn "ask about this paper" agent with explicit context layers. No tool-calling, no auto-summoning, no workspace-wide context bleed.
-- **Self-hostable.** Bring your own MinerU token and Anthropic / OpenAI key. Postgres + Redis + MinIO run in your cluster.
+- **Self-hostable.** Bring your own MinerU token and Anthropic / OpenAI key. Postgres + Redis + RustFS/S3-compatible object storage run in your cluster.
 
 ## For Now
 
@@ -42,6 +42,29 @@ Date: Apr 29, 2026:
 
 ## Quick start
 
+### Full Docker Compose stack
+
+```bash
+# Builds and starts web, API, worker, migrations, Postgres, Redis, and RustFS.
+pnpm infra:up
+```
+
+Open `http://localhost:8080`. The API is also exposed on `http://localhost:3000`,
+RustFS/S3 on `http://localhost:9000`, and the RustFS console on `http://localhost:9001`.
+
+For anything beyond local testing, copy `infra/docker/.env.example`, replace the
+secrets, and pass it to Compose:
+
+```bash
+cp infra/docker/.env.example infra/docker/.env
+docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml up -d --build --force-recreate
+```
+
+After signing in, configure your **MinerU token** and **LLM API key** in
+`/settings`; user credentials are stored encrypted using `ENCRYPTION_KEY`.
+
+### Local development
+
 ```bash
 # Toolchain
 corepack enable && corepack prepare pnpm@latest --activate
@@ -53,7 +76,7 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 cp packages/db/.env.example packages/db/.env
 
-pnpm infra:up        # Postgres :5432, Redis :6379, MinIO :9000/:9001
+docker compose -f infra/docker/docker-compose.yml up -d postgres redis object-storage object-storage-init
 pnpm db:migrate      # better-auth + app schema
 
 pnpm dev:api         # http://localhost:3000  →  /health
@@ -71,7 +94,7 @@ After signing in, configure your **MinerU token** and **LLM API key** in `/setti
 | --- | --- |
 | Frontend | React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui · Zustand · TanStack Query/Router · Tiptap (via [Novel](https://novel.sh)) · PDF.js · sigma.js |
 | Backend | Bun ≥ 1.2 · Hono · Drizzle ORM · Zod · BullMQ · better-auth · AWS SDK v3 |
-| Data | PostgreSQL 16 + pgvector · Redis 7 · MinIO |
+| Data | PostgreSQL 16 + pgvector · Redis 7 · RustFS / S3-compatible object storage |
 | External | MinerU (PDF parsing) · Anthropic or OpenAI (LLM) |
 | Tooling | pnpm workspaces · Biome · vitest · Playwright · testcontainers-node · Docker Compose · Kustomize |
 
@@ -85,7 +108,7 @@ packages/
   shared/               Zod schemas, types, prompts shared across the stack
   db/                   Drizzle schema, migrations, client
 infra/
-  docker/               docker-compose for Postgres + Redis + MinIO
+  docker/               docker-compose for full self-hosted stack
   k8s/                  Kustomize manifests (base + dev/prod overlays)
 docs/                   PRD, ADRs, deployment runbook, design tokens, task cards
 demo/                   Logo + landing assets
@@ -98,7 +121,7 @@ demo/                   Logo + landing assets
 | `pnpm dev:web` | Vite dev server |
 | `pnpm dev:api` | `bun --hot` Hono server |
 | `pnpm worker:dev` | BullMQ worker (paper parse + enrich) |
-| `pnpm infra:up` / `infra:down` / `infra:logs` | Docker dev stack |
+| `pnpm infra:up` / `infra:down` / `infra:logs` | Docker Compose full stack |
 | `pnpm db:generate` | Drizzle Kit — diff schema files into a new migration |
 | `pnpm db:migrate` | Apply migrations against `DATABASE_URL` |
 | `pnpm db:studio` | Drizzle Studio web UI |
@@ -110,7 +133,7 @@ demo/                   Logo + landing assets
 
 ## Tests
 
-`pnpm test` runs vitest across the workspace. The web tests cover auth flow + reader components; the API tests use [`testcontainers-node`](https://node.testcontainers.org) for ephemeral Postgres + Redis + MinIO and need a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` first.
+`pnpm test` runs vitest across the workspace. The web tests cover auth flow + reader components; the API tests use [`testcontainers-node`](https://node.testcontainers.org) for ephemeral Postgres + Redis + S3-compatible object storage and need a working Docker socket. The vitest config auto-discovers colima / Docker-Desktop / standard sockets and sets `DOCKER_HOST` for you. If your Docker socket lives somewhere unusual, export `DOCKER_HOST=unix:///path/to/docker.sock` first.
 
 ## Authentication
 

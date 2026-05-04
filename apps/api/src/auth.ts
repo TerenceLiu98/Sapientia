@@ -13,7 +13,7 @@ export const auth = betterAuth({
 	}),
 	secret: config.BETTER_AUTH_SECRET,
 	baseURL: config.BETTER_AUTH_URL,
-	trustedOrigins: [...new Set([config.BETTER_AUTH_URL, config.FRONTEND_ORIGIN])],
+	trustedOrigins: trustedAuthOrigins(config.BETTER_AUTH_URL, config.FRONTEND_ORIGIN),
 
 	emailAndPassword: {
 		enabled: true,
@@ -64,3 +64,25 @@ export const auth = betterAuth({
 
 export type Session = typeof auth.$Infer.Session.session
 export type User = typeof auth.$Infer.Session.user
+
+function trustedAuthOrigins(...origins: string[]) {
+	return [
+		...new Set(
+			origins.flatMap((origin) => {
+				const expanded = [origin]
+				try {
+					const url = new URL(origin)
+					if (["localhost", "127.0.0.1", "0.0.0.0"].includes(url.hostname)) {
+						for (const hostname of ["localhost", "127.0.0.1", "0.0.0.0"]) {
+							url.hostname = hostname
+							expanded.push(url.toString().replace(/\/$/, ""))
+						}
+					}
+				} catch {
+					// Config validation guarantees URLs, but keep auth startup resilient.
+				}
+				return expanded
+			}),
+		),
+	]
+}
