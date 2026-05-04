@@ -486,8 +486,10 @@ function PaperNodeCard({
 }) {
 	return (
 		<div className="mt-3 rounded-lg border border-border-subtle bg-bg-primary p-3">
-			<div className="text-sm font-medium text-text-primary">{paper.title}</div>
-			<div className="mt-1 text-xs leading-5 text-text-tertiary">
+			<div className="line-clamp-2 text-[13px] leading-5 font-medium text-text-primary">
+				{paper.title}
+			</div>
+			<div className="mt-1 text-[11px] leading-4 text-text-tertiary">
 				{paper.year ?? "n.d."}
 				{paper.venue ? ` · ${paper.venue}` : ""} · {paper.conceptCount} concepts · degree{" "}
 				{paper.degree}
@@ -512,7 +514,7 @@ function PaperNodeCard({
 				<div className="mt-3 flex flex-wrap gap-1.5">
 					{paper.topConcepts.map((concept) => (
 						<span
-							className="rounded-md border border-border-subtle bg-bg-secondary px-2 py-1 text-[11px] text-text-secondary"
+							className="rounded-md border border-border-subtle bg-bg-secondary px-2 py-1 text-[10px] text-text-secondary"
 							key={concept.id}
 						>
 							<span className="font-medium text-text-primary">{concept.displayName}</span>
@@ -563,16 +565,16 @@ function PaperNodeConnectionButton({
 			onClick={() => onSelect({ kind: "edge", id: edge.id })}
 			type="button"
 		>
-			<span className="block truncate font-medium text-text-primary">
+			<span className="block truncate text-[12px] font-medium text-text-primary">
 				{otherPaper?.title ?? "Connected paper"}
 			</span>
-			<span className="mt-0.5 block text-text-tertiary">
+			<span className="mt-0.5 block text-[10px] leading-4 text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · strength {formatPercent(edge.weight)}
 				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
 				{edge.hasReaderNoteEvidence ? " · reader note" : ""}
 			</span>
 			{strongestEvidence ? (
-				<span className="mt-1 line-clamp-2 block leading-5 text-text-secondary">
+				<span className="mt-1 line-clamp-2 block text-[11px] leading-4 text-text-secondary">
 					via {strongestEvidence.sourceConceptName} / {strongestEvidence.targetConceptName}
 				</span>
 			) : null}
@@ -597,10 +599,10 @@ function PaperEdgeButton({
 			onClick={() => onSelect({ kind: "edge", id: edge.id })}
 			type="button"
 		>
-			<span className="block truncate font-medium text-text-primary">
+			<span className="block truncate text-[12px] font-medium text-text-primary">
 				{source?.title ?? "Paper"} / {target?.title ?? "Paper"}
 			</span>
-			<span className="mt-1 block text-text-tertiary">
+			<span className="mt-1 block text-[10px] leading-4 text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · {edge.evidenceCount} evidence ·{" "}
 				{formatPercent(edge.weight)}
 				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
@@ -616,8 +618,8 @@ function PaperButton({ paper, onClick }: { paper: PaperNode; onClick: () => void
 			onClick={onClick}
 			type="button"
 		>
-			<span className="block truncate text-sm font-medium text-text-primary">{paper.title}</span>
-			<span className="mt-0.5 block truncate text-xs text-text-tertiary">
+			<span className="block truncate text-[12px] font-medium text-text-primary">{paper.title}</span>
+			<span className="mt-0.5 block truncate text-[10px] text-text-tertiary">
 				{paper.conceptCount} concepts · degree {paper.degree}
 			</span>
 		</button>
@@ -638,10 +640,10 @@ function PaperEdgeCard({
 	const evidenceRows = sortedPaperEvidence(edge.topEvidence)
 	return (
 		<div className="mt-3 rounded-lg border border-border-subtle bg-bg-primary p-3">
-			<div className="text-sm font-medium text-text-primary">
+			<div className="line-clamp-2 text-[13px] leading-5 font-medium text-text-primary">
 				{source?.title ?? "Paper"} / {target?.title ?? "Paper"}
 			</div>
-			<div className="mt-1 text-xs leading-5 text-text-tertiary">
+			<div className="mt-1 text-[10px] leading-4 text-text-tertiary">
 				{formatPaperEdgeKind(edge.edgeKind)} · {edge.evidenceCount} evidence ·{" "}
 				{edge.strongEvidenceCount} strong · strength {formatPercent(edge.weight)}
 				{edge.status === "stale" ? " · stale" : edge.isRetained ? " · weaker evidence" : ""}
@@ -673,10 +675,10 @@ function PaperEdgeCard({
 						className="rounded-md border border-border-subtle bg-bg-secondary px-2.5 py-2 text-xs"
 						key={`${evidence.sourceConceptId}:${evidence.targetConceptId}:${evidence.matchMethod}`}
 					>
-						<div className="font-medium text-text-primary">
+						<div className="text-[12px] font-medium text-text-primary">
 							{evidence.sourceConceptName} / {evidence.targetConceptName}
 						</div>
-						<div className="mt-0.5 text-text-tertiary">
+						<div className="mt-0.5 text-[10px] leading-4 text-text-tertiary">
 							{evidence.kind} · {evidence.matchMethod} · {formatPercent(evidence.similarityScore)}
 							{evidence.llmDecision ? ` · LLM: ${evidence.llmDecision}` : ""}
 							{evidence.llmConfidence != null
@@ -704,7 +706,9 @@ function PaperEdgeCard({
 							/>
 						</div>
 						{evidence.rationale ? (
-							<div className="mt-2 line-clamp-2 text-text-secondary">{evidence.rationale}</div>
+							<div className="mt-2 line-clamp-2 text-[11px] leading-4 text-text-secondary">
+								{evidence.rationale}
+							</div>
 						) : null}
 						<div className="mt-2 flex flex-wrap gap-2">
 							<EvidenceJumpLink
@@ -738,15 +742,21 @@ function ConceptMeaningCard({
 }) {
 	return (
 		<div className="rounded-md border border-border-subtle bg-bg-primary px-2.5 py-2">
-			<div className="text-[11px] uppercase tracking-[0.12em] text-text-tertiary">{label}</div>
-			<div className="mt-1 font-medium text-text-primary">{name}</div>
+			<div className="line-clamp-1 text-[10px] uppercase tracking-[0.12em] text-text-tertiary">
+				{label}
+			</div>
+			<div className="mt-1 text-[11px] font-medium text-text-primary">{name}</div>
 			{description ? (
-				<div className="mt-1 line-clamp-3 leading-5 text-text-secondary">{description}</div>
+				<div className="mt-1 line-clamp-3 text-[11px] leading-4 text-text-secondary">
+					{description}
+				</div>
 			) : (
-				<div className="mt-1 text-text-tertiary">No source-level description yet.</div>
+				<div className="mt-1 text-[11px] text-text-tertiary">
+					No source-level description yet.
+				</div>
 			)}
 			{snippets.length > 0 ? (
-				<div className="mt-2 rounded-md border border-border-subtle bg-bg-secondary px-2 py-1.5 leading-5 text-text-secondary">
+				<div className="mt-2 rounded-md border border-border-subtle bg-bg-secondary px-2 py-1.5 text-[11px] leading-4 text-text-secondary">
 					<span className="text-text-tertiary">Evidence: </span>
 					{snippets[0]?.snippet}
 				</div>
