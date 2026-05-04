@@ -5,7 +5,7 @@ import {
 	getCoreRowModel,
 	useReactTable,
 } from "@tanstack/react-table"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
 	type Paper,
 	type PaperEnrichmentStatus,
@@ -103,20 +103,23 @@ function ActionError({ message }: { message: string | null }) {
 	return <p className="mt-1 text-right text-xs text-text-error">{message}</p>
 }
 
-function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: string }) {
-	const updatePaper = useUpdatePaper(workspaceId, paper.id)
-	const fetchMetadata = useFetchPaperMetadata(workspaceId, paper.id)
+function PaperActionsCell({
+	onEditMetadata,
+	paper,
+	workspaceId,
+}: {
+	onEditMetadata: (paperId: string) => void
+	paper: Paper
+	workspaceId: string
+}) {
 	const exportBibtex = useExportPaperBibtex(paper)
 	const downloadPdf = useDownloadPaperPdf(paper.id)
 	const deletePaper = useDeletePaper(workspaceId)
 	const retryParse = useRetryPaperParse(workspaceId)
 	const retryKnowledge = useRetryPaperKnowledge(workspaceId)
-	const [editing, setEditing] = useState(false)
 	const [actionError, setActionError] = useState<string | null>(null)
 
 	const isBusy =
-		updatePaper.isPending ||
-		fetchMetadata.isPending ||
 		exportBibtex.isPending ||
 		downloadPdf.isPending ||
 		retryParse.isPending ||
@@ -143,7 +146,7 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 					<DropdownMenuItem
 						onSelect={() => {
 							setActionError(null)
-							setEditing(true)
+							onEditMetadata(paper.id)
 						}}
 					>
 						Edit metadata
@@ -214,33 +217,45 @@ function PaperActionsCell({ paper, workspaceId }: { paper: Paper; workspaceId: s
 			</DropdownMenu>
 
 			<ActionError message={actionError} />
-
-			<EditMetadataModal
-				errorMessage={updatePaper.error instanceof Error ? updatePaper.error.message : null}
-				fetchErrorMessage={
-					fetchMetadata.error instanceof Error ? fetchMetadata.error.message : null
-				}
-				isFetchingMetadata={fetchMetadata.isPending}
-				isSaving={updatePaper.isPending}
-				onClose={() => setEditing(false)}
-				onFetchMetadata={(input) => {
-					setActionError(null)
-					fetchMetadata.mutate(input)
-				}}
-				onSubmit={(patch) => {
-					setActionError(null)
-					updatePaper.mutate(patch, {
-						onSuccess: () => setEditing(false),
-					})
-				}}
-				open={editing}
-				paper={paper}
-			/>
 		</div>
 	)
 }
 
-function makeColumns(workspaceId: string) {
+function MetadataEditorController({
+	onClose,
+	paper,
+	workspaceId,
+}: {
+	onClose: () => void
+	paper: Paper | null
+	workspaceId: string
+}) {
+	const paperId = paper?.id ?? ""
+	const updatePaper = useUpdatePaper(workspaceId, paperId)
+	const fetchMetadata = useFetchPaperMetadata(workspaceId, paperId)
+
+	return (
+		<EditMetadataModal
+			errorMessage={updatePaper.error instanceof Error ? updatePaper.error.message : null}
+			fetchErrorMessage={fetchMetadata.error instanceof Error ? fetchMetadata.error.message : null}
+			isFetchingMetadata={fetchMetadata.isPending}
+			isSaving={updatePaper.isPending}
+			onClose={onClose}
+			onFetchMetadata={(input) => {
+				fetchMetadata.mutate(input)
+			}}
+			onSubmit={(patch) => {
+				updatePaper.mutate(patch, {
+					onSuccess: onClose,
+				})
+			}}
+			open={Boolean(paper)}
+			paper={paper}
+		/>
+	)
+}
+
+function makeColumns(workspaceId: string, onEditMetadata: (paperId: string) => void) {
 	return [
 		columnHelper.accessor("title", {
 			header: "Title",
@@ -302,7 +317,13 @@ function makeColumns(workspaceId: string) {
 		columnHelper.display({
 			id: "actions",
 			header: "",
-			cell: (info) => <PaperActionsCell paper={info.row.original} workspaceId={workspaceId} />,
+			cell: (info) => (
+				<PaperActionsCell
+					onEditMetadata={onEditMetadata}
+					paper={info.row.original}
+					workspaceId={workspaceId}
+				/>
+			),
 		}),
 	]
 }
@@ -317,48 +338,61 @@ const SIZED_COLUMN_CLASSES: Record<string, string> = {
 }
 
 export function LibraryTable({ papers, workspaceId }: { papers: Paper[]; workspaceId: string }) {
+	const [editingPaperId, setEditingPaperId] = useState<string | null>(null)
+	const editingPaper = papers.find((paper) => paper.id === editingPaperId) ?? null
+	const columns = useMemo(
+		() => makeColumns(workspaceId, setEditingPaperId),
+		[workspaceId],
+	)
 	const table = useReactTable({
 		data: papers,
-		columns: makeColumns(workspaceId),
+		columns,
 		getCoreRowModel: getCoreRowModel(),
 	})
 
 	return (
-		<table className="w-full table-auto">
-			<thead className="border-b border-border-subtle bg-bg-secondary">
-				{table.getHeaderGroups().map((hg) => (
-					<tr key={hg.id}>
-						{hg.headers.map((header) => {
-							const sizing = SIZED_COLUMN_CLASSES[header.column.id] ?? ""
-							return (
-								<th
-									className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary ${sizing}`}
-									key={header.id}
-								>
-									{flexRender(header.column.columnDef.header, header.getContext())}
-								</th>
-							)
-						})}
-					</tr>
-				))}
-			</thead>
-			<tbody>
-				{table.getRowModel().rows.map((row) => (
-					<tr
-						className="h-[var(--table-row-height)] border-b border-border-subtle transition-colors hover:bg-surface-hover"
-						key={row.id}
-					>
-						{row.getVisibleCells().map((cell) => {
-							const sizing = SIZED_COLUMN_CLASSES[cell.column.id] ?? ""
-							return (
-								<td className={`px-4 py-3 text-sm align-middle ${sizing}`} key={cell.id}>
-									{flexRender(cell.column.columnDef.cell, cell.getContext())}
-								</td>
-							)
-						})}
-					</tr>
-				))}
-			</tbody>
-		</table>
+		<>
+			<table className="w-full table-auto">
+				<thead className="border-b border-border-subtle bg-bg-secondary">
+					{table.getHeaderGroups().map((hg) => (
+						<tr key={hg.id}>
+							{hg.headers.map((header) => {
+								const sizing = SIZED_COLUMN_CLASSES[header.column.id] ?? ""
+								return (
+									<th
+										className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary ${sizing}`}
+										key={header.id}
+									>
+										{flexRender(header.column.columnDef.header, header.getContext())}
+									</th>
+								)
+							})}
+						</tr>
+					))}
+				</thead>
+				<tbody>
+					{table.getRowModel().rows.map((row) => (
+						<tr
+							className="h-[var(--table-row-height)] border-b border-border-subtle transition-colors hover:bg-surface-hover"
+							key={row.id}
+						>
+							{row.getVisibleCells().map((cell) => {
+								const sizing = SIZED_COLUMN_CLASSES[cell.column.id] ?? ""
+								return (
+									<td className={`px-4 py-3 text-sm align-middle ${sizing}`} key={cell.id}>
+										{flexRender(cell.column.columnDef.cell, cell.getContext())}
+									</td>
+								)
+							})}
+						</tr>
+					))}
+				</tbody>
+			</table>
+			<MetadataEditorController
+				onClose={() => setEditingPaperId(null)}
+				paper={editingPaper}
+				workspaceId={workspaceId}
+			/>
+		</>
 	)
 }

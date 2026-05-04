@@ -30,18 +30,26 @@ describe("paper-enrichment", () => {
 		})
 
 		expect(enrich).toHaveBeenCalledTimes(2)
-		expect(enrich).toHaveBeenNthCalledWith(1, {
-			doi: null,
-			arxivId: null,
-			candidateTitle: "Proceedings header noise",
-			rawHeadText: "",
-		})
-		expect(enrich).toHaveBeenNthCalledWith(2, {
-			doi: null,
-			arxivId: null,
-			candidateTitle: "measuring dynamic media bias",
-			rawHeadText: "",
-		})
+		expect(enrich).toHaveBeenNthCalledWith(
+			1,
+			{
+				doi: null,
+				arxivId: null,
+				candidateTitle: "Proceedings header noise",
+				rawHeadText: "",
+			},
+			{ semanticScholarApiKey: undefined },
+		)
+		expect(enrich).toHaveBeenNthCalledWith(
+			2,
+			{
+				doi: null,
+				arxivId: null,
+				candidateTitle: "measuring dynamic media bias",
+				rawHeadText: "",
+			},
+			{ semanticScholarApiKey: undefined },
+		)
 		expect(result.status).toBe("enriched")
 	})
 
@@ -64,11 +72,14 @@ describe("paper-enrichment", () => {
 			overrideDoi: "10.1000/test",
 		})
 
-		expect(enrich).toHaveBeenCalledWith({
-			doi: "10.1000/test",
-			arxivId: null,
-			candidateTitle: "New better title",
-			rawHeadText: "",
-		})
+		expect(enrich).toHaveBeenCalledWith(
+			{
+				doi: "10.1000/test",
+				arxivId: null,
+				candidateTitle: "New better title",
+				rawHeadText: "",
+			},
+			{ semanticScholarApiKey: undefined },
+		)
 	})
 })

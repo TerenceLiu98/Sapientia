@@ -16,6 +16,7 @@ import { requireMembership } from "../middleware/workspace"
 import { enqueuePaperParse } from "../queues/paper-parse"
 import { enqueuePaperSummarize } from "../queues/paper-summarize"
 import { papersToBibtex, paperToBibtex } from "../services/bibtex"
+import { getSemanticScholarApiKey } from "../services/credentials"
 import { buildDisplayFilename } from "../services/filename"
 import {
 	InvalidPaperContentError,
@@ -302,11 +303,15 @@ paperRoutes.post("/papers/:id/fetch-metadata", requireAuth, async (c) => {
 		overrideTitle: body.title,
 		overrideDoi: body.doi,
 		overrideArxivId: body.arxivId,
+		semanticScholarApiKey: await getSemanticScholarApiKey(user.id),
 	})
+
+	const [latestPaper] = await db.select().from(papers).where(eq(papers.id, id)).limit(1)
+	if (!latestPaper || latestPaper.deletedAt) return c.json({ error: "not found" }, 404)
 
 	const [updated] = await db
 		.update(papers)
-		.set(applyEnrichedMetadataToPaper(paper, result))
+		.set(applyEnrichedMetadataToPaper(latestPaper, result))
 		.where(eq(papers.id, id))
 		.returning()
 

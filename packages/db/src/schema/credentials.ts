@@ -27,6 +27,10 @@ export const userCredentials = pgTable("user_credentials", {
 	embeddingBaseUrl: text("embedding_base_url"),
 	embeddingModel: text("embedding_model"),
 
+	// Metadata providers. Semantic Scholar supports optional x-api-key auth
+	// to avoid the shared unauthenticated throttle.
+	semanticScholarApiKeyCiphertext: bytea("semantic_scholar_api_key_ciphertext"),
+
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

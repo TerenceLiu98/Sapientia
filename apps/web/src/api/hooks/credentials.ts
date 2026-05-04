@@ -14,6 +14,7 @@ export interface CredentialsStatus {
 	embeddingProvider: EmbeddingProvider | null
 	embeddingBaseUrl: string | null
 	embeddingModel: string | null
+	hasSemanticScholarKey: boolean
 }
 
 export interface CredentialsUpdate {
@@ -26,6 +27,7 @@ export interface CredentialsUpdate {
 	embeddingApiKey?: string | null
 	embeddingBaseUrl?: string | null
 	embeddingModel?: string | null
+	semanticScholarApiKey?: string | null
 }
 
 export function useCredentialsStatus() {

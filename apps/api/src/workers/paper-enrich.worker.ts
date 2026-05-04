@@ -9,6 +9,7 @@ import {
 	type PaperEnrichJobData,
 	type PaperEnrichJobResult,
 } from "../queues/paper-enrich"
+import { getSemanticScholarApiKey } from "../services/credentials"
 import { extractIdentifiers } from "../services/enrichment/identifier-extractor"
 import { enrichPaperFromIdentifiers } from "../services/paper-enrichment"
 import { applyEnrichedMetadataToPaper } from "../services/paper-metadata"
@@ -17,7 +18,7 @@ import { downloadFromS3 } from "../services/s3-client"
 async function processPaperEnrich(
 	job: Job<PaperEnrichJobData, PaperEnrichJobResult>,
 ): Promise<PaperEnrichJobResult> {
-	const { paperId } = job.data
+	const { paperId, userId } = job.data
 	const log = logger.child({ jobId: job.id, paperId })
 
 	const [paper] = await db.select().from(papers).where(eq(papers.id, paperId)).limit(1)
@@ -61,11 +62,18 @@ async function processPaperEnrich(
 	const result = await enrichPaperFromIdentifiers({
 		paper,
 		identifiers: ids,
+		semanticScholarApiKey: await getSemanticScholarApiKey(userId),
 	})
+
+	const [latestPaper] = await db.select().from(papers).where(eq(papers.id, paperId)).limit(1)
+	if (!latestPaper || latestPaper.deletedAt) {
+		log.warn("paper_not_found_after_enrichment")
+		return { paperId, status: "failed", sources: [] }
+	}
 
 	await db
 		.update(papers)
-		.set(applyEnrichedMetadataToPaper(paper, result))
+		.set(applyEnrichedMetadataToPaper(latestPaper, result))
 		.where(eq(papers.id, paperId))
 
 	return {

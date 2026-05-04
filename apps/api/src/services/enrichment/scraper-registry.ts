@@ -38,15 +38,23 @@ export const metadataScrapers: MetadataScraper[] = [
 			if (input.arxivId) return [{ kind: "arxiv_id", value: input.arxivId }]
 			return titleQuery(input)
 		},
-		async fetch(query) {
+		async fetch(query, options) {
 			if (query.kind === "doi") {
-				return semanticScholar.lookupById({ doi: query.value })
+				return semanticScholar.lookupById({
+					doi: query.value,
+					apiKey: options.semanticScholarApiKey,
+				})
 			}
 			if (query.kind === "arxiv_id") {
-				return semanticScholar.lookupById({ arxivId: query.value })
+				return semanticScholar.lookupById({
+					arxivId: query.value,
+					apiKey: options.semanticScholarApiKey,
+				})
 			}
 			if (query.kind === "title") {
-				return semanticScholar.searchByTitle(query.value)
+				return semanticScholar.searchByTitle(query.value, {
+					apiKey: options.semanticScholarApiKey,
+				})
 			}
 			return null
 		},

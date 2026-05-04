@@ -28,13 +28,17 @@ export interface EnrichmentPipelineState {
 	results: EnrichedMetadata[]
 }
 
+export interface EnrichmentOptions {
+	semanticScholarApiKey?: string | null
+}
+
 export interface MetadataScraper {
 	source: EnrichmentSource
 	buildQueries: (
 		input: ExtractedIdentifiers,
 		state: EnrichmentPipelineState,
 	) => EnrichmentQuery[]
-	fetch: (query: EnrichmentQuery) => Promise<EnrichedMetadata | null>
+	fetch: (query: EnrichmentQuery, options: EnrichmentOptions) => Promise<EnrichedMetadata | null>
 }
 
 export class EnrichmentApiError extends Error {

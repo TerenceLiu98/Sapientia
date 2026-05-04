@@ -78,4 +78,24 @@ describe("me routes", () => {
 			reason: "credentials-updated",
 		})
 	})
+
+	it("accepts a Semantic Scholar metadata key without refreshing embeddings", async () => {
+		const { meRoutes } = await import("./me")
+		const app = new Hono()
+		app.route("/", meRoutes)
+
+		const response = await app.request("/me/credentials", {
+			method: "PATCH",
+			body: JSON.stringify({
+				semanticScholarApiKey: "s2-key",
+			}),
+			headers: { "content-type": "application/json" },
+		})
+
+		expect(response.status).toBe(200)
+		expect(updateCredentialsMock).toHaveBeenCalledWith("user-1", {
+			semanticScholarApiKey: "s2-key",
+		})
+		expect(enqueueWorkspaceSemanticRefreshesForUserMock).not.toHaveBeenCalled()
+	})
 })

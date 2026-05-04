@@ -30,15 +30,17 @@ const SemanticScholarSearchResponseSchema = z.object({
 	data: z.array(SemanticScholarPaperSchema),
 })
 
-function semanticScholarHeaders() {
-	return config.SEMANTIC_SCHOLAR_API_KEY
-		? { "x-api-key": config.SEMANTIC_SCHOLAR_API_KEY }
+function semanticScholarHeaders(apiKey?: string | null) {
+	const effectiveApiKey = apiKey?.trim() || config.SEMANTIC_SCHOLAR_API_KEY
+	return effectiveApiKey
+		? { "x-api-key": effectiveApiKey }
 		: undefined
 }
 
 export async function lookupById(args: {
 	doi?: string | null
 	arxivId?: string | null
+	apiKey?: string | null
 }): Promise<EnrichedMetadata> {
 	let identifier: string | null = null
 	if (args.doi) identifier = `DOI:${args.doi}`
@@ -49,7 +51,7 @@ export async function lookupById(args: {
 
 	const res = await fetchWithTimeout(
 		`${SEMANTIC_SCHOLAR_BASE}/paper/${encodeURIComponent(identifier)}?fields=${fields}`,
-		{ headers: semanticScholarHeaders(), timeoutMs: 10_000 },
+		{ headers: semanticScholarHeaders(args.apiKey), timeoutMs: 10_000 },
 	).catch((error) => {
 		if (error instanceof EnrichmentApiError && error.reason === "timeout") {
 			throw new EnrichmentApiError("semantic_scholar", "timeout", error.message)
@@ -71,10 +73,13 @@ export async function lookupById(args: {
 	return normalizePaper(paper)
 }
 
-export async function searchByTitle(title: string): Promise<EnrichedMetadata | null> {
+export async function searchByTitle(
+	title: string,
+	options: { apiKey?: string | null } = {},
+): Promise<EnrichedMetadata | null> {
 	const res = await fetchWithTimeout(
 		`${SEMANTIC_SCHOLAR_BASE}/paper/search?query=${encodeURIComponent(title)}&limit=5&fields=${fields}`,
-		{ headers: semanticScholarHeaders(), timeoutMs: 10_000 },
+		{ headers: semanticScholarHeaders(options.apiKey), timeoutMs: 10_000 },
 	).catch((error) => {
 		if (error instanceof EnrichmentApiError && error.reason === "timeout") {
 			throw new EnrichmentApiError("semantic_scholar", "timeout", error.message)

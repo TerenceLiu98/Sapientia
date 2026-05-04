@@ -17,6 +17,7 @@ const UpdateCredentialsSchema = z.object({
 	embeddingApiKey: z.string().nullable().optional(),
 	embeddingBaseUrl: z.string().url().nullable().optional(),
 	embeddingModel: z.string().trim().min(1).nullable().optional(),
+	semanticScholarApiKey: z.string().nullable().optional(),
 })
 
 export const meRoutes = new Hono<AuthContext>()

@@ -40,6 +40,7 @@ export function EditMetadataModal({
 	const [doi, setDoi] = useState("")
 	const [arxivId, setArxivId] = useState("")
 	const [venue, setVenue] = useState("")
+	const paperId = paper?.id ?? null
 
 	useEffect(() => {
 		if (!open || !paper) return
@@ -49,7 +50,7 @@ export function EditMetadataModal({
 		setDoi(paper.doi ?? "")
 		setArxivId(paper.arxivId ?? "")
 		setVenue(paper.venue ?? "")
-	}, [open, paper])
+	}, [open, paperId])
 
 	if (!open || !paper) return null
 

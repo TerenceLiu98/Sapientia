@@ -17,6 +17,7 @@ export interface CredentialsStatus {
 	embeddingProvider: EmbeddingProvider | null
 	embeddingBaseUrl: string | null
 	embeddingModel: string | null
+	hasSemanticScholarKey: boolean
 }
 
 export async function getCredentialsStatus(userId: string): Promise<CredentialsStatus> {
@@ -37,6 +38,7 @@ export async function getCredentialsStatus(userId: string): Promise<CredentialsS
 			embeddingProvider: null,
 			embeddingBaseUrl: null,
 			embeddingModel: null,
+			hasSemanticScholarKey: false,
 		}
 	}
 
@@ -50,6 +52,7 @@ export async function getCredentialsStatus(userId: string): Promise<CredentialsS
 		embeddingProvider: row.embeddingProvider,
 		embeddingBaseUrl: row.embeddingBaseUrl ?? null,
 		embeddingModel: row.embeddingModel?.trim() ? row.embeddingModel.trim() : null,
+		hasSemanticScholarKey: row.semanticScholarApiKeyCiphertext != null,
 	}
 }
 
@@ -108,6 +111,17 @@ export async function getEmbeddingCredential(
 	}
 }
 
+export async function getSemanticScholarApiKey(userId: string): Promise<string | null> {
+	const [row] = await db
+		.select()
+		.from(userCredentials)
+		.where(eq(userCredentials.userId, userId))
+		.limit(1)
+
+	if (!row?.semanticScholarApiKeyCiphertext) return null
+	return decrypt(row.semanticScholarApiKeyCiphertext)
+}
+
 export interface CredentialsUpdate {
 	mineruToken?: string | null
 	llmProvider?: LlmProvider | null
@@ -118,6 +132,7 @@ export interface CredentialsUpdate {
 	embeddingApiKey?: string | null
 	embeddingBaseUrl?: string | null
 	embeddingModel?: string | null
+	semanticScholarApiKey?: string | null
 }
 
 export async function updateCredentials(userId: string, updates: CredentialsUpdate) {
@@ -157,6 +172,11 @@ export async function updateCredentials(userId: string, updates: CredentialsUpda
 	if (updates.embeddingModel !== undefined) {
 		dbValues.embeddingModel = updates.embeddingModel?.trim()
 			? updates.embeddingModel.trim()
+			: null
+	}
+	if (updates.semanticScholarApiKey !== undefined) {
+		dbValues.semanticScholarApiKeyCiphertext = updates.semanticScholarApiKey
+			? encrypt(updates.semanticScholarApiKey)
 			: null
 	}
 

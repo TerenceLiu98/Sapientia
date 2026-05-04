@@ -29,8 +29,14 @@ describe("semantic-scholar-client", () => {
 		)
 
 		const { lookupById } = await import("./semantic-scholar-client")
-		const result = await lookupById({ doi: "10.1/x" })
+		const result = await lookupById({ doi: "10.1/x", apiKey: "user-key" })
 
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				headers: { "x-api-key": "user-key" },
+			}),
+		)
 		expect(result).toMatchObject({
 			title: "Transformer Paper",
 			authors: ["Alice"],
@@ -64,6 +70,12 @@ describe("semantic-scholar-client", () => {
 		const { searchByTitle } = await import("./semantic-scholar-client")
 		const result = await searchByTitle("Attention Is All You Need")
 
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				headers: { "x-api-key": "key" },
+			}),
+		)
 		expect(result?.title).toBe("Attention Is All You Need")
 		expect(result?.source).toBe("semantic_scholar")
 	})

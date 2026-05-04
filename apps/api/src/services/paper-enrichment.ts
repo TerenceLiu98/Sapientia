@@ -14,8 +14,16 @@ export async function enrichPaperFromIdentifiers(args: {
 	overrideTitle?: string | null
 	overrideDoi?: string | null
 	overrideArxivId?: string | null
+	semanticScholarApiKey?: string | null
 }): Promise<EnrichmentResult> {
-	const { paper, identifiers, overrideTitle, overrideDoi, overrideArxivId } = args
+	const {
+		paper,
+		identifiers,
+		overrideTitle,
+		overrideDoi,
+		overrideArxivId,
+		semanticScholarApiKey,
+	} = args
 
 	const fallbackTitle = deriveTitleSearchCandidate(overrideTitle ?? paper.title)
 	const primaryTitle =
@@ -34,7 +42,7 @@ export async function enrichPaperFromIdentifiers(args: {
 		return { metadata: null, sources: [], status: "skipped" }
 	}
 
-	const primaryResult = await enrich(primaryIdentifiers)
+	const primaryResult = await enrich(primaryIdentifiers, { semanticScholarApiKey })
 	if (primaryResult.status !== "failed" && primaryResult.status !== "skipped") {
 		return primaryResult
 	}
@@ -43,8 +51,11 @@ export async function enrichPaperFromIdentifiers(args: {
 		return primaryResult
 	}
 
-	return enrich({
-		...primaryIdentifiers,
-		candidateTitle: fallbackTitle,
-	})
+	return enrich(
+		{
+			...primaryIdentifiers,
+			candidateTitle: fallbackTitle,
+		},
+		{ semanticScholarApiKey },
+	)
 }

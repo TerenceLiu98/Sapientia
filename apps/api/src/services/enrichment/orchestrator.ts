@@ -1,7 +1,12 @@
 import { logger } from "../../logger"
 import type { ExtractedIdentifiers } from "./identifier-extractor"
 import { metadataScrapers } from "./scraper-registry"
-import type { EnrichedMetadata, EnrichmentQuery, EnrichmentSource } from "./types"
+import type {
+	EnrichedMetadata,
+	EnrichmentOptions,
+	EnrichmentQuery,
+	EnrichmentSource,
+} from "./types"
 
 export interface EnrichmentResult {
 	metadata: Partial<EnrichedMetadata> | null
@@ -9,7 +14,10 @@ export interface EnrichmentResult {
 	status: "enriched" | "partial" | "failed" | "skipped"
 }
 
-export async function enrich(ids: ExtractedIdentifiers): Promise<EnrichmentResult> {
+export async function enrich(
+	ids: ExtractedIdentifiers,
+	options: EnrichmentOptions = {},
+): Promise<EnrichmentResult> {
 	const log = logger.child({ component: "enrichment" })
 	const results: EnrichedMetadata[] = []
 
@@ -17,7 +25,7 @@ export async function enrich(ids: ExtractedIdentifiers): Promise<EnrichmentResul
 		const queries = dedupeQueries(scraper.buildQueries(ids, { results }))
 		for (const query of queries) {
 			try {
-				const result = await scraper.fetch(query)
+				const result = await scraper.fetch(query, options)
 				if (!result) {
 					log.warn({ source: scraper.source, queryKind: query.kind }, "scraper_miss")
 					continue

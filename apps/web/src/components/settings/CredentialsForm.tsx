@@ -35,6 +35,8 @@ export function CredentialsForm() {
 	const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState("")
 	const [embeddingModel, setEmbeddingModel] = useState("")
 	const [showEmbedding, setShowEmbedding] = useState(false)
+	const [semanticScholarApiKey, setSemanticScholarApiKey] = useState("")
+	const [showSemanticScholar, setShowSemanticScholar] = useState(false)
 	const [savedMessage, setSavedMessage] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 
@@ -50,6 +52,7 @@ export function CredentialsForm() {
 		const embeddingApiKeyValue = embeddingApiKey.trim()
 		const embeddingBaseUrlValue = embeddingBaseUrl.trim()
 		const embeddingModelValue = embeddingModel.trim()
+		const semanticScholarApiKeyValue = semanticScholarApiKey.trim()
 
 		if (mineruToken.trim()) updates.mineruToken = mineruToken.trim()
 		if (llmApiKeyValue && !llmModelValue && !data?.llmModel) {
@@ -86,6 +89,9 @@ export function CredentialsForm() {
 		if (embeddingModelValue) {
 			updates.embeddingModel = embeddingModelValue
 		}
+		if (semanticScholarApiKeyValue) {
+			updates.semanticScholarApiKey = semanticScholarApiKeyValue
+		}
 
 		if (Object.keys(updates).length === 0) {
 			setError("Nothing to save — fill in at least one field.")
@@ -101,6 +107,7 @@ export function CredentialsForm() {
 			setEmbeddingApiKey("")
 			setEmbeddingBaseUrl("")
 			setEmbeddingModel("")
+			setSemanticScholarApiKey("")
 			setSavedMessage("Saved.")
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Save failed")
@@ -368,6 +375,54 @@ export function CredentialsForm() {
 						type="text"
 						value={embeddingModel}
 					/>
+				</div>
+			</section>
+
+			<section className="space-y-3">
+				<header>
+					<div className="text-xs font-medium uppercase tracking-[0.16em] text-text-secondary">
+						Metadata
+					</div>
+					<h2 className="font-serif text-xl text-text-primary">Semantic Scholar API key</h2>
+					<p className="mt-1 text-sm text-text-secondary">
+						Used only for paper metadata lookup. Semantic Scholar supports anonymous
+						requests, but a personal key avoids the shared unauthenticated throttle and
+						makes DOI/title lookups more reliable during uploads.
+					</p>
+				</header>
+				<div className="space-y-1.5">
+					<label
+						className="block text-sm font-medium text-text-primary"
+						htmlFor="semantic-scholar-api-key"
+					>
+						API key{" "}
+						<span className="text-xs text-text-tertiary">
+							{data?.hasSemanticScholarKey ? "configured" : "optional"}
+						</span>
+					</label>
+					<div className="flex gap-2">
+						<input
+							className="h-10 flex-1 rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-accent"
+							id="semantic-scholar-api-key"
+							onChange={(e) => setSemanticScholarApiKey(e.target.value)}
+							placeholder={
+								data?.hasSemanticScholarKey ? "•••••• (leave blank to keep)" : "Paste key"
+							}
+							type={showSemanticScholar ? "text" : "password"}
+							value={semanticScholarApiKey}
+						/>
+						<button
+							className="h-10 rounded-md border border-border-default px-3 text-xs hover:bg-surface-hover"
+							onClick={() => setShowSemanticScholar((v) => !v)}
+							type="button"
+						>
+							{showSemanticScholar ? "Hide" : "Show"}
+						</button>
+					</div>
+					<p className="text-xs leading-5 text-text-secondary">
+						Stored encrypted. Sapientia sends it only as the `x-api-key` header to
+						Semantic Scholar Academic Graph API requests.
+					</p>
 				</div>
 			</section>
 
