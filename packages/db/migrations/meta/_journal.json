@@ -232,6 +232,13 @@
       "when": 1777890600000,
       "tag": "0033_rich_paper_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1777979700000,
+      "tag": "0034_repair_concept_memory_lifecycle",
+      "breakpoints": true
     }
   ]
 }
