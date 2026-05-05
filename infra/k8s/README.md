@@ -1,49 +1,74 @@
 # Sapientia Kubernetes Deployment
 
-Kubernetes manifests are organized as Kustomize overlays:
+Kubernetes manifests are maintained in two forms:
 
-- `base/` contains the full stack: web, API, worker, migration job, Postgres, Redis, RustFS, bucket init, services, and ingress.
-- `overlays/dev/` is a local/dev cluster overlay.
-- `overlays/prod/` is a production-shaped overlay with TLS host placeholders and versioned images.
+- `raw/` contains beginner-friendly plain YAML files such as `deployment.yaml`, `secret.example.yaml`, and `ingress.yaml`.
+- `kustomize/base/` contains the same full stack as reusable Kustomize resources.
+- `kustomize/overlays/dev/` is a local/dev cluster overlay.
+- `kustomize/overlays/prod/` is a production-shaped overlay with TLS host placeholders and versioned images.
 
-All overlays create and use the `sapientia` namespace by default.
+Both deployment paths create and use the `sapientia` namespace by default.
 
 ## 1. Publish Images
 
 The GHCR workflow publishes:
 
-- `ghcr.io/<owner>/sapientia-api:latest` from the `publish` branch
-- `ghcr.io/<owner>/sapientia-web:latest` from the `publish` branch
-- `ghcr.io/<owner>/sapientia-api:v0.1` from `v0.1` branch/tag
-- `ghcr.io/<owner>/sapientia-web:v0.1` from `v0.1` branch/tag
+- `ghcr.io/TerenceLiu98/sapientia-api:latest` from the `publish` branch
+- `ghcr.io/TerenceLiu98/sapientia-web:latest` from the `publish` branch
+- `ghcr.io/TerenceLiu98/sapientia-api:v-x` from `v-x` branch/tag
+- `ghcr.io/TerenceLiu98/sapientia-web:v-x` from `v-x` branch/tag
 
 If the GHCR packages are private, create an image pull secret in the namespace and patch the service account or deployments for your cluster.
 
-## 2. Create Secrets
+## 2. Beginner Path: Raw YAML
+
+Use this path if you want to see and edit normal Kubernetes resources directly.
+
+```bash
+kubectl apply -f infra/k8s/raw/namespace.yaml
+
+cp infra/k8s/raw/secret.example.yaml /tmp/sapientia-secrets.yaml
+$EDITOR /tmp/sapientia-secrets.yaml
+kubectl apply -f /tmp/sapientia-secrets.yaml
+
+kubectl apply -f infra/k8s/raw/configmap.yaml
+kubectl apply -f infra/k8s/raw/storage.yaml
+kubectl apply -f infra/k8s/raw/job.yaml
+kubectl apply -f infra/k8s/raw/deployment.yaml
+kubectl apply -f infra/k8s/raw/ingress.yaml
+```
+
+See `raw/README.md` for what each file contains.
+
+## 3. Kustomize Path
+
+Use this path once you want dev/prod overlays and image/tag patches.
+
+### Create Secrets
 
 Copy the example, replace every secret, then apply it:
 
 ```bash
-kubectl apply -f infra/k8s/base/namespace.yaml
-cp infra/k8s/base/secret.example.yaml /tmp/sapientia-secrets.yaml
+kubectl apply -f infra/k8s/kustomize/base/namespace.yaml
+cp infra/k8s/kustomize/base/secret.example.yaml /tmp/sapientia-secrets.yaml
 $EDITOR /tmp/sapientia-secrets.yaml
 kubectl apply -f /tmp/sapientia-secrets.yaml
 ```
 
 The secret must be named `sapientia-secrets` in the `sapientia` namespace.
 
-## 3. Deploy
+### Deploy
 
 For a local/dev cluster:
 
 ```bash
-kubectl apply -k infra/k8s/overlays/dev
+kubectl apply -k infra/k8s/kustomize/overlays/dev
 kubectl -n sapientia rollout status deploy/api
 kubectl -n sapientia rollout status deploy/web
 kubectl -n sapientia rollout status deploy/worker
 ```
 
-For production, edit `infra/k8s/overlays/prod/*.yaml` first, especially:
+For production, edit `infra/k8s/kustomize/overlays/prod/*.yaml` first, especially:
 
 - hosts in `ingress-patch.yaml`
 - public origins in `config-patch.yaml`
@@ -52,7 +77,7 @@ For production, edit `infra/k8s/overlays/prod/*.yaml` first, especially:
 Then deploy:
 
 ```bash
-kubectl apply -k infra/k8s/overlays/prod
+kubectl apply -k infra/k8s/kustomize/overlays/prod
 kubectl -n sapientia rollout status deploy/api
 kubectl -n sapientia rollout status deploy/web
 kubectl -n sapientia rollout status deploy/worker

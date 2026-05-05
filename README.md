@@ -80,9 +80,11 @@ After signing in, configure your **MinerU token** and **LLM API key** in
 
 ### Kubernetes
 
-Kustomize manifests live in `infra/k8s`. They deploy the same stack as Compose:
-web, API, worker, migration job, Postgres, Redis, and RustFS/S3-compatible object
-storage. See [`infra/k8s/README.md`](infra/k8s/README.md) for the secret setup,
+Kubernetes manifests live in `infra/k8s`. `raw/` contains beginner-friendly
+plain YAML files, while `kustomize/` contains reusable base resources plus dev
+and production overlays. Both deploy the same stack as Compose: web, API,
+worker, migration job, Postgres, Redis, and RustFS/S3-compatible object storage.
+See [`infra/k8s/README.md`](infra/k8s/README.md) for the raw flow, secret setup,
 dev overlay, and production overlay flow.
 
 ### Local development
@@ -193,8 +195,8 @@ Phase 1 — **Reading Foundation**. Sign-up → upload PDF → parse via MinerU 
 
 ## Contributing
 
-Sapientia is in heavy development. Open an issue before significant changes; the [`CLAUDE.md`](CLAUDE.md) file at the repo root is the operations manual that human + AI contributors share — it documents the locked tech stack, naming conventions, and "do not" rules.
+Sapientia is in heavy development. Open an issue before significant changes; we can discuss the best way to contribute your improvements. For now, the best way to help is to try it out and share feedback!
 
 ## License
 
-Not yet decided. Treat as source-available for now; add an explicit license before any external use.
+Please see [LICENSE](LICENSE).
