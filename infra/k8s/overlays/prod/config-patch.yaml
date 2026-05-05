@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+  BETTER_AUTH_URL: https://sapientia.example.com
+  FRONTEND_ORIGIN: https://sapientia.example.com
+  S3_PUBLIC_ENDPOINT: https://s3.sapientia.example.com
+  S3_SERVER_DOMAINS: s3.sapientia.example.com,object-storage,object-storage.sapientia.svc.cluster.local

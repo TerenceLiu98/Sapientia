@@ -78,6 +78,13 @@ docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml u
 After signing in, configure your **MinerU token** and **LLM API key** in
 `/settings`; user credentials are stored encrypted using `ENCRYPTION_KEY`.
 
+### Kubernetes
+
+Kustomize manifests live in `infra/k8s`. They deploy the same stack as Compose:
+web, API, worker, migration job, Postgres, Redis, and RustFS/S3-compatible object
+storage. See [`infra/k8s/README.md`](infra/k8s/README.md) for the secret setup,
+dev overlay, and production overlay flow.
+
 ### Local development
 
 ```bash

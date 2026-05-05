@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sapientia
+
+resources:
+  - ../../base
+
+patches:
+  - path: config-patch.yaml
+  - path: ingress-patch.yaml
+  - path: scale-patch.yaml
+
+images:
+  - name: ghcr.io/terenceliu98/sapientia-api
+    newTag: v0.1
+  - name: ghcr.io/terenceliu98/sapientia-web
+    newTag: v0.1

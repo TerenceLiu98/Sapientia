@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: pgvector/pgvector:pg16
+          command: ["sh", "-c", "until pg_isready -h postgres -U sapientia -d sapientia; do sleep 2; done"]
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command: ["sh", "-c", "until redis-cli -h redis ping; do sleep 2; done"]
+        - name: wait-for-object-storage
+          image: curlimages/curl:8.16.0
+          command: ["sh", "-c", "until curl -fsS http://object-storage:9000/ >/dev/null; do sleep 2; done"]
+      containers:
+        - name: api
+          image: ghcr.io/terenceliu98/sapientia-api:latest
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: sapientia-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi

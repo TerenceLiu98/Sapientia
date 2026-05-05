@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sapientia
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - sapientia.example.com
+      secretName: sapientia-web-tls
+    - hosts:
+        - s3.sapientia.example.com
+      secretName: sapientia-s3-tls
+  rules:
+    - host: sapientia.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
+    - host: s3.sapientia.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: object-storage
+                port:
+                  name: s3
