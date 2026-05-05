@@ -61,11 +61,11 @@ docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml u
 ```
 
 GitHub Actions publishes `sapientia-api` and `sapientia-web` images to GHCR on
-pushes to the `publish` branch, version branches such as `v0.1`, and manual
-dispatch. The `publish` branch produces `latest`; each `v*` branch produces its
-own version tag. To deploy from published images instead of building locally, set
-`API_IMAGE` and `WEB_IMAGE` in `infra/docker/.env`, then pull and start without
-building:
+pushes to the `publish` branch, version branches such as `v0.1`, version tags
+such as `v0.1`, and manual dispatch. The `publish` branch produces `latest`;
+each `v*` branch or tag produces its own version tag. To deploy from published
+images instead of building locally, set `API_IMAGE` and `WEB_IMAGE` in
+`infra/docker/.env`, then pull and start without building:
 
 ```bash
 API_IMAGE=ghcr.io/<owner>/sapientia-api:latest
