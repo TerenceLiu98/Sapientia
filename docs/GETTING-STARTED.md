@@ -80,6 +80,12 @@ pnpm playwright:smoke       # Curated Playwright core smoke lane (~5 min)
 pnpm playwright:regression  # Full Playwright regression suite
 ```
 
+## Contribution Workflow
+
+Create a short-lived branch from the latest `origin/main`, commit focused changes, and push that branch. The pre-push hook runs the local quality gate for every branch. Open a pull request into `main`; GitHub branch protection, not the local hook, rejects direct main updates and requires the configured CI checks before merge.
+
+Never use `--no-verify`. Fix a failing local or remote check and push the branch again.
+
 ## Chunk Sidecar Validation
 
 The experimental `.chunk/config.json` mirrors the portable parts of the local git hook gate as named validations. Use it for inner-loop checks before running the full pre-push hook:
