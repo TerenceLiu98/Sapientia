@@ -29,6 +29,7 @@ Il workflow `ci.yml` esegue i seguenti check automatici:
 - Installa/attiva il repo in Codecov una volta sola tramite GitHub App / import del repository.
 - Nessun `CODECOV_TOKEN` richiesto in GitHub Actions: `ci.yml` usa OIDC (`id-token: write` + `use_oidc: true`).
 - Il workflow carica `coverage/lcov.info` (Vitest) e `coverage/rust.lcov` (cargo-llvm-cov).
+- L'upload e opzionale e non bloccante. Le soglie di coverage restano applicate dai comandi di test anche se Codecov non e attivato o non e disponibile.
 - L'action Codecov resta con integrity validation attiva. Se Codecov ruota la chiave GPG del CLI, aggiorna il pin dell'action invece di usare `skip_validation`.
 
 ### Telemetry Secrets For Release Builds
