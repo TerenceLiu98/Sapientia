@@ -588,7 +588,7 @@ mod tests {
         let bare = bare_dir.path();
 
         git_command()
-            .args(["init", "--bare"])
+            .args(["init", "--bare", "--initial-branch=main"])
             .current_dir(bare)
             .output()
             .unwrap();

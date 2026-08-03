@@ -299,10 +299,9 @@ fn frontmatter_end(content: &str) -> Option<usize> {
     let (after_open, opening_len, line_ending_len) =
         if let Some(after_open) = content.strip_prefix("---\n") {
             (after_open, 4, 1)
-        } else if let Some(after_open) = content.strip_prefix("---\r\n") {
-            (after_open, 5, 2)
         } else {
-            return None;
+            let after_open = content.strip_prefix("---\r\n")?;
+            (after_open, 5, 2)
         };
     let close = if line_ending_len == 2 {
         "\r\n---"
