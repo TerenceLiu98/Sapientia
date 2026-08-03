@@ -13,33 +13,17 @@ Il workflow `ci.yml` esegue i seguenti check automatici:
 - Upload automatico su Codecov dai report LCOV frontend + Rust
 - Threshold configurabile in `vitest.config.ts`
 
-### 3. Code Health (CodeScene)
-- Delta analysis su ogni PR/push
-- Fail se il code health diminuisce
-- Richiede secrets configurati (vedi sotto)
-
-### 4. Documentation Check
+### 3. Documentation Check
 - Verifica che se cambia codice in `src/` o `src-tauri/`, anche `docs/` viene aggiornato
 - **Warning only** — non blocca il merge, solo un reminder
 - Skip con `[skip docs]` nel commit message
 - Aggiorna docs solo se la modifica invalida architettura/astrazioni/design già documentati
 
-### 5. Lint & Format
+### 4. Lint & Format
 - ESLint per frontend
 - Clippy + rustfmt per Rust
 
 ## Setup Required
-
-### CodeScene Secrets
-Aggiungi questi secrets nel repository GitHub (Settings → Secrets → Actions):
-
-```
-CODESCENE_TOKEN=<your-codescene-pat>
-CODESCENE_PROJECT_ID=<your-project-id>
-```
-
-Il PAT di CodeScene è lo stesso che usi localmente (~/.codescene/token).
-Il project ID lo trovi nella dashboard CodeScene.
 
 ### Codecov Setup
 - Installa/attiva il repo in Codecov una volta sola tramite GitHub App / import del repository.
@@ -114,9 +98,6 @@ pnpm test:coverage
 pnpm lint
 cargo clippy
 cargo fmt --check
-
-# CodeScene (local)
-codescene delta-analysis --base-revision origin/main
 ```
 
 ## Workflow Triggers
@@ -129,5 +110,12 @@ Nota: l'upload a Codecov gira su push a `main` e sulle PR dello stesso repositor
 
 ## Status Checks
 
-Tutti i check devono passare prima di poter fare merge.
+`main` richiede una pull request aggiornata e tutti i check configurati devono passare prima del merge. I push diretti sono rifiutati dalla branch protection.
 Se un check fallisce, vedrai il dettaglio nei logs di GitHub Actions.
+
+I check richiesti sono:
+
+- `Frontend Static Quality Checks`
+- `Frontend Tests & Coverage`
+- `Rust Tests & Quality Checks`
+- `Linux build verification`

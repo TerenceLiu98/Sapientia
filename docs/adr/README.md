@@ -76,7 +76,7 @@ proposed → active → superseded
 | [0018](0018-codescene-code-health-gates.md) | CodeScene code health gates in CI | superseded → [0064](0064-ratcheted-codescene-thresholds.md) |
 | [0019](0019-github-device-flow-oauth.md) | GitHub device flow OAuth for vault sync | superseded → [0056](0056-system-git-cli-auth-no-provider-oauth.md) |
 | [0020](0020-keyboard-first-design.md) | Keyboard-first design principle | active |
-| [0021](0021-push-to-main-workflow.md) | Push directly to main (no PRs) | active |
+| [0021](0021-push-to-main-workflow.md) | Push directly to main (no PRs) | superseded -> [0177](0177-pr-first-protected-main-workflow.md) |
 | [0022](0022-blocknote-rich-text-editor.md) | BlockNote as the rich text editor | active |
 | [0023](0023-repair-vault-auto-bootstrap.md) | Repair Vault auto-bootstrap pattern | active |
 | [0024](0024-cache-outside-vault.md) | Vault cache stored outside vault directory | active |
@@ -120,7 +120,7 @@ proposed → active → superseded
 | [0061](0061-ai-prompt-bridge-event-bus.md) | AI prompt bridge — module-level event bus for cross-component prompt routing | active |
 | [0062](0062-selectable-cli-ai-agents.md) | Selectable CLI AI agents with a shared panel architecture | active |
 | [0063](0063-blocknote-code-block-package-for-editor-highlighting.md) | BlockNote code-block package for editor syntax highlighting | active |
-| [0064](0064-ratcheted-codescene-thresholds.md) | Ratcheted CodeScene thresholds as the quality gate baseline | active |
+| [0064](0064-ratcheted-codescene-thresholds.md) | Ratcheted CodeScene thresholds as the quality gate baseline | superseded -> [0178](0178-repository-owned-quality-gates-without-codescene.md) |
 | [0065](0065-root-managed-ai-guidance-files.md) | Root-managed AI guidance files with Claude shim | active |
 | [0066](0066-calendar-semver-versioning-for-alpha-and-stable-releases.md) | Calendar-semver versioning for alpha and stable releases | active |
 | [0067](0067-autogit-idle-and-inactive-checkpoints.md) | AutoGit idle and inactive checkpoints | active |
@@ -233,3 +233,5 @@ proposed → active → superseded
 | [0174](0174-project-as-unified-canvas-workspace.md) | Project as a unified Canvas workspace | proposed |
 | [0175](0175-affine-inspired-project-canvas-engine.md) | AFFiNE-inspired Project Canvas engine boundaries | active |
 | [0176](0176-affine-edgeless-capability-alignment.md) | AFFiNE Edgeless capability alignment without storage convergence | proposed |
+| [0177](0177-pr-first-protected-main-workflow.md) | PR-first delivery through protected main | active |
+| [0178](0178-repository-owned-quality-gates-without-codescene.md) | Repository-owned quality gates without CodeScene | active |
