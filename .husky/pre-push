@@ -88,6 +88,7 @@ if [ -n "$PUSH_TARGET" ]; then
   for FILE in $CHANGED; do
     case "$FILE" in
       src-tauri/*|Cargo*)
+        APP_CHANGED=true
         RUST_CHANGED=true
         ;;
       site/*)
